@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 
 // =========================================================================
 // WebRTC 信令與 P2P 連線全域狀態
@@ -383,6 +383,7 @@ function initAccessPin() {
       const newPin = generateAccessPin();
       valPin.textContent = `${newPin.slice(0, 3)}-${newPin.slice(3)}`;
       (window as any).__localAccessPin = newPin;
+      myPin = newPin; // 同步更新全域變數，確保連線驗證時使用的是最新 PIN
       btnRefresh.textContent = "✓";
       setTimeout(() => { btnRefresh.textContent = "🔄"; }, 1000);
     });
@@ -554,7 +555,7 @@ async function startCall(remoteId: string, pin: string) {
 async function handleIncomingOffer(sourceId: string, sdpString: string, incomingPin?: string) {
   // 1. 檢查本機授權狀態（作為被控端，必須有有效授權或在試用期內）
   try {
-    const isWebBrowser = typeof (window as any).__TAURI__ === "undefined" && typeof (window as any).__TAURI_IPC__ === "undefined";
+    const isWebBrowser = !isTauri();
     if (!isWebBrowser) {
       const licenseState = await invoke<{status: string, trial_days_left: number | null}>("check_license_status");
       if (licenseState.status === "expired" || licenseState.status === "unauthorized") {
@@ -717,7 +718,7 @@ async function initLicenseVerification() {
   const statusBadge = document.getElementById("license-status");
 
   // 判斷是否在純網頁環境（例如手機瀏覽器）
-  const isWebBrowser = typeof (window as any).__TAURI__ === "undefined" && typeof (window as any).__TAURI_IPC__ === "undefined";
+  const isWebBrowser = !isTauri();
 
   if (isWebBrowser) {
     if (statusBadge) {
@@ -1264,13 +1265,14 @@ function startTransferPolling(taskId: string) {
 window.addEventListener("DOMContentLoaded", async () => {
   await initI18n();
 
-  // 產生並儲存本機 ID 與 PIN（WebRTC 連線前必須先確立身份）
   const generatedId = generateMockMyId();
   if (generatedId) myId = generatedId;
-  myPin = (window as any).__localAccessPin || "";
 
   await fetchHwid();
   initAccessPin();
+  // 在 initAccessPin 執行後，才能取得正確產生的 PIN 碼
+  myPin = (window as any).__localAccessPin || "";
+  
   initConnectButton();
   initLicenseVerification();
   initPrivacyMode();
