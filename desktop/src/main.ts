@@ -368,13 +368,16 @@ function initConnectButton() {
     const originalText = btnText?.textContent || "Connect";
     if (btnText) btnText.textContent = t("connecting") || "Connecting...";
 
+    console.log(`[Frontend] 嘗試發起連線至 ${remoteId} (PIN: ${pin})`);
     try {
       const result = await invoke<string>("initiate_connection", {
         remoteId,
         accessPin: pin,
       });
+      console.log(`[Frontend] 連線回傳結果:`, result);
       alert(t(result) || result);
     } catch (error) {
+      console.error(`[Frontend] 連線發生錯誤:`, error);
       const errStr = String(error);
       alert(t(errStr) || errStr);
     } finally {

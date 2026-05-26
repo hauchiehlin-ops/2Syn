@@ -171,66 +171,57 @@ async fn get_connection_status(state: State<'_, AppState>) -> Result<serde_json:
     }))
 }
 
-/// 運行網路與安全診斷，提升可用性與防錯能力
+/// 執行連線診斷（PoC 模擬）
 #[tauri::command]
 async fn run_connection_diagnostic() -> Result<serde_json::Value, String> {
-    // 1. 檢查本機授權與啟用憑證是否合法且與本機 HWID 綁定
-    let license_active = if let Ok(ticket) = SecureStorage::load_secret("license_key") {
-        LicenseValidator::verify_license(&ticket, &[0u8; 32]).unwrap_or(false)
-    } else {
-        false
-    };
-    
-    // 2. 測試 STUN 伺服器 DNS 解析 (模擬)
-    let stun_dns_resolved = tokio::net::lookup_host("stun.l.google.com:19302").await.is_ok();
-    
-    // 3. 根據環境給予架構優化建議 (以 key 的形式傳回)
-    let (nat_type, suggested_action) = if !stun_dns_resolved {
-        ("nat_unknown", "suggest_no_network")
-    } else if !license_active {
-        ("nat_symmetric", "suggest_no_license")
-    } else {
-        ("nat_cone", "suggest_optimal")
-    };
-    
+    println!("[DEBUG] 執行連線診斷");
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     Ok(serde_json::json!({
-        "license_active": license_active,
-        "stun_dns_resolved": stun_dns_resolved,
-        "nat_type": nat_type,
-        "suggested_action": suggested_action,
+        "hwid": generate_hwid().unwrap_or_default(),
+        "license_active": true,
+        "stun_dns_resolved": true,
+        "nat_type": "nat_type_cone",
+        "suggested_action": "action_none"
     }))
 }
 
-/// 模擬網路波動以觸發降級，供 PoC 測試用
+/// 切換網路模擬狀態
 #[tauri::command]
-async fn trigger_network_simulation(
-    state: State<'_, AppState>,
-    rtt_ms: u32,
-    loss_rate: f32,
-    is_relay: bool,
-) -> Result<String, String> {
-    let conn_type = if is_relay {
-        ConnectionType::Relay
-    } else {
-        ConnectionType::P2PDirect
-    };
+async fn trigger_network_simulation(state: State<'_, AppState>, mode: String) -> Result<String, String> {
+    println!("[DEBUG] 收到網路模擬請求: {}", mode);
+    let mut metrics = state.connection_manager.get_current_metrics().await;
     
-    let metrics = NetworkMetrics {
-        rtt_ms,
-        packet_loss_rate: loss_rate,
-        connection_type: conn_type,
-    };
+    match mode.as_str() {
+        "good" => {
+            metrics.rtt_ms = 10;
+            metrics.packet_loss_rate = 0.0;
+            metrics.connection_type = ConnectionType::P2PDirect;
+        },
+        "poor" => {
+            metrics.rtt_ms = 180;
+            metrics.packet_loss_rate = 0.1;
+            metrics.connection_type = ConnectionType::P2PDirect;
+        },
+        "relay" => {
+            metrics.rtt_ms = 80;
+            metrics.packet_loss_rate = 0.02;
+            metrics.connection_type = ConnectionType::Relay;
+        },
+        _ => {}
+    }
     
     state.connection_manager.update_metrics(metrics).await;
-    Ok("網路狀態更新成功".to_string())
+    Ok("ok".to_string())
 }
 
-/// 發起遠端連線（驗證對方設備 ID 與存取 PIN 碼）
+/// 發起遠端連線請求 (PoC: 目前只印 Log)
 #[tauri::command]
 async fn initiate_connection(remote_id: String, access_pin: String) -> Result<String, String> {
+    println!("[DEBUG] 發起連線 - 目標 ID: {}, PIN: {}", remote_id, access_pin);
     // 驗證設備 ID 格式（必須為 9 位數字）
     let clean_id = remote_id.trim().replace('-', "");
     if clean_id.len() != 9 || !clean_id.chars().all(|c| c.is_ascii_digit()) {
+        println!("[ERROR] 連線失敗: 遠端 ID 格式錯誤 ({})", clean_id);
         return Err("err_invalid_remote_id".to_string());
     }
     // 驗證 PIN 碼格式（4~8 位數字）
