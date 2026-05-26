@@ -1,6 +1,8 @@
 FROM rust:1.80 as builder
 
 WORKDIR /usr/src/app
+# 安裝 C 編譯器與連結器 (Linker)，解決 x86_64-unknown-linux-gnu-gcc not found 錯誤
+RUN apt-get update && apt-get install -y gcc build-essential pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 # 複製整個 workspace
 COPY . .
 
