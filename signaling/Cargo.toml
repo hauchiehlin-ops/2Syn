@@ -1,0 +1,13 @@
+[package]
+name = "syn-signaling"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.36", features = ["full"] }
+axum = { version = "0.7", features = ["ws"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing-subscriber = "0.3"
+ring = "0.17"
+hex = "0.4"

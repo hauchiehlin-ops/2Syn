@@ -1,0 +1,27 @@
+# Node
+node_modules/
+dist/
+build/
+
+# Rust
+target/
+**/*.rs.bk
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Env
+.env
+.env.local

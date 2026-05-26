@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>2syn Remote Desktop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <!-- 景深霓虹背景光暈球 -->
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+
+  <div class="glass-container">
+    <!-- 頂部 Header -->
+    <header class="app-header">
+      <div class="logo">
+        <span class="logo-symbol">⚡</span>
+        <span class="logo-text">2syn</span>
+      </div>
+      <div class="header-actions">
+        <select id="language-select" class="language-dropdown">
+          <option value="zh-TW">繁體中文</option>
+          <option value="zh-CN">简体中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+          <option value="de">Deutsch</option>
+          <option value="th">ไทย</option>
+          <option value="id">Bahasa Indonesia</option>
+          <option value="ms">Bahasa Melayu</option>
+          <option value="ru">Русский</option>
+          <option value="es">Español</option>
+        </select>
+      </div>
+    </header>
+
+    <!-- 主內容區 -->
+    <main class="main-content">
+      
+      <!-- 左側控制面板 -->
+      <section class="control-panel glass-panel">
+        <h2 id="txt-connect-title">Establish Connection</h2>
+        
+        <div class="input-group">
+          <label for="remote-id-input">
+            <span id="lbl-remote-id">Remote Device ID</span>
+            <button class="btn-info" data-help="remote-id" type="button">ⓘ</button>
+          </label>
+          <div id="help-remote-id" class="help-block"></div>
+          <input type="text" id="remote-id-input" placeholder="Enter 9-digit Device ID" maxlength="11">
+        </div>
+
+        <div class="input-group">
+          <label for="totp-input">
+            <span id="lbl-totp">TOTP Verification Code</span>
+            <button class="btn-info" data-help="totp" type="button">ⓘ</button>
+          </label>
+          <div id="help-totp" class="help-block"></div>
+          <input type="text" id="totp-input" placeholder="Enter 6-digit TOTP" maxlength="6">
+        </div>
+
+        <button id="btn-connect" class="btn-primary">
+          <span id="txt-btn-connect">Connect</span>
+        </button>
+
+        <!-- 去中心化離線手動 SDP 連線 -->
+        <div class="offline-sdp-section">
+          <div class="toggle-row">
+            <span style="font-weight: 600; font-size: 13px; display: inline-flex; align-items: center;">
+              <span id="lbl-offline-mode">Offline Connection (SDP)</span>
+              <button class="btn-info" data-help="offline-sdp" type="button">ⓘ</button>
+            </span>
+            <label class="switch">
+              <input type="checkbox" id="chk-offline-sdp-mode">
+              <span class="slider round"></span>
+            </label>
+          </div>
+          <div id="help-offline-sdp" class="help-block"></div>
+          <div id="offline-sdp-panel" class="offline-panel-hidden" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px;">
+            <button id="btn-gen-local-sdp" class="btn-secondary">Generate & Copy Local SDP Offer</button>
+            <textarea id="txt-local-sdp" readonly placeholder="Local SDP will be generated here" style="background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 6px; border-radius: 6px; height: 70px; resize: none;"></textarea>
+            
+            <label for="txt-remote-sdp" id="lbl-remote-sdp" style="font-size: 11px; color: var(--text-muted);">Enter Remote SDP Answer/Offer</label>
+            <textarea id="txt-remote-sdp" placeholder="Paste Remote SDP here" style="background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 6px; border-radius: 6px; height: 70px; resize: none;"></textarea>
+            <button id="btn-apply-remote-sdp" class="btn-primary" style="padding: 8px;">Establish Connection</button>
+          </div>
+        </div>
+
+        <div class="separator"></div>
+
+        <!-- 本機身分與授權 -->
+        <div class="host-info">
+          <h3 id="txt-host-info-title">Host Information</h3>
+          <div class="info-row">
+            <span id="lbl-my-id">My ID:</span>
+            <div class="val-with-copy">
+              <span id="val-my-id" class="code-text">Loading...</span>
+              <button class="btn-copy" id="btn-copy-id" type="button" title="Copy">📋</button>
+            </div>
+          </div>
+          <div class="info-row">
+            <span id="lbl-hwid">My HWID:</span>
+            <div class="val-with-copy">
+              <span id="val-hwid" class="code-text truncate">Loading...</span>
+              <button class="btn-copy" id="btn-copy-hwid" type="button" title="Copy">📋</button>
+            </div>
+          </div>
+          
+          <div class="input-group license-group">
+            <label for="license-input">
+              <span id="lbl-license">Buyout License Key</span>
+              <button class="btn-info" data-help="license" type="button">ⓘ</button>
+            </label>
+            <div id="help-license" class="help-block"></div>
+            <div class="input-with-button">
+              <input type="password" id="license-input" placeholder="Enter license key">
+              <button id="btn-verify-license" class="btn-secondary">Verify</button>
+            </div>
+            <span id="license-status" class="status-badge status-inactive">Unauthorized</span>
+          </div>
+        </div>
+
+        <!-- 隱私功能 -->
+        <div class="privacy-control">
+          <h3 id="txt-privacy-title">Security & Privacy</h3>
+          <div class="toggle-row">
+            <span style="display: inline-flex; align-items: center;">
+              <span id="lbl-privacy-mode">Privacy Shield Mode (Virtual GPU)</span>
+              <button class="btn-info" data-help="privacy" type="button">ⓘ</button>
+            </span>
+            <label class="switch">
+              <input type="checkbox" id="chk-privacy-mode">
+              <span class="slider round"></span>
+            </label>
+          </div>
+          <div id="help-privacy" class="help-block"></div>
+        </div>
+      </section>
+
+      <!-- 右側監控與測試面板 -->
+      <section class="monitor-panel">
+        
+        <!-- 即時狀態面板 -->
+        <div class="status-panel glass-panel">
+          <h2 id="txt-monitor-title">Network & Video Quality Metrics</h2>
+          
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <span class="metric-label" id="lbl-metric-fps">Target Frame Rate</span>
+              <span class="metric-value" id="val-metric-fps">-- fps</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label" id="lbl-metric-color">Color Sampling</span>
+              <span class="metric-value" id="val-metric-color">--</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label" id="lbl-metric-bitrate">Max Bitrate Limit</span>
+              <span class="metric-value" id="val-metric-bitrate">-- Mbps</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label" id="lbl-metric-file">File Transfer</span>
+              <span class="metric-value" id="val-metric-file">--</span>
+            </div>
+            <!-- 即時性能指標 -->
+            <div class="metric-card">
+              <span class="metric-label" id="lbl-metric-rtt">Network Latency (RTT)</span>
+              <span class="metric-value" id="val-metric-rtt">-- ms</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label" id="lbl-metric-loss">Packet Loss Rate</span>
+              <span class="metric-value" id="val-metric-loss">--%</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label" id="lbl-metric-protocol">Connection Protocol</span>
+              <span class="metric-value" id="val-metric-protocol">--</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label" id="lbl-metric-encryption">Codec & Cipher Security</span>
+              <span class="metric-value" id="val-metric-encryption">--</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 智慧連線管理與模擬器摺疊區 -->
+        <div class="management-panel glass-panel">
+          <div class="toggle-row" style="margin-bottom: 8px;">
+            <span style="font-weight: 600; font-size: 14px; display: inline-flex; align-items: center;">
+              <span id="lbl-smart-auto">Smart Quality Auto-Optimization</span>
+              <button class="btn-info" data-help="smart-auto" type="button">ⓘ</button>
+            </span>
+            <label class="switch">
+              <input type="checkbox" id="chk-smart-auto" checked>
+              <span class="slider round"></span>
+            </label>
+          </div>
+          <div id="help-smart-auto" class="help-block"></div>
+          
+          <!-- 自動引導狀態指示 -->
+          <div id="auto-status-indicator" class="auto-indicator">
+            <span class="pulse-dot"></span>
+            <span id="txt-auto-active">System automatically adjusting. Network and stream quality are in optimal states.</span>
+          </div>
+
+          <!-- 可摺疊的開發者模擬器 -->
+          <div id="simulator-accordion" class="accordion-collapsed" style="max-height: 0; overflow: hidden; transition: max-height 0.4s ease-out;">
+            <div class="simulator-inner" style="padding-top: 14px; display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--panel-border); margin-top: 10px;">
+              <h4 style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;" id="txt-sim-header">Advanced Developer Tools</h4>
+              
+              <div class="range-group">
+                <div class="range-header">
+                  <label for="range-rtt" style="display: inline-flex; align-items: center;">
+                    <span id="lbl-sim-rtt">Simulated RTT Latency</span>
+                    <button class="btn-info" data-help="sim-rtt" type="button">ⓘ</button>
+                  </label>
+                  <span id="val-sim-rtt">10 ms</span>
+                </div>
+                <div id="help-sim-rtt" class="help-block"></div>
+                <input type="range" id="range-rtt" min="5" max="300" value="10">
+              </div>
+     
+              <div class="range-group">
+                <div class="range-header">
+                  <label for="range-loss" style="display: inline-flex; align-items: center;">
+                    <span id="lbl-sim-loss">Simulated Packet Loss</span>
+                    <button class="btn-info" data-help="sim-loss" type="button">ⓘ</button>
+                  </label>
+                  <span id="val-sim-loss">0%</span>
+                </div>
+                <div id="help-sim-loss" class="help-block"></div>
+                <input type="range" id="range-loss" min="0" max="15" value="0">
+              </div>
+     
+              <div class="toggle-row">
+                <span style="display: inline-flex; align-items: center;">
+                  <span id="lbl-sim-relay">Simulate Relay Mode</span>
+                  <button class="btn-info" data-help="sim-relay" type="button">ⓘ</button>
+                </span>
+                <label class="switch">
+                  <input type="checkbox" id="chk-sim-relay">
+                  <span class="slider round"></span>
+                </label>
+              </div>
+              <div id="help-sim-relay" class="help-block"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 自我診斷面板 -->
+        <div class="diagnostic-panel glass-panel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 id="txt-diag-title" style="margin-bottom: 0;">Security & Connectivity Diagnostics</h2>
+            <button id="btn-run-diagnostic" class="btn-secondary" style="padding: 4px 10px; font-size: 11px;">Run Diagnostics</button>
+          </div>
+          <div class="info-row" style="margin-bottom: 8px; font-size: 12px;">
+            <span id="lbl-diag-dns">STUN Server Lookup:</span>
+            <span id="val-diag-dns" class="code-text" style="color: var(--text-muted);">--</span>
+          </div>
+          <div class="info-row" style="margin-bottom: 8px; font-size: 12px;">
+            <span id="lbl-diag-nat">NAT Detection Type:</span>
+            <span id="val-diag-nat" class="code-text" style="color: var(--text-muted);">--</span>
+          </div>
+          <div class="separator" style="margin: 8px 0;"></div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span id="lbl-diag-suggest" style="font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Optimization Suggestions</span>
+            <p id="val-diag-suggest" style="font-size: 12px; color: var(--color-primary); line-height: 1.4;">Click the button above to analyze your device secure store and connection pipes.</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
