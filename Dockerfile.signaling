@@ -1,6 +1,9 @@
 FROM rust:1.80-slim as builder
 
 WORKDIR /usr/src/app
+# 安裝編譯必備的 C 編譯器與套件庫，否則 libc 等底層依賴會編譯失敗
+RUN apt-get update && apt-get install -y pkg-config libssl-dev build-essential && rm -rf /var/lib/apt/lists/*
+
 # 複製整個 workspace
 COPY . .
 
