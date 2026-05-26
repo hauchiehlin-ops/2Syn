@@ -668,6 +668,20 @@ async function initLicenseVerification() {
   const licenseInput = document.getElementById("license-input") as HTMLInputElement;
   const statusBadge = document.getElementById("license-status");
 
+  // 啟動時自動檢查 Keychain 中是否已有合法授權（防止熱重載或重啟後遺失狀態）
+  if (statusBadge) {
+    try {
+      const alreadyLicensed = await invoke<boolean>("check_license_status");
+      if (alreadyLicensed) {
+        statusBadge.className = "status-badge status-active";
+        statusBadge.textContent = t("status_active");
+        console.log("[license] 啟動時偵測到有效授權，已恢復狀態");
+      }
+    } catch (e) {
+      console.warn("[license] 啟動授權檢查失敗:", e);
+    }
+  }
+
   if (btnVerify && licenseInput && statusBadge) {
     btnVerify.addEventListener("click", async () => {
       const key = licenseInput.value.trim();
