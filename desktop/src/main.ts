@@ -397,7 +397,10 @@ async function initLicenseVerification() {
   if (btnVerify && licenseInput && statusBadge) {
     btnVerify.addEventListener("click", async () => {
       const key = licenseInput.value.trim();
-      if (!key) return;
+      if (!key) {
+        alert(t("err_license_empty") || "請輸入授權金鑰");
+        return;
+      }
 
       try {
         const isValid = await invoke<boolean>("verify_license_key", { licenseKey: key });

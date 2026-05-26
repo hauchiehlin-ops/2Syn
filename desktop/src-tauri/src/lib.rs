@@ -1,7 +1,7 @@
 // Tauri lib entry point
 
 use syn_core::security::{generate_hwid, LicenseValidator, SecureStorage};
-use syn_core::connection::{ConnectionManager, ConnectionType, NetworkMetrics};
+use syn_core::connection::{ConnectionManager, ConnectionType};
 use syn_core::file_transfer::FileTransferEngine;
 use std::sync::Arc;
 use tauri::{State, Manager};
@@ -218,17 +218,34 @@ async fn trigger_network_simulation(state: State<'_, AppState>, mode: String) ->
 #[tauri::command]
 async fn initiate_connection(remote_id: String, access_pin: String) -> Result<String, String> {
     println!("[DEBUG] 發起連線 - 目標 ID: {}, PIN: {}", remote_id, access_pin);
-    // 驗證設備 ID 格式（必須為 9 位數字）
+    
+    // 1. 商業邏輯閘門：檢查買斷授權狀態
+    let is_authorized = if let Ok(ticket) = SecureStorage::load_secret("license_key") {
+        LicenseValidator::verify_license(&ticket, &[0u8; 32]).unwrap_or(false)
+    } else {
+        false
+    };
+    
+    if !is_authorized {
+        println!("[ERROR] 連線失敗: 系統未授權 (Unauthorized)");
+        return Err("err_unauthorized".to_string()); // 前端請新增此翻譯 key，或直接回傳錯誤字串
+    }
+
+    // 2. 驗證設備 ID 格式（必須為 9 位數字）
     let clean_id = remote_id.trim().replace('-', "");
     if clean_id.len() != 9 || !clean_id.chars().all(|c| c.is_ascii_digit()) {
         println!("[ERROR] 連線失敗: 遠端 ID 格式錯誤 ({})", clean_id);
         return Err("err_invalid_remote_id".to_string());
     }
-    // 驗證 PIN 碼格式（4~8 位數字）
+    
+    // 3. 驗證 PIN 碼格式（4~8 位數字）
     let clean_pin = access_pin.trim();
     if clean_pin.len() < 4 || !clean_pin.chars().all(|c| c.is_ascii_digit()) {
+        println!("[ERROR] 連線失敗: PIN 格式錯誤 ({})", clean_pin);
         return Err("err_invalid_pin".to_string());
     }
+    
+    println!("[DEBUG] 參數與授權驗證通過。準備透過信令伺服器交握...");
     // 此處為 PoC 占位：實際產品會透過信令伺服器轉發加密握手請求
     // 連線流程：信令伺服器比對 PIN -> 通過後開始 WebRTC ECDH 安全握手 -> 建立 AES-256-GCM 加密通道
     Ok("alert_connect_initiated".to_string())

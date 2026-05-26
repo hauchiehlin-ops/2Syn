@@ -68,10 +68,8 @@ pub fn generate_hwid() -> Result<String, CoreError> {
         // iOS 平台：使用 Keychain 持久化 UUID 作為 HWID
         // iOS 的 UIDevice.identifierForVendor 在 App 重新安裝後會重設，
         // 因此改用 Keychain 儲存一個永久性 UUID，即使 App 重灌也能保留。
-        use std::process::Command;
 
         // 嘗試用 security CLI 讀取 Keychain 中已存的 UUID
-        let label = "com.twosyn.app.hwid";
 
         // 在 iOS Sandbox 環境中，Keychain 可透過 Security framework 存取，
         // 但 Rust 層直接呼叫需透過 sys 層。此處用環境變數 Fallback 供 PoC。
