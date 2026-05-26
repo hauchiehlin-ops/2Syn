@@ -112,10 +112,21 @@ async fn main() {
         .route("/deactivate", post(deactivate_handler))
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
-    println!("2syn 信令與授權驗證伺服器已啟動: http://{}", addr);
-    
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[warn] Port {} 已被佔用 ({}), 嘗試 port {}...", port, e, port + 1);
+            let fallback = SocketAddr::from(([0, 0, 0, 0], port + 1));
+            tokio::net::TcpListener::bind(&fallback).await
+                .expect(&format!("Port {} 和 {} 均無法綁定，請手動釋放", port, port + 1))
+        }
+    };
+
+    let local_addr = listener.local_addr().unwrap();
+    println!("2syn 信令與授權驗證伺服器已啟動: http://{}", local_addr);
     axum::serve(listener, app).await.unwrap();
 }
 

@@ -30,7 +30,7 @@ async fn verify_license_key(license_key: String) -> Result<bool, String> {
     let hwid = generate_hwid().map_err(|e| e.to_string())?;
     
     // 呼叫授權驗證伺服器 (支援透過環境變數或預設區網 IP 測試)
-    let signaling_url = std::env::var("SIGNALING_URL").unwrap_or_else(|_| "http://192.168.68.50:8080".to_string());
+    let signaling_url = std::env::var("SIGNALING_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
     let client = reqwest::Client::new();
     let res = client.post(format!("{}/activate", signaling_url))
         .json(&serde_json::json!({
