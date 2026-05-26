@@ -1,10 +1,13 @@
 FROM rust:1.80 as builder
 
 WORKDIR /usr/src/app
-# 安裝 C 編譯器與連結器 (Linker)，解決 x86_64-unknown-linux-gnu-gcc not found 錯誤
+# 安裝 C 編譯器與連結器 (Linker)
 RUN apt-get update && apt-get install -y gcc build-essential pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 # 複製整個 workspace
 COPY . .
+# 移除本地開發的跨平台編譯設定，避免干擾原生 Linux 編譯
+RUN rm -rf .cargo
+
 
 # 編譯 signaling server (Release 模式)
 # 使用 -j 1 限制編譯執行緒，避免 Render 免費方案 (512MB RAM) 發生記憶體不足 (OOM) 導致崩潰
