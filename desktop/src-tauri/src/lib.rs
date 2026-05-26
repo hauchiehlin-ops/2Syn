@@ -68,36 +68,62 @@ async fn verify_license_key(license_key: String) -> Result<bool, String> {
     }
 }
 
-/// 初始化時檢查是否已有合法授權
+#[derive(serde::Serialize)]
+pub struct LicenseStatus {
+    pub status: String,
+    pub trial_days_left: Option<u32>,
+}
+
+/// 初始化時檢查是否已有合法授權或仍在試用期內
 #[tauri::command]
-async fn check_license_status() -> Result<bool, String> {
-    match syn_core::security::SecureStorage::load_secret("license_key") {
-        Ok(ticket) => {
-            println!("[license] Keychain 讀取成功, ticket 長度: {}", ticket.len());
-            println!("[license] ticket 前 80 字元: {}", &ticket[..ticket.len().min(80)]);
-            match syn_core::security::LicenseValidator::verify_license(&ticket, &[0u8; 32]) {
-                Ok(true) => {
-                    println!("[license] 驗證通過: 已授權");
-                    Ok(true)
-                }
-                Ok(false) => {
-                    println!("[license] 驗證失敗: 簽章或 HWID 不符");
-                    // 嘗試印出當前 HWID 供比對
-                    if let Ok(current_hwid) = syn_core::security::generate_hwid() {
-                        println!("[license] 當前 HWID: {}", current_hwid);
-                    }
-                    Ok(false)
-                }
-                Err(e) => {
-                    println!("[license] 驗證過程發生錯誤: {:?}", e);
-                    Ok(false)
-                }
-            }
+async fn check_license_status() -> Result<LicenseStatus, String> {
+    println!("[license] check_license_status 被呼叫");
+    
+    // 1. 先檢查是否有買斷憑證
+    if let Ok(ticket) = syn_core::security::SecureStorage::load_secret("license_key") {
+        if let Ok(true) = syn_core::security::LicenseValidator::verify_license(&ticket, &[0u8; 32]) {
+            println!("[license] 驗證通過: 已買斷授權");
+            return Ok(LicenseStatus {
+                status: "buyout".to_string(),
+                trial_days_left: None,
+            });
         }
-        Err(e) => {
-            println!("[license] Keychain 讀取失敗: {:?}", e);
-            Ok(false)
+    }
+    
+    // 2. 若無買斷憑證，檢查或建立首次啟動時間（試用期 14 天）
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+        
+    let first_launch = match syn_core::security::SecureStorage::load_secret("first_launch_time") {
+        Ok(time_str) => {
+            time_str.parse::<u64>().unwrap_or(current_time)
         }
+        Err(_) => {
+            // 寫入首次啟動時間
+            let _ = syn_core::security::SecureStorage::save_secret("first_launch_time", &current_time.to_string());
+            current_time
+        }
+    };
+    
+    let elapsed_secs = current_time.saturating_sub(first_launch);
+    let trial_duration_secs = 14 * 24 * 60 * 60;
+    
+    if elapsed_secs <= trial_duration_secs {
+        let remaining_secs = trial_duration_secs - elapsed_secs;
+        let days_left = (remaining_secs / (24 * 60 * 60)) as u32;
+        println!("[license] 試用期內，剩餘天數: {}", days_left);
+        Ok(LicenseStatus {
+            status: "trial".to_string(),
+            trial_days_left: Some(days_left),
+        })
+    } else {
+        println!("[license] 試用已過期");
+        Ok(LicenseStatus {
+            status: "expired".to_string(),
+            trial_days_left: Some(0),
+        })
     }
 }
 

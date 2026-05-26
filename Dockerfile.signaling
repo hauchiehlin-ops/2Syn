@@ -1,0 +1,24 @@
+FROM rust:1.80-slim as builder
+
+WORKDIR /usr/src/app
+# 複製整個 workspace
+COPY . .
+
+# 編譯 signaling server (Release 模式)
+RUN cargo build -p syn-signaling --release
+
+# 建立極簡的執行環境
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+# 從 builder 階段複製編譯好的執行檔
+COPY --from=builder /usr/src/app/target/release/syn-signaling /app/syn-signaling
+
+# 預設綁定 0.0.0.0 以供雲端平台映射
+ENV HOST=0.0.0.0
+ENV PORT=8080
+
+EXPOSE 8080
+
+CMD ["./syn-signaling"]
