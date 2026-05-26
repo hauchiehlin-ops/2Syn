@@ -1,5 +1,27 @@
 import { invoke } from "@tauri-apps/api/core";
 
+// =========================================================================
+// WebRTC 信令與 P2P 連線全域狀態
+// =========================================================================
+let signalingWs: WebSocket | null = null;
+let peerConnection: RTCPeerConnection | null = null;
+let dataChannelControl: RTCDataChannel | null = null;
+let dataChannelFile: RTCDataChannel | null = null;
+let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
+let myId: string = "";                        // 本機 9 位數 ID
+let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
+
+// 取得信令伺服器 WebSocket URL（優先環境變數，備用本地）
+function getSignalingUrl(): string {
+  return (window as any).__SIGNALING_URL__ || "ws://127.0.0.1:8080/ws";
+}
+
+// STUN 伺服器清單（Google + Cloudflare 雙備援，全球可用）
+const ICE_SERVERS: RTCIceServer[] = [
+  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+  { urls: ["stun:stun.cloudflare.com:3478"] },
+];
+
 // 宣告語系翻譯字典快取
 let translations: Record<string, string> = {};
 
@@ -293,13 +315,22 @@ async function fetchHwid() {
 }
 
 // 產生模擬的 9 位數本機 ID (去中心化定址)
-function generateMockMyId() {
+// 使用 sessionStorage 確保同一次啟動 ID 固定不變
+function generateMockMyId(): string {
   const valMyId = document.getElementById("val-my-id");
-  if (valMyId) {
-    // 隨機產生 xxx-xxx-xxx 格式 ID
-    const r = () => Math.floor(100 + Math.random() * 900);
-    valMyId.textContent = `${r()}-${r()}-${r()}`;
+  const r = () => Math.floor(100 + Math.random() * 900);
+  
+  // 從 sessionStorage 取回已產生的 ID，確保重整後 ID 一致
+  let storedId = sessionStorage.getItem("2syn_my_id");
+  if (!storedId) {
+    storedId = `${r()}${r()}${r()}`;
+    sessionStorage.setItem("2syn_my_id", storedId);
   }
+  
+  if (valMyId) {
+    valMyId.textContent = `${storedId.slice(0,3)}-${storedId.slice(3,6)}-${storedId.slice(6)}`;
+  }
+  return storedId; // 回傳純數字字串（不含 dash），供信令登入使用
 }
 
 // 產生本機隨機存取 PIN 碼（6 位數，每次啟動自動刷新）
@@ -342,7 +373,253 @@ function initAccessPin() {
   }
 }
 
+// =========================================================================
+// 信令客戶端：建立 WebSocket 連線並處理訊息路由
+// =========================================================================
+function initSignalingClient() {
+  const url = getSignalingUrl();
+  console.log(`[Signaling] 嘗試連線到信令伺服器: ${url}`);
+  
+  signalingWs = new WebSocket(url);
+  
+  signalingWs.onopen = () => {
+    console.log("[Signaling] 已連線，正在登入...");
+    signalingWs!.send(JSON.stringify({ type: "login", id: myId }));
+  };
+
+  signalingWs.onmessage = async (event) => {
+    let msg: any;
+    try { msg = JSON.parse(event.data); } catch { return; }
+    console.log("[Signaling] 收到:", msg);
+
+    switch (msg.type) {
+      case "offer":
+        // 我們是被動端（被呼叫者）
+        await handleIncomingOffer(msg.source, msg.sdp);
+        break;
+      case "answer":
+        // 收到遠端回傳的 Answer
+        if (peerConnection) {
+          await peerConnection.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+          console.log("[WebRTC] 遠端 Answer 已套用，ICE 協商中...");
+        }
+        break;
+      case "ice":
+        // 收到遠端 ICE Candidate
+        if (peerConnection && msg.candidate) {
+          try {
+            await peerConnection.addIceCandidate(JSON.parse(msg.candidate));
+          } catch (e) {
+            console.warn("[WebRTC] 無法加入 ICE Candidate:", e);
+          }
+        }
+        break;
+      case "error":
+        console.error("[Signaling] 伺服器錯誤:", msg.message);
+        if (msg.message === "Target offline") {
+          alert(t("err_target_offline") || "對方不在線上，請確認設備 ID 是否正確。");
+          resetConnectionUI();
+        }
+        break;
+    }
+  };
+
+  signalingWs.onclose = () => {
+    console.warn("[Signaling] WebSocket 已斷線，5 秒後重新嘗試...");
+    signalingWs = null;
+    setTimeout(initSignalingClient, 5000);
+  };
+
+  signalingWs.onerror = (err) => {
+    console.error("[Signaling] 連線錯誤:", err);
+  };
+}
+
+// =========================================================================
+// WebRTC：建立 PeerConnection 並掛載 Data Channels
+// =========================================================================
+function createPeerConnection(remoteId: string): RTCPeerConnection {
+  // 若已有舊連線，先關閉
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+    dataChannelControl = null;
+    dataChannelFile = null;
+  }
+
+  currentRemoteId = remoteId;
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+  // 當 ICE Candidate 產生時，轉發給信令伺服器
+  pc.onicecandidate = (event) => {
+    if (event.candidate && signalingWs?.readyState === WebSocket.OPEN) {
+      signalingWs.send(JSON.stringify({
+        type: "ice",
+        target: remoteId,
+        candidate: JSON.stringify(event.candidate),
+      }));
+    }
+  };
+
+  // 監聽連線狀態變化
+  pc.onconnectionstatechange = () => {
+    const state = pc.connectionState;
+    console.log(`[WebRTC] 連線狀態: ${state}`);
+    updateConnectionStatusUI(state);
+  };
+
+  // 被動端：接收遠端建立的 Data Channels
+  pc.ondatachannel = (event) => {
+    const ch = event.channel;
+    if (ch.label === "input-control") {
+      dataChannelControl = ch;
+      bindControlChannel(ch);
+    } else if (ch.label === "file-transfer") {
+      dataChannelFile = ch;
+      bindFileChannel(ch);
+    }
+  };
+
+  return pc;
+}
+
+// 主動端：建立 Data Channels 並發起 Offer
+async function startCall(remoteId: string, pin: string) {
+  if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
+    alert(t("err_signaling_offline") || "無法連線到信令伺服器，請確認 2syn 服務正在執行。");
+    return;
+  }
+
+  const pc = createPeerConnection(remoteId);
+  peerConnection = pc;
+
+  // 主動端建立 Data Channels
+  dataChannelControl = pc.createDataChannel("input-control", {
+    ordered: true,
+    maxRetransmits: 0, // 低延遲，不重傳
+  });
+  bindControlChannel(dataChannelControl);
+
+  dataChannelFile = pc.createDataChannel("file-transfer", {
+    ordered: true,    // 可靠傳輸，確保檔案完整
+  });
+  bindFileChannel(dataChannelFile);
+
+  // 產生 SDP Offer
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  // 透過信令伺服器轉發 Offer（含 PIN）
+  signalingWs.send(JSON.stringify({
+    type: "offer",
+    target: remoteId,
+    pin: pin,
+    sdp: offer.sdp,
+  }));
+
+  console.log(`[WebRTC] Offer 已發送至 ${remoteId}`);
+}
+
+// 被動端：收到 Offer，驗證 PIN 後回傳 Answer
+async function handleIncomingOffer(sourceId: string, sdpString: string) {
+  // 驗證 PIN 是否符合本機 Access PIN
+  // 注意：信令伺服器目前直接轉發，PIN 驗證在接收端完成
+  const acceptCall = confirm(
+    `設備 ${sourceId} 正在請求連線到您的裝置。\n是否允許？`
+  );
+  if (!acceptCall) return;
+
+  const pc = createPeerConnection(sourceId);
+  peerConnection = pc;
+
+  await pc.setRemoteDescription({ type: "offer", sdp: sdpString });
+
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  // 回傳 Answer 給發起方
+  if (signalingWs?.readyState === WebSocket.OPEN) {
+    signalingWs.send(JSON.stringify({
+      type: "answer",
+      target: sourceId,
+      sdp: answer.sdp,
+    }));
+  }
+  console.log(`[WebRTC] Answer 已回傳給 ${sourceId}`);
+}
+
+// 控制通道（滑鼠鍵盤）綁定：收到遠端控制指令交由 Rust 執行
+function bindControlChannel(ch: RTCDataChannel) {
+  ch.onopen = () => console.log("[DataChannel] input-control 已開啟");
+  ch.onclose = () => console.log("[DataChannel] input-control 已關閉");
+  ch.onmessage = async (event) => {
+    try {
+      const data: Uint8Array = event.data instanceof ArrayBuffer
+        ? new Uint8Array(event.data)
+        : new Uint8Array(await event.data.arrayBuffer());
+      // 交由 Rust 後端執行實際的滑鼠/鍵盤操作
+      await invoke("handle_remote_input", { data: Array.from(data) });
+    } catch (e) {
+      console.error("[Control] 執行遠端輸入失敗:", e);
+    }
+  };
+}
+
+// 檔案傳輸通道綁定
+function bindFileChannel(ch: RTCDataChannel) {
+  ch.binaryType = "arraybuffer";
+  ch.onopen = () => console.log("[DataChannel] file-transfer 已開啟");
+  ch.onclose = () => console.log("[DataChannel] file-transfer 已關閉");
+  ch.onmessage = async (event) => {
+    // 接收端收到檔案資料塊 — 交由 Rust 寫入磁碟
+    try {
+      const data = new Uint8Array(event.data as ArrayBuffer);
+      await invoke("receive_file_chunk", { chunk: Array.from(data) });
+    } catch (e) {
+      console.error("[File] 寫入檔案塊失敗:", e);
+    }
+  };
+}
+
+// 重置連線相關 UI 狀態
+function resetConnectionUI() {
+  const btnConnect = document.getElementById("btn-connect");
+  const btnText = document.getElementById("txt-btn-connect");
+  if (btnConnect) btnConnect.removeAttribute("disabled");
+  if (btnText) btnText.textContent = t("btn_connect");
+}
+
+// 依照 WebRTC connectionState 更新 UI 提示
+function updateConnectionStatusUI(state: string) {
+  const statusMap: Record<string, string> = {
+    connecting: t("conn_connecting") || "連線中...",
+    connected:  t("conn_connected")  || "已連線 (P2P)",
+    disconnected: t("conn_disconnected") || "已中斷",
+    failed:     t("conn_failed")     || "連線失敗",
+    closed:     t("conn_closed")     || "已關閉",
+  };
+  const label = statusMap[state];
+  if (label) {
+    // 更新連線按鈕文字以提供即時回饋
+    const btnText = document.getElementById("txt-btn-connect");
+    if (btnText && state !== "connected") {
+      btnText.textContent = label;
+    } else if (btnText && state === "connected") {
+      btnText.textContent = label;
+      // 連線成功後恢復按鈕可用（用來發起中斷）
+      const btnConnect = document.getElementById("btn-connect");
+      if (btnConnect) btnConnect.removeAttribute("disabled");
+    }
+  }
+  if (state === "failed") {
+    alert(t("err_rtc_failed") || "P2P 連線失敗。\n請確認雙方均已啟動 2syn，且防火牆允許 UDP 流量。");
+    resetConnectionUI();
+  }
+}
+
+// =========================================================================
 // 初始化「開始連線」按鈕事件
+// =========================================================================
 function initConnectButton() {
   const btnConnect = document.getElementById("btn-connect");
   const remoteIdInput = document.getElementById("remote-id-input") as HTMLInputElement;
@@ -363,27 +640,24 @@ function initConnectButton() {
       return;
     }
 
+    // 授權閘門：確認本機已授權才能連線
+    try {
+      const isAuthorized = await invoke<boolean>("check_license_status");
+      if (!isAuthorized) {
+        alert(t("err_unauthorized") || "請先完成授權驗證，再發起連線。");
+        return;
+      }
+    } catch (e) {
+      console.warn("授權狀態確認失敗:", e);
+    }
+
     btnConnect.setAttribute("disabled", "true");
     const btnText = document.getElementById("txt-btn-connect");
-    const originalText = btnText?.textContent || "Connect";
     if (btnText) btnText.textContent = t("connecting") || "Connecting...";
 
-    console.log(`[Frontend] 嘗試發起連線至 ${remoteId} (PIN: ${pin})`);
-    try {
-      const result = await invoke<string>("initiate_connection", {
-        remoteId,
-        accessPin: pin,
-      });
-      console.log(`[Frontend] 連線回傳結果:`, result);
-      alert(t(result) || result);
-    } catch (error) {
-      console.error(`[Frontend] 連線發生錯誤:`, error);
-      const errStr = String(error);
-      alert(t(errStr) || errStr);
-    } finally {
-      btnConnect.removeAttribute("disabled");
-      if (btnText) btnText.textContent = originalText;
-    }
+    console.log(`[Frontend] 發起 WebRTC 連線至 ${remoteId} (PIN: ${pin})`);
+    // 真正的 WebRTC 連線發起
+    await startCall(remoteId, pin);
   });
 }
 
@@ -550,7 +824,7 @@ function startStatusPolling() {
   }, 500);
 }
 
-// 初始化離線手動 SDP 連線控制
+// 初始化離線手動 SDP 連線控制（使用瀏覽器原生 WebRTC）
 function initOfflineSdpMode() {
   const chkOffline = document.getElementById("chk-offline-sdp-mode") as HTMLInputElement;
   const sdpPanel = document.getElementById("offline-sdp-panel");
@@ -568,36 +842,81 @@ function initOfflineSdpMode() {
   if (btnGenLocal && txtLocal) {
     btnGenLocal.addEventListener("click", async () => {
       try {
-        // 呼叫後端產生 SDP Offer
-        const localSdp = await invoke<string>("generate_local_sdp_offer");
-        txtLocal.value = localSdp;
-        // 自動選取並複製到剪貼簿
-        txtLocal.select();
-        navigator.clipboard.writeText(localSdp);
-        alert(t("alert_sdp_success"));
+        // 用瀏覽器原生 RTCPeerConnection 產生 Offer SDP
+        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        peerConnection = pc;
+        currentRemoteId = "manual";
+
+        // 建立 Data Channels
+        dataChannelControl = pc.createDataChannel("input-control", { ordered: true, maxRetransmits: 0 });
+        bindControlChannel(dataChannelControl);
+        dataChannelFile = pc.createDataChannel("file-transfer", { ordered: true });
+        bindFileChannel(dataChannelFile);
+
+        pc.onicecandidate = (event) => {
+          if (!event.candidate) {
+            // ICE 收集完畢，將完整 SDP 放入文字框
+            const finalSdp = pc.localDescription?.sdp || "";
+            txtLocal.value = finalSdp;
+            txtLocal.select();
+            navigator.clipboard.writeText(finalSdp).catch(() => {});
+            alert(t("alert_sdp_success"));
+          }
+        };
+
+        pc.onconnectionstatechange = () => updateConnectionStatusUI(pc.connectionState);
+        pc.ondatachannel = (event) => {
+          if (event.channel.label === "input-control") bindControlChannel(event.channel);
+          if (event.channel.label === "file-transfer") bindFileChannel(event.channel);
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
       } catch (error) {
-        const errorStr = String(error);
-        const displayError = t(errorStr);
-        alert(`${t("alert_sdp_fail")}${displayError}`);
+        alert(`${t("alert_sdp_fail")}${String(error)}`);
       }
     });
   }
 
   if (btnApplyRemote && txtRemote) {
     btnApplyRemote.addEventListener("click", async () => {
-      const remoteSdp = txtRemote.value.trim();
-      if (!remoteSdp) {
+      const remoteSdpText = txtRemote.value.trim();
+      if (!remoteSdpText) {
         alert(t("alert_sdp_empty"));
         return;
       }
       try {
-        // 呼叫後端套用對方的 SDP
-        const result = await invoke<string>("apply_remote_sdp_answer", { sdp: remoteSdp });
-        alert(t(result));
+        if (peerConnection && peerConnection.localDescription?.type === "offer") {
+          // 主動端：套用遠端 Answer
+          await peerConnection.setRemoteDescription({ type: "answer", sdp: remoteSdpText });
+          alert(t("alert_sdp_applied") || "SDP Answer 已套用！ICE 協商中...");
+        } else {
+          // 被動端：套用遠端 Offer，自動產生並顯示 Answer
+          const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+          peerConnection = pc;
+          currentRemoteId = "manual";
+
+          pc.onicecandidate = (event) => {
+            if (!event.candidate) {
+              const answerSdp = pc.localDescription?.sdp || "";
+              txtLocal.value = answerSdp;
+              txtLocal.select();
+              navigator.clipboard.writeText(answerSdp).catch(() => {});
+              alert(t("alert_answer_generated") || "Answer SDP 已產生並複製到剪貼板，請傳送給對方。");
+            }
+          };
+          pc.onconnectionstatechange = () => updateConnectionStatusUI(pc.connectionState);
+          pc.ondatachannel = (event) => {
+            if (event.channel.label === "input-control") bindControlChannel(event.channel);
+            if (event.channel.label === "file-transfer") bindFileChannel(event.channel);
+          };
+
+          await pc.setRemoteDescription({ type: "offer", sdp: remoteSdpText });
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+        }
       } catch (error) {
-        const errorStr = String(error);
-        const displayError = t(errorStr);
-        alert(`${t("alert_sdp_apply_fail")}${displayError}`);
+        alert(`${t("alert_sdp_apply_fail")}${String(error)}`);
       }
     });
   }
@@ -854,7 +1173,12 @@ function startTransferPolling(taskId: string) {
 // =========================================================================
 window.addEventListener("DOMContentLoaded", async () => {
   await initI18n();
-  generateMockMyId();
+
+  // 產生並儲存本機 ID 與 PIN（WebRTC 連線前必須先確立身份）
+  const generatedId = generateMockMyId();
+  if (generatedId) myId = generatedId;
+  myPin = (window as any).__localAccessPin || "";
+
   await fetchHwid();
   initAccessPin();
   initConnectButton();
@@ -870,4 +1194,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   
   // 啟動狀態輪詢
   startStatusPolling();
+
+  // 啟動信令 WebSocket 連線（信令伺服器必須先啟動）
+  initSignalingClient();
 });

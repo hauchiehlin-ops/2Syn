@@ -65,25 +65,18 @@ pub fn generate_hwid() -> Result<String, CoreError> {
 
     #[cfg(target_os = "ios")]
     {
-        // iOS 平台：使用 Keychain 持久化 UUID 作為 HWID
-        // iOS 的 UIDevice.identifierForVendor 在 App 重新安裝後會重設，
-        // 因此改用 Keychain 儲存一個永久性 UUID，即使 App 重灌也能保留。
-
-        // 嘗試用 security CLI 讀取 Keychain 中已存的 UUID
-
-        // 在 iOS Sandbox 環境中，Keychain 可透過 Security framework 存取，
-        // 但 Rust 層直接呼叫需透過 sys 層。此處用環境變數 Fallback 供 PoC。
-        // 實際產品需透過 Swift plugin 呼叫 Security.framework 的 SecItemCopyMatching。
-        if let Ok(existing) = std::env::var("TWOSYN_DEVICE_UUID") {
-            return Ok(hash_hwid(&existing));
-        }
-
-        // 產生一個新的 UUID 並儲存（PoC 層級：實際需呼叫 Keychain API）
-        let new_uuid = format!(
-            "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-            rand_u32(), rand_u16(), rand_u16(), rand_u16(), rand_u48()
-        );
-        Ok(hash_hwid(&new_uuid))
+        static IOS_UUID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        let existing = IOS_UUID.get_or_init(|| {
+            if let Ok(env_uuid) = std::env::var("TWOSYN_DEVICE_UUID") {
+                env_uuid
+            } else {
+                format!(
+                    "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+                    rand_u32(), rand_u16(), rand_u16(), rand_u16(), rand_u48()
+                )
+            }
+        });
+        Ok(hash_hwid(existing))
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
@@ -246,14 +239,20 @@ impl LicenseValidator {
                 let hwid = generate_hwid()?;
                 let payload_parts: Vec<&str> = payload.split('|').collect();
                 if payload_parts.len() < 3 {
+                    println!("[DEBUG] Payload parts length < 3");
                     return Ok(false);
                 }
                 
                 // 憑證格式 payload_parts: [LicenseKey, HWID, Timestamp]
                 let licensed_hwid = payload_parts[1];
-                Ok(licensed_hwid == hwid)
+                let is_match = licensed_hwid == hwid;
+                println!("[DEBUG] Signature valid. HWID match: {} (licensed: {}, current: {})", is_match, licensed_hwid, hwid);
+                Ok(is_match)
             }
-            Err(_) => Ok(false),
+            Err(e) => {
+                println!("[DEBUG] Signature verification failed: {:?}", e);
+                Ok(false)
+            }
         }
     }
 }

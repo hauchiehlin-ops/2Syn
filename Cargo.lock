@@ -4946,6 +4946,7 @@ name = "syn-signaling"
 version = "0.1.5"
 dependencies = [
  "axum",
+ "futures-util",
  "hex",
  "ring 0.17.14",
  "serde",

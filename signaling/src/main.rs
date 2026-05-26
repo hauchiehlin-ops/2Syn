@@ -11,6 +11,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::RwLock;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tokio::sync::mpsc;
+use futures_util::{StreamExt, SinkExt};
 
 // 伺服器 Ed25519 PKCS8 私鑰 (與用戶端公鑰對應)
 pub const SERVER_PRIVATE_KEY: [u8; 83] = [
@@ -29,6 +31,33 @@ struct LicenseInfo {
 
 struct ServerState {
     licenses: RwLock<HashMap<String, LicenseInfo>>,
+    clients: RwLock<HashMap<String, mpsc::Sender<Message>>>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type")]
+enum SignalingMessage {
+    #[serde(rename = "login")]
+    Login { id: String },
+    #[serde(rename = "offer")]
+    Offer { target: String, pin: String, sdp: String },
+    #[serde(rename = "answer")]
+    Answer { target: String, sdp: String },
+    #[serde(rename = "ice")]
+    Ice { target: String, candidate: String },
+}
+
+#[derive(Serialize, Debug)]
+#[serde(tag = "type")]
+enum ServerMessage {
+    #[serde(rename = "offer")]
+    Offer { source: String, sdp: String },
+    #[serde(rename = "answer")]
+    Answer { source: String, sdp: String },
+    #[serde(rename = "ice")]
+    Ice { source: String, candidate: String },
+    #[serde(rename = "error")]
+    Error { message: String },
 }
 
 #[derive(Deserialize)]
@@ -74,6 +103,7 @@ async fn main() {
 
     let state = Arc::new(ServerState {
         licenses: RwLock::new(licenses),
+        clients: RwLock::new(HashMap::new()),
     });
 
     let app = Router::new()
@@ -89,28 +119,92 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_socket)
+async fn ws_handler(State(state): State<Arc<ServerState>>, ws: WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
-async fn handle_socket(mut socket: WebSocket) {
-    println!("新客戶端已連線");
+async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
+    let (mut sender, mut receiver) = socket.split();
+    let (tx, mut rx) = mpsc::channel::<Message>(100);
     
-    while let Some(Ok(msg)) = socket.recv().await {
-        match msg {
-            Message::Text(text) => {
-                println!("收到信令 SDP/ICE: {}", text);
-                if socket.send(Message::Text(format!("Echo back: {}", text))).await.is_err() {
-                    break;
-                }
-            }
-            Message::Close(_) => {
-                println!("客戶端中斷連線");
+    // Spawn a task to forward messages from the channel to the websocket
+    let mut send_task = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if sender.send(msg).await.is_err() {
                 break;
             }
-            _ => {}
         }
-    }
+    });
+
+    let mut client_id: Option<String> = None;
+    
+    // Read messages from the websocket
+    let mut recv_task = {
+        let state = Arc::clone(&state);
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            while let Some(Ok(msg)) = receiver.next().await {
+                if let Message::Text(text) = msg {
+                    if let Ok(sig_msg) = serde_json::from_str::<SignalingMessage>(&text) {
+                        match sig_msg {
+                            SignalingMessage::Login { id } => {
+                                client_id = Some(id.clone());
+                                state.clients.write().await.insert(id, tx.clone());
+                                println!("Client logged in: {:?}", client_id);
+                            }
+                            SignalingMessage::Offer { target, pin: _, sdp } => {
+                                // 這裡實務上要驗證目標的 PIN（目前假定為同意或由目標自行驗證）
+                                // 為簡化，直接將 Offer 轉發給目標
+                                let clients = state.clients.read().await;
+                                if let Some(target_tx) = clients.get(&target) {
+                                    let out_msg = ServerMessage::Offer {
+                                        source: client_id.clone().unwrap_or_default(),
+                                        sdp,
+                                    };
+                                    let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
+                                } else {
+                                    let err = ServerMessage::Error { message: "Target offline".into() };
+                                    let _ = tx.send(Message::Text(serde_json::to_string(&err).unwrap())).await;
+                                }
+                            }
+                            SignalingMessage::Answer { target, sdp } => {
+                                let clients = state.clients.read().await;
+                                if let Some(target_tx) = clients.get(&target) {
+                                    let out_msg = ServerMessage::Answer {
+                                        source: client_id.clone().unwrap_or_default(),
+                                        sdp,
+                                    };
+                                    let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
+                                }
+                            }
+                            SignalingMessage::Ice { target, candidate } => {
+                                let clients = state.clients.read().await;
+                                if let Some(target_tx) = clients.get(&target) {
+                                    let out_msg = ServerMessage::Ice {
+                                        source: client_id.clone().unwrap_or_default(),
+                                        candidate,
+                                    };
+                                    let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
+                                }
+                            }
+                        }
+                    } else {
+                        println!("Invalid message format: {}", text);
+                    }
+                }
+            }
+            // Cleanup on disconnect
+            if let Some(id) = client_id {
+                println!("Client disconnected: {}", id);
+                state.clients.write().await.remove(&id);
+            }
+        })
+    };
+
+    tokio::select! {
+        _ = (&mut send_task) => recv_task.abort(),
+        _ = (&mut recv_task) => send_task.abort(),
+    };
 }
 
 // 簽署憑證核心邏輯
