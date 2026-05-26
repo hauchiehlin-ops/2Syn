@@ -41,11 +41,13 @@ const fallbackTranslations: Record<string, string> = {
   // 頁面靜態文字
   "connect_title": "Establish Connection",
   "remote_id_placeholder": "Enter 9-digit Device ID",
-  "totp_placeholder": "Enter 6-digit TOTP",
+  "access_pin_placeholder": "Enter access PIN",
   "btn_connect": "Connect",
   "host_info_title": "Host Information",
   "remote_id": "Remote Device ID",
-  "totp": "TOTP Verification Code",
+  "access_pin_label": "Access PIN",
+  "access_pin_help": "Enter the 6-digit access PIN displayed on the remote device.",
+  "my_pin_label": "Access PIN:",
   "my_id": "My ID:",
   "hwid": "My HWID:",
   "license": "Buyout License Key",
@@ -174,11 +176,12 @@ function updateDomTranslations() {
   // 更新所有對應的 DOM 元素
   setTextContent("txt-connect-title", t("connect_title"));
   setPlaceholder("remote-id-input", t("remote_id_placeholder"));
-  setPlaceholder("totp-input", t("totp_placeholder"));
+  setPlaceholder("access-pin-input", t("access_pin_placeholder"));
   setTextContent("txt-btn-connect", t("btn_connect"));
   setTextContent("txt-host-info-title", t("host_info_title"));
   setTextContent("lbl-remote-id", t("remote_id"));
-  setTextContent("lbl-totp", t("totp"));
+  setTextContent("lbl-access-pin", t("access_pin_label"));
+  setTextContent("lbl-my-pin", t("my_pin_label"));
   setTextContent("lbl-my-id", t("my_id"));
   setTextContent("lbl-hwid", t("hwid"));
   setTextContent("lbl-license", t("license"));
@@ -233,7 +236,7 @@ function updateDomTranslations() {
 
   // 說明區塊文字更新
   setTextContent("help-remote-id", t("help_remote_id"));
-  setTextContent("help-totp", t("help_totp"));
+  setTextContent("help-access-pin", t("access_pin_help"));
   setTextContent("help-offline-sdp", t("help_offline_sdp"));
   setTextContent("help-license", t("help_license"));
   setTextContent("help-privacy", t("help_privacy"));
@@ -298,6 +301,89 @@ function generateMockMyId() {
     valMyId.textContent = `${r()}-${r()}-${r()}`;
   }
 }
+
+// 產生本機隨機存取 PIN 碼（6 位數，每次啟動自動刷新）
+function generateAccessPin(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+// 初始化存取 PIN 碼顯示與刷新邏輯
+function initAccessPin() {
+  const valPin = document.getElementById("val-my-pin");
+  const btnRefresh = document.getElementById("btn-refresh-pin");
+  const btnCopyPin = document.getElementById("btn-copy-pin");
+
+  // 啟動時自動產生一組 PIN
+  const freshPin = generateAccessPin();
+  if (valPin) {
+    valPin.textContent = `${freshPin.slice(0, 3)}-${freshPin.slice(3)}`;
+  }
+  // 儲存原始 PIN（不含 dash）供後端驗證用
+  (window as any).__localAccessPin = freshPin;
+
+  if (btnRefresh && valPin) {
+    btnRefresh.addEventListener("click", () => {
+      const newPin = generateAccessPin();
+      valPin.textContent = `${newPin.slice(0, 3)}-${newPin.slice(3)}`;
+      (window as any).__localAccessPin = newPin;
+      btnRefresh.textContent = "✓";
+      setTimeout(() => { btnRefresh.textContent = "🔄"; }, 1000);
+    });
+  }
+
+  if (btnCopyPin && valPin) {
+    btnCopyPin.addEventListener("click", () => {
+      const pinText = valPin.textContent || "";
+      navigator.clipboard.writeText(pinText).then(() => {
+        btnCopyPin.textContent = "✓";
+        setTimeout(() => { btnCopyPin.textContent = "📋"; }, 1500);
+      });
+    });
+  }
+}
+
+// 初始化「開始連線」按鈕事件
+function initConnectButton() {
+  const btnConnect = document.getElementById("btn-connect");
+  const remoteIdInput = document.getElementById("remote-id-input") as HTMLInputElement;
+  const accessPinInput = document.getElementById("access-pin-input") as HTMLInputElement;
+
+  if (!btnConnect || !remoteIdInput || !accessPinInput) return;
+
+  btnConnect.addEventListener("click", async () => {
+    const remoteId = remoteIdInput.value.trim().replace(/-/g, "");
+    const pin = accessPinInput.value.trim().replace(/-/g, "");
+
+    if (!remoteId || remoteId.length !== 9) {
+      alert(t("err_invalid_remote_id") || "請輸入有效的 9 位數設備 ID。");
+      return;
+    }
+    if (!pin || pin.length < 4) {
+      alert(t("err_invalid_pin") || "請輸入對方的存取 PIN 碼。");
+      return;
+    }
+
+    btnConnect.setAttribute("disabled", "true");
+    const btnText = document.getElementById("txt-btn-connect");
+    const originalText = btnText?.textContent || "Connect";
+    if (btnText) btnText.textContent = t("connecting") || "Connecting...";
+
+    try {
+      const result = await invoke<string>("initiate_connection", {
+        remoteId,
+        accessPin: pin,
+      });
+      alert(t(result) || result);
+    } catch (error) {
+      const errStr = String(error);
+      alert(t(errStr) || errStr);
+    } finally {
+      btnConnect.removeAttribute("disabled");
+      if (btnText) btnText.textContent = originalText;
+    }
+  });
+}
+
 
 // 授權金鑰驗證
 async function initLicenseVerification() {
@@ -648,12 +734,124 @@ function initSmartAutoMode() {
 }
 
 // =========================================================================
+// 檔案傳輸邏輯
+// =========================================================================
+let currentTransferTaskId: string | null = null;
+let transferPollingInterval: number | null = null;
+
+function initFileTransfer() {
+  const dropZone = document.getElementById("file-drop-zone");
+  const progressContainer = document.getElementById("transfer-progress-container");
+  const filenameEl = document.getElementById("transfer-filename");
+  const btnCancel = document.getElementById("btn-cancel-transfer");
+
+  if (!dropZone) return;
+
+  // 處理拖曳外觀
+  dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "var(--color-primary)";
+    dropZone.style.background = "var(--color-primary-glow)";
+  });
+  
+  dropZone.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "var(--panel-border)";
+    dropZone.style.background = "rgba(0,0,0,0.02)";
+  });
+
+  dropZone.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "var(--panel-border)";
+    dropZone.style.background = "rgba(0,0,0,0.02)";
+
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    // PoC：目前只取第一個檔案
+    const file = files[0];
+    // Tauri 需要絕對路徑才能讀取，這邊為了 PoC 我們先假設可以從某些管道取得路徑
+    // 實務上在 Tauri，如果開啟拖曳支援，event 中會有檔案路徑，或者可以使用 Tauri 的對話框
+    // 這裡我們示範呼叫，實際路徑處理要看 Tauri plugin-fs 設定
+    // 先寫死一個假路徑，或者透過 Tauri API 挑選檔案
+    alert("In a real Tauri app, we would use the absolute path of this file. PoC will simulate the transfer.");
+    
+    // 模擬啟動傳輸（若被封鎖會跳警告）
+    try {
+      const taskId = await invoke<string>("send_file", { path: "/tmp/dummy_file.txt" });
+      currentTransferTaskId = taskId;
+      
+      if (filenameEl) filenameEl.textContent = file.name;
+      if (progressContainer) progressContainer.style.display = "flex";
+      
+      // 啟動進度輪詢
+      startTransferPolling(taskId);
+      
+    } catch (e) {
+      alert(t(String(e)) || String(e));
+    }
+  });
+
+  if (btnCancel) {
+    btnCancel.addEventListener("click", async () => {
+      if (currentTransferTaskId) {
+        await invoke("cancel_transfer", { taskId: currentTransferTaskId });
+        currentTransferTaskId = null;
+        if (progressContainer) progressContainer.style.display = "none";
+        if (transferPollingInterval) clearInterval(transferPollingInterval);
+        alert("Transfer cancelled.");
+      }
+    });
+  }
+}
+
+function startTransferPolling(taskId: string) {
+  if (transferPollingInterval) clearInterval(transferPollingInterval);
+  
+  const pctEl = document.getElementById("transfer-pct");
+  const barEl = document.getElementById("transfer-progress-bar");
+  const progressContainer = document.getElementById("transfer-progress-container");
+
+  transferPollingInterval = window.setInterval(async () => {
+    try {
+      const tasks = await invoke<any[]>("get_active_transfers");
+      const myTask = tasks.find(t => t.task_id === taskId);
+      
+      if (myTask) {
+        const pct = Math.round(myTask.progress_pct);
+        if (pctEl) pctEl.textContent = `${pct}%`;
+        if (barEl) barEl.style.width = `${pct}%`;
+        
+        if (myTask.status === "Completed") {
+          clearInterval(transferPollingInterval!);
+          setTimeout(() => {
+            if (progressContainer) progressContainer.style.display = "none";
+            alert("Transfer Complete!");
+          }, 1000);
+        } else if (myTask.status === "Cancelled" || myTask.status === "Failed") {
+          clearInterval(transferPollingInterval!);
+          if (progressContainer) progressContainer.style.display = "none";
+        }
+      } else {
+        // 任務不見了（可能是被清理掉）
+        clearInterval(transferPollingInterval!);
+        if (progressContainer) progressContainer.style.display = "none";
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, 1000);
+}
+
+// =========================================================================
 // 應用程式初始化入口點
 // =========================================================================
 window.addEventListener("DOMContentLoaded", async () => {
   await initI18n();
   generateMockMyId();
   await fetchHwid();
+  initAccessPin();
+  initConnectButton();
   initLicenseVerification();
   initPrivacyMode();
   initNetworkSimulator();
@@ -662,6 +860,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initHelpButtons();
   initClipboardCopy();
   initSmartAutoMode();
+  initFileTransfer();
   
   // 啟動狀態輪詢
   startStatusPolling();

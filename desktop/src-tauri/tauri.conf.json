@@ -1,6 +1,6 @@
 {
   "productName": "2syn",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.twosyn.app",
   "build": {
     "frontendDist": "../dist",
@@ -27,6 +27,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": []
+    "icon": [],
+    "iOS": {
+      "developmentTeam": "6UJ8GS752W"
+    }
   }
 }

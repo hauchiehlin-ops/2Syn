@@ -1,7 +1,12 @@
 [package]
 name = "syn-desktop"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
+
+[lib]
+name = "syn_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 
 [dependencies]
 tauri = { version = "2.0", features = ["devtools"] }
@@ -11,6 +16,7 @@ serde_json = "1.0"
 syn-core = { path = "../../core" }
 tokio = { version = "1.36", features = ["full"] }
 reqwest = { version = "0.11", features = ["json"] }
+uuid = { version = "1.7", features = ["v4"] }
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }

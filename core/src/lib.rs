@@ -3,6 +3,8 @@ pub mod codec;
 pub mod security;
 pub mod input;
 pub mod idd;
+pub mod file_transfer;
+
 
 /// 系統核心通用錯誤定義
 #[derive(Debug)]

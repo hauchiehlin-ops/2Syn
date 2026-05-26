@@ -2,12 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="hsl(220, 80%, 96%)">
+  <meta name="description" content="2syn — Secure WebRTC remote desktop with end-to-end encryption.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>2syn Remote Desktop</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/src/style.css">
+
 </head>
 <body>
   <!-- 景深霓虹背景光暈球 -->
@@ -56,12 +61,12 @@
         </div>
 
         <div class="input-group">
-          <label for="totp-input">
-            <span id="lbl-totp">TOTP Verification Code</span>
-            <button class="btn-info" data-help="totp" type="button">ⓘ</button>
+          <label for="access-pin-input">
+            <span id="lbl-access-pin">Access PIN</span>
+            <button class="btn-info" data-help="access-pin" type="button">ⓘ</button>
           </label>
-          <div id="help-totp" class="help-block"></div>
-          <input type="text" id="totp-input" placeholder="Enter 6-digit TOTP" maxlength="6">
+          <div id="help-access-pin" class="help-block"></div>
+          <input type="password" id="access-pin-input" placeholder="Enter access PIN" maxlength="8" autocomplete="off">
         </div>
 
         <button id="btn-connect" class="btn-primary">
@@ -110,6 +115,14 @@
               <button class="btn-copy" id="btn-copy-hwid" type="button" title="Copy">📋</button>
             </div>
           </div>
+          <div class="info-row">
+            <span id="lbl-my-pin">Access PIN:</span>
+            <div class="val-with-copy">
+              <span id="val-my-pin" class="code-text pin-display">------</span>
+              <button class="btn-copy" id="btn-refresh-pin" type="button" title="Refresh PIN">🔄</button>
+              <button class="btn-copy" id="btn-copy-pin" type="button" title="Copy">📋</button>
+            </div>
+          </div>
           
           <div class="input-group license-group">
             <label for="license-input">
@@ -122,6 +135,27 @@
               <button id="btn-verify-license" class="btn-secondary">Verify</button>
             </div>
             <span id="license-status" class="status-badge status-inactive">Unauthorized</span>
+          </div>
+        </div>
+        </div>
+
+        <div class="separator"></div>
+
+        <!-- 檔案傳輸 -->
+        <div class="file-transfer-section">
+          <h3 id="txt-file-transfer-title" style="font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: 8px;">File Transfer</h3>
+          <div id="file-drop-zone" style="border: 2px dashed var(--panel-border); border-radius: var(--border-radius-md); padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px; cursor: pointer; transition: var(--transition-smooth); background: rgba(0,0,0,0.02);">
+            <span id="txt-drop-zone">Drag & Drop files here or Click to upload</span>
+          </div>
+          <div id="transfer-progress-container" style="display: none; margin-top: 12px; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px;">
+              <span id="transfer-filename" class="truncate" style="font-weight: 600;">filename.txt</span>
+              <span id="transfer-pct">0%</span>
+            </div>
+            <div style="height: 6px; background: rgba(0,0,0,0.1); border-radius: 3px; overflow: hidden;">
+              <div id="transfer-progress-bar" style="height: 100%; width: 0%; background: var(--color-primary); transition: width 0.3s ease;"></div>
+            </div>
+            <button id="btn-cancel-transfer" class="btn-secondary" style="margin-top: 4px; padding: 4px; font-size: 11px; min-height: unset;">Cancel Transfer</button>
           </div>
         </div>
 

@@ -63,7 +63,32 @@ pub fn generate_hwid() -> Result<String, CoreError> {
         Err(CoreError::SystemError("無法獲取 macOS 硬體特徵碼".to_string()))
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "ios")]
+    {
+        // iOS 平台：使用 Keychain 持久化 UUID 作為 HWID
+        // iOS 的 UIDevice.identifierForVendor 在 App 重新安裝後會重設，
+        // 因此改用 Keychain 儲存一個永久性 UUID，即使 App 重灌也能保留。
+        use std::process::Command;
+
+        // 嘗試用 security CLI 讀取 Keychain 中已存的 UUID
+        let label = "com.twosyn.app.hwid";
+
+        // 在 iOS Sandbox 環境中，Keychain 可透過 Security framework 存取，
+        // 但 Rust 層直接呼叫需透過 sys 層。此處用環境變數 Fallback 供 PoC。
+        // 實際產品需透過 Swift plugin 呼叫 Security.framework 的 SecItemCopyMatching。
+        if let Ok(existing) = std::env::var("TWOSYN_DEVICE_UUID") {
+            return Ok(hash_hwid(&existing));
+        }
+
+        // 產生一個新的 UUID 並儲存（PoC 層級：實際需呼叫 Keychain API）
+        let new_uuid = format!(
+            "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+            rand_u32(), rand_u16(), rand_u16(), rand_u16(), rand_u48()
+        );
+        Ok(hash_hwid(&new_uuid))
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
     {
         // Linux / Android 平台 Fallback
         use std::fs;
@@ -76,6 +101,35 @@ pub fn generate_hwid() -> Result<String, CoreError> {
         Err(CoreError::SystemError("不支援的作業系統或無法獲取機器特徵碼".to_string()))
     }
 }
+
+// iOS UUID 產生輔助函數（使用 ring 的隨機數）
+#[cfg(target_os = "ios")]
+fn rand_u32() -> u32 {
+    use ring::rand::{SecureRandom, SystemRandom};
+    let rng = SystemRandom::new();
+    let mut buf = [0u8; 4];
+    let _ = rng.fill(&mut buf);
+    u32::from_le_bytes(buf)
+}
+#[cfg(target_os = "ios")]
+fn rand_u16() -> u16 {
+    use ring::rand::{SecureRandom, SystemRandom};
+    let rng = SystemRandom::new();
+    let mut buf = [0u8; 2];
+    let _ = rng.fill(&mut buf);
+    u16::from_le_bytes(buf)
+}
+#[cfg(target_os = "ios")]
+fn rand_u48() -> u64 {
+    use ring::rand::{SecureRandom, SystemRandom};
+    let rng = SystemRandom::new();
+    let mut buf = [0u8; 6];
+    let _ = rng.fill(&mut buf);
+    let mut tmp = [0u8; 8];
+    tmp[..6].copy_from_slice(&buf);
+    u64::from_le_bytes(tmp)
+}
+
 
 /// 將硬體識別碼透過 SHA-256 雜湊，保護使用者隱私
 fn hash_hwid(raw_id: &str) -> String {

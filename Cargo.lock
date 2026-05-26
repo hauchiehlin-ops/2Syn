@@ -4901,7 +4901,7 @@ dependencies = [
 
 [[package]]
 name = "syn-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aes-gcm",
  "base32",
@@ -4928,7 +4928,7 @@ dependencies = [
 
 [[package]]
 name = "syn-desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "reqwest 0.11.27",
  "serde",
@@ -4938,11 +4938,12 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-shell",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
 name = "syn-signaling"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "axum",
  "hex",

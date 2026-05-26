@@ -293,6 +293,32 @@ impl WebRtcSession {
         Ok(data_channel)
     }
 
+    /// 建立高可靠性的檔案傳輸通道 (Data Channel)
+    pub async fn setup_file_channel(&self) -> Result<Arc<RTCDataChannel>, CoreError> {
+        // 設定 Data Channel 為可靠模式（預設）以確保檔案不遺失
+        let init = RTCDataChannelInit {
+            ordered: Some(true),
+            max_retransmits: None, // 允許無限重傳（可靠傳輸）
+            ..Default::default()
+        };
+
+        let data_channel = self.peer_connection
+            .create_data_channel("file-transfer", Some(init))
+            .await
+            .map_err(|e| CoreError::NetworkError(format!("無法建立檔案傳輸通道: {}", e)))?;
+
+        // 註冊資料通道接收回呼 (在此可將收到的 chunk 送入 ChunkReassembler)
+        // 實務上應搭配一個 tokio mpsc channel 將 chunk 送給後台 worker 處理
+        let _dc = Arc::clone(&data_channel);
+        data_channel.on_message(Box::new(move |msg| {
+            let _data = msg.data.to_vec();
+            // TODO: 送入 ChunkReassembler
+            Box::pin(async move {})
+        }));
+
+        Ok(data_channel)
+    }
+
     /// 獲取原生 PeerConnection 引用，以便與信令搓合模組進行 SDP 協商
     pub fn get_peer_connection(&self) -> Arc<RTCPeerConnection> {
         Arc::clone(&self.peer_connection)
