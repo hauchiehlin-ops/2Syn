@@ -71,12 +71,34 @@ async fn verify_license_key(license_key: String) -> Result<bool, String> {
 /// 初始化時檢查是否已有合法授權
 #[tauri::command]
 async fn check_license_status() -> Result<bool, String> {
-    if let Ok(ticket) = syn_core::security::SecureStorage::load_secret("license_key") {
-        if let Ok(true) = syn_core::security::LicenseValidator::verify_license(&ticket, &[0u8; 32]) {
-            return Ok(true);
+    match syn_core::security::SecureStorage::load_secret("license_key") {
+        Ok(ticket) => {
+            println!("[license] Keychain 讀取成功, ticket 長度: {}", ticket.len());
+            println!("[license] ticket 前 80 字元: {}", &ticket[..ticket.len().min(80)]);
+            match syn_core::security::LicenseValidator::verify_license(&ticket, &[0u8; 32]) {
+                Ok(true) => {
+                    println!("[license] 驗證通過: 已授權");
+                    Ok(true)
+                }
+                Ok(false) => {
+                    println!("[license] 驗證失敗: 簽章或 HWID 不符");
+                    // 嘗試印出當前 HWID 供比對
+                    if let Ok(current_hwid) = syn_core::security::generate_hwid() {
+                        println!("[license] 當前 HWID: {}", current_hwid);
+                    }
+                    Ok(false)
+                }
+                Err(e) => {
+                    println!("[license] 驗證過程發生錯誤: {:?}", e);
+                    Ok(false)
+                }
+            }
+        }
+        Err(e) => {
+            println!("[license] Keychain 讀取失敗: {:?}", e);
+            Ok(false)
         }
     }
-    Ok(false)
 }
 
 /// 模擬切換隱私黑屏模式與虛擬顯示器

@@ -87,8 +87,10 @@ struct DeactivateResponse {
 
 #[tokio::main]
 async fn main() {
+    // 只顯示 INFO 以上層級，避免 tungstenite TRACE log 淹沒其他訊息
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::EnvFilter::new("info"))
         .init();
 
     // 初始化模擬資料庫與預置買斷金鑰
