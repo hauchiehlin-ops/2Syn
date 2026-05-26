@@ -1,14 +1,12 @@
-FROM rust:1.80-slim as builder
+FROM rust:1.80 as builder
 
 WORKDIR /usr/src/app
-# 安裝編譯必備的 C 編譯器與套件庫，否則 libc 等底層依賴會編譯失敗
-RUN apt-get update && apt-get install -y pkg-config libssl-dev build-essential && rm -rf /var/lib/apt/lists/*
-
 # 複製整個 workspace
 COPY . .
 
 # 編譯 signaling server (Release 模式)
-RUN cargo build -p syn-signaling --release
+# 使用 -j 1 限制編譯執行緒，避免 Render 免費方案 (512MB RAM) 發生記憶體不足 (OOM) 導致崩潰
+RUN cargo build -p syn-signaling --release -j 1
 
 # 建立極簡的執行環境
 FROM debian:bookworm-slim
