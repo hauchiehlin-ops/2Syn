@@ -1778,10 +1778,14 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       lastTouchX = centerX;
       lastTouchY = centerY;
       
-      const rect = videoEl.getBoundingClientRect();
       // 限制平移範圍，不讓畫面跑出界外太多
-      const maxPanX = (rect.width * currentZoom - rect.width) / 2;
-      const maxPanY = (rect.height * currentZoom - rect.height) / 2;
+      // 注意：必須使用原始未縮放的尺寸 (offsetWidth/offsetHeight)
+      const originalWidth = videoEl.offsetWidth;
+      const originalHeight = videoEl.offsetHeight;
+      
+      const maxPanX = (originalWidth * (currentZoom - 1)) / 2;
+      const maxPanY = (originalHeight * (currentZoom - 1)) / 2;
+      
       currentPanX = Math.max(-maxPanX, Math.min(maxPanX, currentPanX));
       currentPanY = Math.max(-maxPanY, Math.min(maxPanY, currentPanY));
       
