@@ -5909,6 +5909,7 @@ dependencies = [
  "objc",
  "openh264",
  "pbkdf2",
+ "rayon",
  "ring 0.17.14",
  "serde",
  "serde_json",

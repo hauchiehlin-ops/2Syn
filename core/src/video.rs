@@ -6,6 +6,7 @@ use std::time::Duration;
 use xcap::Monitor;
 use openh264::encoder::{Encoder, EncoderConfig};
 use openh264::formats::YUVSource;
+use rayon::prelude::*;
 
 pub struct VideoStreamer {
     track: Arc<TrackLocalStaticSample>,
@@ -27,7 +28,9 @@ impl RgbaToYuv420 {
         let mut u_plane = vec![0u8; (width / 2) * (height / 2)];
         let mut v_plane = vec![0u8; (width / 2) * (height / 2)];
 
-        for j in 0..height {
+        // 使用 Rayon 平行處理 Y 平面與 U/V 平面
+        // 因為 Y 是一維矩陣，我們可以直接依照列 (row) 進行並行處理
+        y_plane.par_chunks_exact_mut(width).enumerate().for_each(|(j, y_row)| {
             for i in 0..width {
                 let idx = (j * width + i) * 4;
                 let r = rgba[idx] as i32;
@@ -35,17 +38,28 @@ impl RgbaToYuv420 {
                 let b = rgba[idx + 2] as i32;
 
                 let y = (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16).clamp(0, 255) as u8;
-                y_plane[j * width + i] = y;
-
-                if j % 2 == 0 && i % 2 == 0 {
-                    let u = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-                    let v = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-                    let u_idx = (j / 2) * (width / 2) + (i / 2);
-                    u_plane[u_idx] = u;
-                    v_plane[u_idx] = v;
-                }
+                y_row[i] = y;
             }
-        }
+        });
+
+        // U 和 V 平面大小是原來的 1/4 (長寬各一半)
+        let uv_width = width / 2;
+        u_plane.par_chunks_exact_mut(uv_width).zip(v_plane.par_chunks_exact_mut(uv_width)).enumerate().for_each(|(u_j, (u_row, v_row))| {
+            let j = u_j * 2;
+            for u_i in 0..uv_width {
+                let i = u_i * 2;
+                let idx = (j * width + i) * 4;
+                let r = rgba[idx] as i32;
+                let g = rgba[idx + 1] as i32;
+                let b = rgba[idx + 2] as i32;
+
+                let u = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+                let v = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+                
+                u_row[u_i] = u;
+                v_row[u_i] = v;
+            }
+        });
 
         Self {
             y: y_plane,

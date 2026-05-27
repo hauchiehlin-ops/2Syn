@@ -24,6 +24,7 @@ webrtc = "0.10"
 xcap = "0.9.6"
 image = "0.25.10"
 openh264 = "0.9.3"
+rayon = "1.8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"

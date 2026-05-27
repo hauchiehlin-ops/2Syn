@@ -940,12 +940,47 @@ function initConnectButton() {
 
   
   const btnFixNetwork = document.getElementById('btn-fix-network');
+  const networkIndicator = document.getElementById('network-health-indicator');
+  const networkText = document.getElementById('network-health-text');
+  const networkDesc = document.getElementById('network-health-desc');
+
   if (btnFixNetwork) {
     btnFixNetwork.addEventListener('click', () => {
       window.open('https://tailscale.com/download/mac', '_blank');
-      // Show an alert guiding them what to do
       alert('請下載並安裝 Tailscale，登入後即可獲得無限距穿透能力！\n安裝完成後，此燈號會自動轉為綠色。');
     });
+  }
+
+  // 定期檢查網路體質
+  if (networkIndicator && networkText && networkDesc && btnFixNetwork) {
+    setInterval(async () => {
+      try {
+        const res: any = await invoke('check_network_health');
+        if (res.has_tailscale) {
+          networkIndicator.style.backgroundColor = 'var(--success-color, #10b981)';
+          networkText.textContent = 'Excellent (P2P Ready)';
+          networkText.style.color = 'var(--success-color, #10b981)';
+          networkDesc.textContent = '已偵測到 Tailscale 虛擬網卡，您現在擁有 100% 的行動網路與 CGNAT 穿透率，連線將極度穩定且高速。';
+          btnFixNetwork.style.display = 'none';
+        } else if (res.has_ipv6) {
+          networkIndicator.style.backgroundColor = '#fbbf24'; // Warning color (yellow)
+          networkText.textContent = 'Good (IPv6 Available)';
+          networkText.style.color = '#fbbf24';
+          networkDesc.textContent = '已偵測到 IPv6 網路，大部份情況下能成功穿透。但若遇到純 IPv4 的嚴格行動網路，可能會降級為中繼模式。建議安裝 Tailscale 以獲取最佳體驗。';
+          btnFixNetwork.style.display = 'inline-block';
+        } else {
+          networkIndicator.style.backgroundColor = '#ef4444'; // Error color (red)
+          networkText.textContent = 'Poor (CGNAT / IPv4 Only)';
+          networkText.style.color = '#ef4444';
+          networkDesc.textContent = '您的網路環境缺乏 IPv6，且位於多重 NAT 之後。極高機率無法建立 P2P 直連，將導致畫面嚴重延遲。強烈建議立即安裝穿透工具！';
+          btnFixNetwork.style.display = 'inline-block';
+        }
+      } catch (e) {
+        console.warn('Network health check failed:', e);
+      }
+    }, 5000);
+    // 立即執行一次
+    invoke('check_network_health').catch(() => {});
   }
 
   listen('rust-ice-candidate', (event: any) => {
@@ -1650,6 +1685,43 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     payload[0] = btn;
     sendInputPacket(buildInputPacket(0x03, payload));
   });
+
+  // 特別針對 iOS WKWebView 的 touch 事件進行攔截，轉換為相對應的絕對座標與左鍵點擊
+  const handleTouchMove = (e: TouchEvent) => {
+    e.preventDefault();
+    if (e.touches.length > 0) {
+      const touch = e.touches[0];
+      const rect = videoEl.getBoundingClientRect();
+      let x = (touch.clientX - rect.left) / rect.width;
+      let y = (touch.clientY - rect.top) / rect.height;
+      x = Math.max(0, Math.min(1, x));
+      y = Math.max(0, Math.min(1, y));
+  
+      const payload = new Uint8Array(8);
+      const view = new DataView(payload.buffer);
+      view.setFloat32(0, x, false);
+      view.setFloat32(4, y, false);
+      sendInputPacket(buildInputPacket(0x01, payload));
+    }
+  };
+
+  videoEl.addEventListener("touchstart", (e) => {
+    handleTouchMove(e);
+    const payload = new Uint8Array(1);
+    payload[0] = 1; // Left click
+    sendInputPacket(buildInputPacket(0x02, payload));
+  }, { passive: false });
+
+  videoEl.addEventListener("touchmove", (e) => {
+    handleTouchMove(e);
+  }, { passive: false });
+
+  videoEl.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    const payload = new Uint8Array(1);
+    payload[0] = 1; // Left click release
+    sendInputPacket(buildInputPacket(0x03, payload));
+  }, { passive: false });
 
   // 禁用右鍵選單
   videoEl.addEventListener("contextmenu", (e) => e.preventDefault());
