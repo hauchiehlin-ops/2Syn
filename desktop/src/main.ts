@@ -413,6 +413,10 @@ function setPlaceholder(id: string, text: string) {
 
 // 獲取硬體特徵碼 (HWID)
 async function fetchHwid() {
+  if (!isTauri()) {
+    setTextContent("val-hwid", t("hwid_failed"));
+    return;
+  }
   try {
     const hwid = await invoke<string>("get_device_hwid");
     const valHwid = document.getElementById("val-hwid");
@@ -911,7 +915,8 @@ function updateConnectionStatusUI(state: string) {
 // 初始化「開始連線」按鈕事件
 // =========================================================================
 function initConnectButton() {
-  // 監聽來自 Rust 的影像擷取與編碼狀態 (例如沒有權限、編碼失敗等)
+  if (isTauri()) {
+    // 監聽來自 Rust 的影像擷取與編碼狀態 (例如沒有權限、編碼失敗等)
   listen<string>('rust-video-status', (event) => {
     console.error(`[WebRTC-Video] 影像處理發生問題: ${event.payload}`);
   });
@@ -930,6 +935,8 @@ function initConnectButton() {
       }));
     }
   });
+
+    }
 
   const btnConnect = document.getElementById("btn-connect");
   const remoteIdInput = document.getElementById("remote-id-input") as HTMLInputElement;
@@ -1061,6 +1068,11 @@ function initPrivacyMode() {
   const chkPrivacy = document.getElementById("chk-privacy-mode") as HTMLInputElement;
   if (chkPrivacy) {
     chkPrivacy.addEventListener("change", async () => {
+      if (!isTauri()) {
+        alert("Web 模式下不支援實體防窺切換");
+        chkPrivacy.checked = !chkPrivacy.checked;
+        return;
+      }
       try {
         const msg = await invoke<string>("toggle_privacy_mode", { enable: chkPrivacy.checked });
         console.log(msg);
@@ -1131,6 +1143,7 @@ function initNetworkSimulator() {
 
 // 週期性輪詢後端，獲取經過智慧連線與降級決策樹計算的即時配置
 function startStatusPolling() {
+  if (!isTauri()) return;
   setInterval(async () => {
     try {
       const status = await invoke<any>("get_connection_status");
@@ -1275,6 +1288,11 @@ function initSystemDiagnostic() {
       
       if (dnsVal) dnsVal.textContent = t("diag_status_checking");
       if (natVal) natVal.textContent = t("diag_status_checking");
+      
+      if (!isTauri()) {
+        alert("Web 模式下不支援連線診斷功能");
+        return;
+      }
       
       try {
         const result = await invoke<any>("run_connection_diagnostic");
@@ -1444,7 +1462,11 @@ function initFileTransfer() {
     alert("In a real Tauri app, we would use the absolute path of this file. PoC will simulate the transfer.");
     
     // 模擬啟動傳輸（若被封鎖會跳警告）
-    try {
+    if (!isTauri()) {
+        alert("Web 模式下不支援檔案傳輸");
+        return;
+      }
+      try {
       const taskId = await invoke<string>("send_file", { path: "/tmp/dummy_file.txt" });
       currentTransferTaskId = taskId;
       
@@ -1461,6 +1483,7 @@ function initFileTransfer() {
 
   if (btnCancel) {
     btnCancel.addEventListener("click", async () => {
+      if (!isTauri()) return;
       if (currentTransferTaskId) {
         await invoke("cancel_transfer", { taskId: currentTransferTaskId });
         currentTransferTaskId = null;
@@ -1480,6 +1503,7 @@ function startTransferPolling(taskId: string) {
   const progressContainer = document.getElementById("transfer-progress-container");
 
   transferPollingInterval = window.setInterval(async () => {
+    if (!isTauri()) return;
     try {
       const tasks = await invoke<any[]>("get_active_transfers");
       const myTask = tasks.find(t => t.task_id === taskId);
