@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 
 
@@ -946,7 +947,7 @@ function initConnectButton() {
 
   if (btnFixNetwork) {
     btnFixNetwork.addEventListener('click', () => {
-      window.open('https://tailscale.com/download/mac', '_blank');
+      open('https://tailscale.com/download');
       alert('請下載並安裝 Tailscale，登入後即可獲得無限距穿透能力！\n安裝完成後，此燈號會自動轉為綠色。');
     });
   }
@@ -1692,8 +1693,27 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (e.touches.length > 0) {
       const touch = e.touches[0];
       const rect = videoEl.getBoundingClientRect();
-      let x = (touch.clientX - rect.left) / rect.width;
-      let y = (touch.clientY - rect.top) / rect.height;
+      
+      // 計算真實的影片內容邊界 (扣除 object-fit: contain 產生的黑邊)
+      const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+      const containerRatio = rect.width / rect.height;
+      
+      let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
+      
+      if (containerRatio > videoRatio) {
+        // 左右有黑邊 (Pillarboxed)
+        renderedHeight = rect.height;
+        renderedWidth = renderedHeight * videoRatio;
+        offsetX = (rect.width - renderedWidth) / 2;
+      } else {
+        // 上下有黑邊 (Letterboxed)
+        renderedWidth = rect.width;
+        renderedHeight = renderedWidth / videoRatio;
+        offsetY = (rect.height - renderedHeight) / 2;
+      }
+
+      let x = (touch.clientX - rect.left - offsetX) / renderedWidth;
+      let y = (touch.clientY - rect.top - offsetY) / renderedHeight;
       x = Math.max(0, Math.min(1, x));
       y = Math.max(0, Math.min(1, y));
   
