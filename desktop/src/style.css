@@ -131,11 +131,12 @@ body {
     padding: 0;
   }
   .glass-container {
+    width: 100vw;
     height: 100dvh;
     border-radius: 0;
     border: none;
     box-shadow: none;
-    max-width: 100%;
+    max-width: 100vw;
   }
 }
 
@@ -279,11 +280,11 @@ body {
 
 @media (min-width: 768px) {
   .control-panel {
-    flex: 1.1;
-    overflow-y: auto;
+    flex: none;
     padding-right: 6px;
     padding-bottom: var(--space-md);
     gap: var(--space-md);
+    overflow-y: auto;
   }
 }
 
@@ -694,6 +695,23 @@ input[type="range"]::-webkit-slider-thumb:hover {
   flex-shrink: 0;
 }
 
+.control-panel {
+  width: 320px;
+  min-width: 280px;
+  max-width: 60vw;
+  flex-shrink: 0;
+  resize: horizontal;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.monitor-panel {
+  flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 .switch input {
   opacity: 0;
   width: 0;
@@ -865,8 +883,8 @@ input:checked + .slider:before {
    ========================================================================= */
 @media (min-width: 600px) and (max-width: 1023px) {
   .glass-container {
-    width: 100%;
-    max-width: 900px;
+    width: 100vw;
+    max-width: 100vw;
   }
 
   .main-content {
