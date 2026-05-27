@@ -493,6 +493,7 @@ function initAccessPin() {
 // =========================================================================
 // 信令客戶端：建立 WebSocket 連線並處理訊息路由
 // =========================================================================
+let heartbeatTimer: any = null;
 function initSignalingClient() {
   const url = getSignalingUrl();
   console.log(`[Signaling] 嘗試連線到信令伺服器: ${url}`);
@@ -502,6 +503,14 @@ function initSignalingClient() {
   signalingWs.onopen = () => {
     console.log("[Signaling] 已連線，正在登入...");
     signalingWs!.send(JSON.stringify({ type: "login", id: myId }));
+    
+    // 建立 30 秒心跳，防止 Render 負載平衡器因為閒置超過 15 分鐘而強制斷線
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
+        signalingWs.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 30000);
   };
 
   signalingWs.onmessage = async (event) => {
@@ -576,6 +585,10 @@ function initSignalingClient() {
   signalingWs.onclose = () => {
     console.warn("[Signaling] WebSocket 已斷線，5 秒後重新嘗試...");
     signalingWs = null;
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
     setTimeout(initSignalingClient, 5000);
   };
 
@@ -924,6 +937,16 @@ function initConnectButton() {
   listen<any>('rust-webrtc-state', (event) => {
     console.log(`[WebRTC-Rust] 狀態變更: ${event.payload}`);
   });
+
+  
+  const btnFixNetwork = document.getElementById('btn-fix-network');
+  if (btnFixNetwork) {
+    btnFixNetwork.addEventListener('click', () => {
+      window.open('https://tailscale.com/download/mac', '_blank');
+      // Show an alert guiding them what to do
+      alert('請下載並安裝 Tailscale，登入後即可獲得無限距穿透能力！\n安裝完成後，此燈號會自動轉為綠色。');
+    });
+  }
 
   listen('rust-ice-candidate', (event: any) => {
     console.log("[WebRTC] 攔截到 Rust 產生的 ICE Candidate, 準備透過 WebSocket 轉發");

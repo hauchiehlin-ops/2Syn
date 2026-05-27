@@ -47,6 +47,8 @@ enum SignalingMessage {
     Ice { target: String, candidate: String },
     #[serde(rename = "error")]
     Error { target: String, message: String },
+    #[serde(rename = "ping")]
+    Ping,
 }
 
 #[derive(Serialize, Debug)]
@@ -211,6 +213,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                     };
                                     let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
                                 }
+                            }
+                            SignalingMessage::Ping => {
+                                // 忽略 Ping，只為保持連線活躍
                             }
                         }
                     } else {

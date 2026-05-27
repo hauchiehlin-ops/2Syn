@@ -194,8 +194,8 @@ pub struct WebRtcSession {
 
 impl WebRtcSession {
     /// 建立全新 WebRTC PeerConnection 連線工作階段
-    /// 包含高可用性 STUN 清單，以及可選的 TURN 中繼伺服器備援
-    pub async fn create_session(custom_turn: Option<(String, String, String)>) -> Result<Self, CoreError> {
+    /// 包含高可用性 STUN 清單，完全捨棄 TURN 依賴
+    pub async fn create_session() -> Result<Self, CoreError> {
         let mut m = MediaEngine::default();
         m.register_default_codecs()
             .map_err(|e| CoreError::NetworkError(format!("註冊預設編解碼器失敗: {}", e)))?;
@@ -205,7 +205,7 @@ impl WebRtcSession {
             .build();
 
         // 高可用性 STUN 備援清單
-        let mut ice_servers = vec![
+        let ice_servers = vec![
             RTCIceServer {
                 urls: vec![
                     "stun:stun.l.google.com:19302".to_string(),
@@ -215,17 +215,6 @@ impl WebRtcSession {
                 ..Default::default()
             }
         ];
-
-        // 注入 TURN 伺服器（若外網環境為 Symmetric NAT，強制走中繼流量）
-        if let Some((url, username, credential)) = custom_turn {
-            ice_servers.push(RTCIceServer {
-                urls: vec![url],
-                username,
-                credential,
-                credential_type: RTCIceCredentialType::Password,
-                ..Default::default()
-            });
-        }
 
         let config = RTCConfiguration {
             ice_servers,

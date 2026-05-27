@@ -169,23 +169,7 @@ async fn unplug_virtual_monitor(index: u32) -> Result<String, String> {
 #[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn generate_local_sdp_offer() -> Result<String, String> {
-    // 未來產品化時，若發現 STUN 失敗，可動態傳入 TURN 憑證
-    // 這裡我們設計為讀取環境變數作為預留擴充點
-    let custom_turn = if let (Ok(url), Ok(user), Ok(pass)) = (
-        std::env::var("TURN_URL"),
-        std::env::var("TURN_USER"),
-        std::env::var("TURN_PASS"),
-    ) {
-        Some((url, user, pass))
-    } else {
-        Some((
-            "turn:openrelay.metered.ca:80".to_string(),
-            "openrelayproject".to_string(),
-            "openrelayproject".to_string(),
-        ))
-    };
-
-    let session = syn_core::connection::WebRtcSession::create_session(custom_turn)
+    let session = syn_core::connection::WebRtcSession::create_session()
         .await
         .map_err(|e| e.to_string())?;
         
@@ -209,11 +193,7 @@ async fn generate_local_sdp_offer() -> Result<String, String> {
 async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: String) -> Result<String, String> {
     use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
-    let session = syn_core::connection::WebRtcSession::create_session(Some((
-        "turn:openrelay.metered.ca:80".to_string(),
-        "openrelayproject".to_string(),
-        "openrelayproject".to_string(),
-    )))
+    let session = syn_core::connection::WebRtcSession::create_session()
         .await
         .map_err(|e| e.to_string())?;
 
@@ -351,6 +331,26 @@ async fn get_connection_status(state: State<'_, AppState>) -> Result<serde_json:
         "rtt_ms": metrics.rtt_ms,
         "packet_loss_rate": metrics.packet_loss_rate,
         "connection_type": conn_type_str,
+    }))
+}
+
+
+/// 檢查本機網路體質 (IPv6 與 Tailscale)
+#[tauri::command]
+async fn check_network_health() -> Result<serde_json::Value, String> {
+    let output = std::process::Command::new("ifconfig").output().map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    
+    // IPv6 通常會包含 inet6 且不只是 ::1 (loopback) 或是 fe80 (link-local)
+    // 為了簡化，只要有 inet6 且不是只有 loopback，就當作有 IPv6 支援
+    let has_ipv6 = stdout.contains("inet6") && stdout.lines().any(|l| l.contains("inet6") && !l.contains("::1") && !l.contains("fe80::"));
+    
+    // 尋找 utun 或 100. 開頭的 Tailscale 虛擬網段 IP
+    let has_tailscale = stdout.lines().any(|l| l.contains("100.") || l.contains("fd7a:115c:a1e0:"));
+
+    Ok(serde_json::json!({
+        "has_ipv6": has_ipv6,
+        "has_tailscale": has_tailscale
     }))
 }
 
@@ -525,6 +525,7 @@ pub fn run() {
             #[cfg(not(target_os = "ios"))]
             get_connection_status,
             #[cfg(not(target_os = "ios"))]
+            check_network_health,
             run_connection_diagnostic,
             #[cfg(not(target_os = "ios"))]
             trigger_network_simulation,
