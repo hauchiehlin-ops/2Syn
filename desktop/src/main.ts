@@ -1,5 +1,33 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
+
+// --- Debug Console Interceptor ---
+(function() {
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  
+  function appendLog(color: string, args: any[]) {
+    originalLog.apply(console, args);
+    // Ensure this runs only in browser context (when DOM is available)
+    if (typeof document !== 'undefined') {
+      const overlay = document.getElementById('debug-overlay');
+      if (!overlay) return;
+      const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      const line = document.createElement('div');
+      line.style.color = color;
+      line.textContent = `[${new Date().toISOString().split('T')[1].slice(0,-1)}] ${msg}`;
+      overlay.appendChild(line);
+      overlay.scrollTop = overlay.scrollHeight;
+    }
+  }
+  
+  console.log = (...args) => appendLog('#0f0', args);
+  console.warn = (...args) => appendLog('#ff0', args);
+  console.error = (...args) => appendLog('#f00', args);
+})();
+// ---------------------------------
+
 // =========================================================================
 // WebRTC 信令與 P2P 連線全域狀態
 // =========================================================================
@@ -440,10 +468,11 @@ function initSignalingClient() {
         break;
       case "ice":
         // 收到遠端 ICE Candidate
-        if (msg.candidate) {
+        if (msg.candidate !== undefined) {
           if (peerConnection && peerConnection.remoteDescription) {
             try {
-              await peerConnection.addIceCandidate(JSON.parse(msg.candidate));
+              const candidateObj = JSON.parse(msg.candidate);
+              await peerConnection.addIceCandidate(candidateObj);
             } catch (e) {
               console.warn("[WebRTC] 無法加入 ICE Candidate:", e);
             }
@@ -458,7 +487,7 @@ function initSignalingClient() {
         if (msg.message === "Target offline") {
           alert(t("err_target_offline") || "對方不在線上，請確認設備 ID 是否正確。");
           resetConnectionUI();
-        } else if (msg.message === "Connection rejected") {
+        } else if (msg.message.includes("Connection rejected")) {
           alert("連線被拒絕：PIN 碼錯誤或對方拒絕連線。");
           resetConnectionUI();
         }
@@ -507,9 +536,27 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
   currentRemoteId = remoteId;
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
-  // 當 ICE Candidate 產生時，轉發給信令伺服器
+  // --- WebRTC State Debug Listeners ---
+  pc.oniceconnectionstatechange = () => {
+    console.log(`[WebRTC] ICE Connection State: ${pc.iceConnectionState}`);
+  };
+  pc.onconnectionstatechange = () => {
+    console.log(`[WebRTC] Connection State: ${pc.connectionState}`);
+  };
+  pc.onicegatheringstatechange = () => {
+    console.log(`[WebRTC] ICE Gathering State: ${pc.iceGatheringState}`);
+  };
+  pc.onsignalingstatechange = () => {
+    console.log(`[WebRTC] Signaling State: ${pc.signalingState}`);
+  };
+  pc.onnegotiationneeded = () => {
+    console.log(`[WebRTC] Negotiation Needed`);
+  };
+  // ------------------------------------
+
+  // 當 ICE Candidate 產生時，轉發給信令伺服器（包含 end-of-candidates）
   pc.onicecandidate = (event) => {
-    if (event.candidate && signalingWs?.readyState === WebSocket.OPEN) {
+    if (signalingWs?.readyState === WebSocket.OPEN) {
       signalingWs.send(JSON.stringify({
         type: "ice",
         target: remoteId,
