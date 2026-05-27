@@ -7,13 +7,20 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
   const originalWarn = console.warn;
   const originalError = console.error;
   
+  function formatArg(a: any) {
+    if (a instanceof Error) {
+      return `${a.name}: ${a.message}\n${a.stack}`;
+    }
+    return typeof a === 'object' ? JSON.stringify(a) : String(a);
+  }
+
   function appendLog(color: string, args: any[]) {
     originalLog.apply(console, args);
     // Ensure this runs only in browser context (when DOM is available)
     if (typeof document !== 'undefined') {
       const overlay = document.getElementById('debug-overlay');
       if (!overlay) return;
-      const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      const msg = args.map(formatArg).join(' ');
       const line = document.createElement('div');
       line.style.color = color;
       line.textContent = `[${new Date().toISOString().split('T')[1].slice(0,-1)}] ${msg}`;
@@ -461,9 +468,13 @@ function initSignalingClient() {
       case "answer":
         // 收到遠端回傳的 Answer
         if (peerConnection) {
-          await peerConnection.setRemoteDescription({ type: "answer", sdp: msg.sdp });
-          console.log("[WebRTC] 遠端 Answer 已套用，ICE 協商中...");
-          flushIceCandidateQueue();
+          try {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: msg.sdp }));
+            console.log("[WebRTC] 遠端 Answer 已套用，ICE 協商中...");
+            flushIceCandidateQueue();
+          } catch (e) {
+            console.error("[WebRTC] 處理 Answer 失敗:", e);
+          }
         }
         break;
       case "ice":
@@ -673,7 +684,7 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
     const pc = createPeerConnection(sourceId);
     peerConnection = pc;
 
-    await pc.setRemoteDescription({ type: "offer", sdp: sdpString });
+    await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: sdpString }));
 
     // 遠端 Offer 套用後，即可處理在等待期間收到的 ICE candidates
     flushIceCandidateQueue();
