@@ -63,17 +63,17 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
   { urls: ["stun:stun.cloudflare.com:3478"] },
   {
-    urls: "turn:openrelay.metered.ca:80",
+    urls: ["turn:openrelay.metered.ca:80"],
     username: "openrelayproject",
     credential: "openrelayproject"
   },
   {
-    urls: "turn:openrelay.metered.ca:443",
+    urls: ["turn:openrelay.metered.ca:443"],
     username: "openrelayproject",
     credential: "openrelayproject"
   },
   {
-    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+    urls: ["turn:openrelay.metered.ca:443?transport=tcp"],
     username: "openrelayproject",
     credential: "openrelayproject"
   }
@@ -595,32 +595,38 @@ async function startCall(remoteId: string, pin: string) {
     return;
   }
 
-  const pc = createPeerConnection(remoteId);
-  peerConnection = pc;
+  try {
+    const pc = createPeerConnection(remoteId);
+    peerConnection = pc;
 
-  // 主動端建立 Data Channels
-  dataChannelControl = pc.createDataChannel("input-control", {
-    ordered: true,
-    maxRetransmits: 0, // 低延遲，不重傳
-  });
-  bindControlChannel(dataChannelControl);
+    // 主動端建立 Data Channels
+    dataChannelControl = pc.createDataChannel("input-control", {
+      ordered: true,
+      maxRetransmits: 0, // 低延遲，不重傳
+    });
+    bindControlChannel(dataChannelControl);
 
-  dataChannelFile = pc.createDataChannel("file-transfer", {
-    ordered: true,    // 可靠傳輸，確保檔案完整
-  });
-  bindFileChannel(dataChannelFile);
+    dataChannelFile = pc.createDataChannel("file-transfer", {
+      ordered: true,    // 可靠傳輸，確保檔案完整
+    });
+    bindFileChannel(dataChannelFile);
 
-  // 產生 SDP Offer
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+    // 產生 SDP Offer
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
 
-  // 透過信令伺服器轉發 Offer（含 PIN）
-  signalingWs.send(JSON.stringify({
-    type: "offer",
-    target: remoteId,
-    pin: pin,
-    sdp: offer.sdp,
-  }));
+    // 透過信令伺服器轉發 Offer（含 PIN）
+    signalingWs.send(JSON.stringify({
+      type: "offer",
+      target: remoteId,
+      pin: pin,
+      sdp: offer.sdp,
+    }));
+  } catch (e) {
+    console.error("[WebRTC] startCall 嚴重錯誤:", e);
+    alert("建立連線失敗：" + String(e));
+    resetConnectionUI();
+  }
 
   console.log(`[WebRTC] Offer 已發送至 ${remoteId}`);
 }
