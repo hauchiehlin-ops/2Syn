@@ -669,26 +669,31 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
     return;
   }
 
-  const pc = createPeerConnection(sourceId);
-  peerConnection = pc;
+  try {
+    const pc = createPeerConnection(sourceId);
+    peerConnection = pc;
 
-  await pc.setRemoteDescription({ type: "offer", sdp: sdpString });
+    await pc.setRemoteDescription({ type: "offer", sdp: sdpString });
 
-  // 遠端 Offer 套用後，即可處理在等待期間收到的 ICE candidates
-  flushIceCandidateQueue();
+    // 遠端 Offer 套用後，即可處理在等待期間收到的 ICE candidates
+    flushIceCandidateQueue();
 
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
 
-  // 回傳 Answer 給發起方
-  if (signalingWs?.readyState === WebSocket.OPEN) {
-    signalingWs.send(JSON.stringify({
-      type: "answer",
-      target: sourceId,
-      sdp: answer.sdp,
-    }));
+    // 回傳 Answer 給發起方
+    if (signalingWs?.readyState === WebSocket.OPEN) {
+      signalingWs.send(JSON.stringify({
+        type: "answer",
+        target: sourceId,
+        sdp: answer.sdp,
+      }));
+    }
+    console.log(`[WebRTC] Answer 已回傳給 ${sourceId}`);
+  } catch (e) {
+    console.error("[WebRTC] handleIncomingOffer 發生嚴重錯誤:", e);
+    alert("處理遠端連線要求時發生錯誤：" + String(e));
   }
-  console.log(`[WebRTC] Answer 已回傳給 ${sourceId}`);
 }
 
 // 控制通道（滑鼠鍵盤）綁定：收到遠端控制指令交由 Rust 執行
