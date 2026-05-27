@@ -45,6 +45,11 @@
   -webkit-font-smoothing: antialiased;
 }
 
+input, textarea {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
 html, body {
   height: 100%;
   width: 100%;

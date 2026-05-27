@@ -199,14 +199,14 @@ impl InputEvent {
             let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
                 .map_err(|_| CoreError::SystemError("無法建立 CGEventSource".to_string()))?;
 
-            // 為了簡化，在 macOS 上我們需要將比例座標 (0.0 ~ 1.0) 對應到主螢幕的像素尺寸上。
-            // 此處暫設為常規 Full HD 解析度 1920x1080 進行比例運算，實務上可動態獲取螢幕解析度。
-            let screen_w = 1920.0;
-            let screen_h = 1080.0;
+            // 動態獲取 Mac 主螢幕解析度物理邊界，避免 Retina 螢幕或不同螢幕比例下的座標漂移失真
+            let bounds = core_graphics::display::CGDisplay::main().bounds();
+            let screen_w = bounds.size.width;
+            let screen_h = bounds.size.height;
 
             match self {
                 InputEvent::MouseMove { x, y } => {
-                    let point = core_graphics::geometry::CGPoint::new((*x * screen_w) as f64, (*y * screen_h) as f64);
+                    let point = core_graphics::geometry::CGPoint::new((*x as f64 * screen_w), (*y as f64 * screen_h));
                     let event = CGEvent::new_mouse_event(
                         source,
                         CGEventType::MouseMoved,

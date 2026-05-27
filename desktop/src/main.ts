@@ -1725,22 +1725,88 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
   };
 
+  let currentZoom = 1;
+  let currentPanX = 0;
+  let currentPanY = 0;
+  let initialPinchDistance = -1;
+  let initialZoom = 1;
+  let lastTouchX = 0;
+  let lastTouchY = 0;
+
+  function getPinchDistance(touches: TouchList) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function updateVideoTransform() {
+    videoEl.style.transform = `translate(${currentPanX}px, ${currentPanY}px) scale(${currentZoom})`;
+  }
+
   videoEl.addEventListener("touchstart", (e) => {
-    handleTouchMove(e);
-    const payload = new Uint8Array(1);
-    payload[0] = 1; // Left click
-    sendInputPacket(buildInputPacket(0x02, payload));
+    e.preventDefault();
+    if (e.touches.length === 2) {
+      initialPinchDistance = getPinchDistance(e.touches);
+      initialZoom = currentZoom;
+      lastTouchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      lastTouchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    } else if (e.touches.length === 1) {
+      handleTouchMove(e);
+      const payload = new Uint8Array(1);
+      payload[0] = 1; // Left click
+      sendInputPacket(buildInputPacket(0x02, payload));
+    }
   }, { passive: false });
 
   videoEl.addEventListener("touchmove", (e) => {
-    handleTouchMove(e);
+    e.preventDefault();
+    if (e.touches.length === 2) {
+      // 雙指縮放與平移
+      const currentDistance = getPinchDistance(e.touches);
+      if (initialPinchDistance > 0) {
+        currentZoom = Math.max(1, Math.min(5, initialZoom * (currentDistance / initialPinchDistance)));
+      }
+      
+      const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      
+      if (lastTouchX !== 0 && lastTouchY !== 0) {
+        currentPanX += (centerX - lastTouchX);
+        currentPanY += (centerY - lastTouchY);
+      }
+      
+      lastTouchX = centerX;
+      lastTouchY = centerY;
+      
+      const rect = videoEl.getBoundingClientRect();
+      // 限制平移範圍，不讓畫面跑出界外太多
+      const maxPanX = (rect.width * currentZoom - rect.width) / 2;
+      const maxPanY = (rect.height * currentZoom - rect.height) / 2;
+      currentPanX = Math.max(-maxPanX, Math.min(maxPanX, currentPanX));
+      currentPanY = Math.max(-maxPanY, Math.min(maxPanY, currentPanY));
+      
+      updateVideoTransform();
+    } else if (e.touches.length === 1) {
+      // 單指控制滑鼠
+      handleTouchMove(e);
+    }
   }, { passive: false });
 
   videoEl.addEventListener("touchend", (e) => {
     e.preventDefault();
-    const payload = new Uint8Array(1);
-    payload[0] = 1; // Left click release
-    sendInputPacket(buildInputPacket(0x03, payload));
+    if (e.touches.length === 0) {
+      initialPinchDistance = -1;
+      lastTouchX = 0;
+      lastTouchY = 0;
+      const payload = new Uint8Array(1);
+      payload[0] = 1; // Left click release
+      sendInputPacket(buildInputPacket(0x03, payload));
+    } else if (e.touches.length === 1) {
+      // 雙指放開一指，重新設定單指位置避免跳躍
+      initialPinchDistance = -1;
+      lastTouchX = 0;
+      lastTouchY = 0;
+    }
   }, { passive: false });
 
   // 禁用右鍵選單
