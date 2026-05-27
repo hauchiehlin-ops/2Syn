@@ -9,6 +9,7 @@ use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::data_channel::RTCDataChannel;
+use webrtc::ice_transport::ice_credential_type::RTCIceCredentialType;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
@@ -221,7 +222,7 @@ impl WebRtcSession {
                 urls: vec![url],
                 username,
                 credential,
-                // credential_type: RTCIceCredentialType::Password (default)
+                credential_type: RTCIceCredentialType::Password,
                 ..Default::default()
             });
         }

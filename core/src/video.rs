@@ -80,7 +80,7 @@ impl VideoStreamer {
         })
     }
 
-    pub async fn start_capture_loop(&self) {
+    pub async fn start_capture_loop(&self, status_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>) {
         let monitors = Monitor::all().unwrap_or_default();
         if monitors.is_empty() {
             eprintln!("[Video] 無法找到顯示器");
@@ -153,13 +153,28 @@ impl VideoStreamer {
                             Ok(encoded) => {
                                 let data = encoded.to_vec();
                                 if !data.is_empty() {
-                                    if let Err(e) = tx.try_send(data) {
+                                    if frame_count % 30 == 1 {
+                                        println!("[Video] Encoded frame size: {} bytes", data.len());
+                                    }
+                                    if let Err(_e) = tx.try_send(data) {
                                         // 可以在這裡加入除錯訊息，表示網路擁塞導致掉幀
                                     }
                                 }
                             }
-                            Err(e) => eprintln!("[Video] H.264 Encoding failed: {:?}", e),
+                            Err(e) => {
+                                let msg = format!("H.264 Encoding failed: {:?}", e);
+                                eprintln!("[Video] {}", msg);
+                                if let Some(tx) = &status_tx {
+                                    let _ = tx.send(msg);
+                                }
+                            }
                         }
+                    }
+                } else if let Err(err) = monitor_clone.capture_image() {
+                    let msg = format!("Screen capture failed (Missing permissions?): {:?}", err);
+                    eprintln!("[Video] {}", msg);
+                    if let Some(tx) = &status_tx {
+                        let _ = tx.send(msg);
                     }
                 }
 

@@ -261,63 +261,13 @@ body {
 }
 
 /* =========================================================================
-   右側面板 (Collapsible Sidebar)
+   右側面板
    ========================================================================= */
 .monitor-panel {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
-  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.3s, width 0.3s;
-  /* 行動端預設是 Off-canvas 側邊欄 */
-  position: fixed;
-  top: 0;
-  right: 0;
-  height: 100%;
-  width: 85%;
-  max-width: 380px;
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(25px);
-  -webkit-backdrop-filter: blur(25px);
-  z-index: 9999;
-  padding: calc(var(--space-md) + 44px) var(--space-md) var(--space-md) var(--space-md);
-  box-shadow: -5px 0 30px rgba(0,0,0,0.1);
-  transform: translateX(100%);
-  opacity: 0;
-  pointer-events: none;
-  overflow-y: auto;
-}
-
-.monitor-panel.panel-open {
-  transform: translateX(0);
-  opacity: 1;
-  pointer-events: auto;
-}
-
-@media (min-width: 1024px) {
-  .monitor-panel {
-    /* 桌面端也改為右側滑出的 Drawer，絕對定位於 glass-container */
-    position: absolute;
-    top: 0;
-    right: 0;
-    height: 100%;
-    width: 380px;
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(25px);
-    -webkit-backdrop-filter: blur(25px);
-    box-shadow: -10px 0 30px rgba(0,0,0,0.1);
-    padding: calc(var(--space-lg) + 44px) var(--space-lg) var(--space-lg) var(--space-lg);
-    transform: translateX(100%);
-    opacity: 0;
-    pointer-events: none;
-    overflow-y: auto;
-    z-index: 100;
-  }
-  .monitor-panel.panel-open {
-    transform: translateX(0);
-    opacity: 1;
-    pointer-events: auto;
-    animation: slideInRight 0.3s forwards;
-  }
+  flex: 1;
 }
 
 @keyframes slideInRight {
@@ -787,22 +737,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   flex-shrink: 0;
 }
 
-.control-panel {
-  width: 320px;
-  min-width: 280px;
-  max-width: 60vw;
-  flex-shrink: 0;
-  resize: horizontal;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-.monitor-panel {
-  flex: 1;
-  min-width: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
 
 .switch input {
   opacity: 0;
@@ -994,7 +928,9 @@ input:checked + .slider:before {
   }
 
   .control-panel {
+    width: 360px;
     min-width: 320px;
+    flex-shrink: 0;
   }
 
   /* 桌面端恢復原本行高 */

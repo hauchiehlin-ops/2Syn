@@ -43,6 +43,9 @@ function showToast(message: string, duration: number = 3000) {
       line.style.color = color;
       line.textContent = `[${new Date().toISOString().split('T')[1].slice(0,-1)}] ${msg}`;
       overlay.appendChild(line);
+      while (overlay.children.length > 100) {
+        overlay.removeChild(overlay.firstChild!);
+      }
       overlay.scrollTop = overlay.scrollHeight;
 
       // 如果是 Error，且畫面上有 toast-container，則彈出提示
@@ -91,10 +94,20 @@ function getSignalingUrl(): string {
   return OFFICIAL_SIGNALING_SERVER;
 }
 
-// STUN 伺服器清單（已移除 TURN 伺服器以節省營運流量成本）
+// STUN 與 TURN 伺服器清單（已恢復 TURN 備援機制，確保極端網路環境下的高可用性）
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-  { urls: ["stun:stun.cloudflare.com:3478"] }
+  { urls: ["stun:stun.cloudflare.com:3478"] },
+  {
+    urls: ["turn:openrelay.metered.ca:80"],
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  },
+  {
+    urls: ["turn:openrelay.metered.ca:443"],
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  }
 ];
 
 // 宣告語系翻譯字典快取
@@ -846,7 +859,22 @@ function resetConnectionUI() {
   const btnConnect = document.getElementById("btn-connect");
   const btnText = document.getElementById("txt-btn-connect");
   if (btnConnect) btnConnect.removeAttribute("disabled");
-  if (btnText) btnText.textContent = t("btn_connect");
+  if (btnText) btnText.textContent = t("btn_connect") || "Connect";
+
+  const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
+  const mainContent = document.querySelector(".glass-container") as HTMLElement;
+  const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
+  
+  if (videoEl) {
+    videoEl.style.display = "none";
+    videoEl.srcObject = null;
+  }
+  if (mainContent) {
+    mainContent.style.display = "flex";
+  }
+  if (btnKeyboard) {
+    btnKeyboard.style.display = "none";
+  }
 }
 
 // 依照 WebRTC connectionState 更新 UI 提示
@@ -874,6 +902,8 @@ function updateConnectionStatusUI(state: string) {
   if (state === "failed") {
     alert(t("err_rtc_failed") || "P2P 連線失敗。\n請確認雙方均已啟動 2syn，且防火牆允許 UDP 流量。");
     resetConnectionUI();
+  } else if (state === "disconnected" || state === "closed") {
+    resetConnectionUI();
   }
 }
 
@@ -881,6 +911,15 @@ function updateConnectionStatusUI(state: string) {
 // 初始化「開始連線」按鈕事件
 // =========================================================================
 function initConnectButton() {
+  // 監聽來自 Rust 的影像擷取與編碼狀態 (例如沒有權限、編碼失敗等)
+  listen<string>('rust-video-status', (event) => {
+    console.error(`[WebRTC-Video] 影像處理發生問題: ${event.payload}`);
+  });
+
+  listen<any>('rust-webrtc-state', (event) => {
+    console.log(`[WebRTC-Rust] 狀態變更: ${event.payload}`);
+  });
+
   listen('rust-ice-candidate', (event: any) => {
     console.log("[WebRTC] 攔截到 Rust 產生的 ICE Candidate, 準備透過 WebSocket 轉發");
     if (signalingWs && signalingWs.readyState === WebSocket.OPEN && currentRemoteId) {

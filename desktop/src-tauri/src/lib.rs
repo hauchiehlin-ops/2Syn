@@ -178,7 +178,11 @@ async fn generate_local_sdp_offer() -> Result<String, String> {
     ) {
         Some((url, user, pass))
     } else {
-        None
+        Some((
+            "turn:openrelay.metered.ca:80".to_string(),
+            "openrelayproject".to_string(),
+            "openrelayproject".to_string(),
+        ))
     };
 
     let session = syn_core::connection::WebRtcSession::create_session(custom_turn)
@@ -205,14 +209,27 @@ async fn generate_local_sdp_offer() -> Result<String, String> {
 async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: String) -> Result<String, String> {
     use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
-    let session = syn_core::connection::WebRtcSession::create_session(None)
+    let session = syn_core::connection::WebRtcSession::create_session(Some((
+        "turn:openrelay.metered.ca:80".to_string(),
+        "openrelayproject".to_string(),
+        "openrelayproject".to_string(),
+    )))
         .await
         .map_err(|e| e.to_string())?;
 
     // 加入視訊軌道並啟動擷取迴圈
     let video_track = session.add_video_track().await.map_err(|e| e.to_string())?;
     let streamer = syn_core::video::VideoStreamer::new(video_track).map_err(|e| e.to_string())?;
-    streamer.start_capture_loop().await;
+    
+    let (status_tx, mut status_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let app_clone_status = app_handle.clone();
+    tokio::spawn(async move {
+        while let Some(msg) = status_rx.recv().await {
+            let _ = app_clone_status.emit("rust-video-status", msg);
+        }
+    });
+
+    streamer.start_capture_loop(Some(status_tx)).await;
 
     let pc = session.get_peer_connection();
     
@@ -224,6 +241,12 @@ async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: St
                 let _ = app_clone.emit("rust-ice-candidate", json);
             }
         }
+        Box::pin(async {})
+    }));
+
+    let app_clone2 = app_handle.clone();
+    pc.on_peer_connection_state_change(Box::new(move |state: webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState| {
+        let _ = app_clone2.emit("rust-webrtc-state", state.to_string());
         Box::pin(async {})
     }));
 
@@ -349,27 +372,16 @@ async fn run_connection_diagnostic() -> Result<serde_json::Value, String> {
 /// 切換網路模擬狀態
 #[cfg(not(target_os = "ios"))]
 #[tauri::command]
-async fn trigger_network_simulation(state: State<'_, AppState>, mode: String) -> Result<String, String> {
-    println!("[DEBUG] 收到網路模擬請求: {}", mode);
+async fn trigger_network_simulation(state: State<'_, AppState>, rtt_ms: u32, loss_rate: f32, is_relay: bool) -> Result<String, String> {
+    println!("[DEBUG] 收到網路模擬請求: {} ms, {}%, relay: {}", rtt_ms, loss_rate, is_relay);
     let mut metrics = state.connection_manager.get_current_metrics().await;
     
-    match mode.as_str() {
-        "good" => {
-            metrics.rtt_ms = 10;
-            metrics.packet_loss_rate = 0.0;
-            metrics.connection_type = ConnectionType::P2PDirect;
-        },
-        "poor" => {
-            metrics.rtt_ms = 180;
-            metrics.packet_loss_rate = 0.1;
-            metrics.connection_type = ConnectionType::P2PDirect;
-        },
-        "relay" => {
-            metrics.rtt_ms = 80;
-            metrics.packet_loss_rate = 0.02;
-            metrics.connection_type = ConnectionType::Relay;
-        },
-        _ => {}
+    metrics.rtt_ms = rtt_ms;
+    metrics.packet_loss_rate = loss_rate;
+    if is_relay {
+        metrics.connection_type = syn_core::connection::ConnectionType::Relay;
+    } else {
+        metrics.connection_type = syn_core::connection::ConnectionType::P2PDirect;
     }
     
     state.connection_manager.update_metrics(metrics).await;

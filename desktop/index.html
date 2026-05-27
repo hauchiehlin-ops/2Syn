@@ -15,6 +15,10 @@
 
 </head>
 <body>
+  <!-- Remote Video View (Hidden until connected) -->
+  <video id="remote-video" autoplay playsinline style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: contain; z-index: 100; background: #000;"></video>
+  <button id="btn-mobile-keyboard" style="display: none; position: fixed; bottom: 20px; right: 20px; z-index: 110; background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.4); border-radius: 50%; width: 50px; height: 50px; font-size: 24px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;">⌨️</button>
+
   <!-- 景深霓虹背景光暈球 -->
   <div class="orb orb-1"></div>
   <div class="orb orb-2"></div>
@@ -137,7 +141,6 @@
             <span id="license-status" class="status-badge status-inactive">Unauthorized</span>
           </div>
         </div>
-        </div>
 
         <div class="separator"></div>
 
@@ -177,7 +180,7 @@
       </section>
 
       <!-- 右側監控與測試面板 -->
-      <section class="monitor-panel">
+      <section class="monitor-panel" id="advanced-panel">
         
         <!-- 即時狀態面板 -->
         <div class="status-panel glass-panel">
@@ -284,6 +287,14 @@
           </div>
         </div>
 
+
+
+        <!-- System Debug Console (Moved inside monitor-panel) -->
+        <div class="diagnostic-panel glass-panel" style="flex: none; min-height: 250px; display: flex; flex-direction: column; overflow: hidden;">
+          <h2 style="margin-bottom: 8px;">System Logs</h2>
+          <div id="debug-overlay" style="flex: 1; background: rgba(0,0,0,0.85); color: #0f0; font-family: monospace; font-size: 10px; overflow-y: auto; padding: 8px; border-radius: 6px; display: flex; flex-direction: column; gap: 2px;"></div>
+        </div>
+
         <!-- 自我診斷面板 -->
         <div class="diagnostic-panel glass-panel">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
@@ -308,9 +319,6 @@
 
     </main>
   </div>
-
-  <!-- On-Screen Debug Console for iOS/Mac WebRTC troubleshooting -->
-  <div id="debug-overlay" style="position: fixed; bottom: 0; left: 0; right: 0; height: 25vh; background: rgba(0,0,0,0.85); color: #0f0; font-family: monospace; font-size: 10px; overflow-y: auto; z-index: 9999; padding: 8px; pointer-events: auto; display: flex; flex-direction: column; gap: 2px;"></div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>
