@@ -5,6 +5,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 // =========================================================================
 let signalingWs: WebSocket | null = null;
 let peerConnection: RTCPeerConnection | null = null;
+let iceCandidateQueue: any[] = [];
 let dataChannelControl: RTCDataChannel | null = null;
 let dataChannelFile: RTCDataChannel | null = null;
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
@@ -22,27 +23,32 @@ function getSignalingUrl(): string {
     return (window as any).__SIGNALING_URL__;
   }
   
-  // 2. 判斷是否為開發環境 (如果 hostname 是 localhost 相關)
-  const hostname = window.location.hostname;
-  if (hostname === "tauri.localhost" || hostname === "asset.localhost") {
-    // 手機/跨裝置開發模式：回退至開發機 IP (需根據實際狀況修改)
-    return `ws://192.168.68.50:8080/ws`;
-  }
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "") {
-    // 本機開發模式
-    return `ws://127.0.0.1:8080/ws`;
-  }
-
-  // 3. 正式環境 (Production)：強制使用官方去中心化/中心化信令伺服器
+  // 2. 在 Tauri 中，無論開發或正式環境，window.location.hostname 通常都是 localhost 或 tauri.localhost
+  // 為了確保 iOS 與 Mac mini 能夠順利連線，直接回傳公開部署的信令伺服器網址
   return OFFICIAL_SIGNALING_SERVER;
 }
 
-// STUN 伺服器清單（Google + Cloudflare 雙備援，全球免費可用）
-// 【強制關閉 TURN 中繼】：這裡刻意不加入 turn: 開頭的伺服器，
-// 確保所有的 P2P 連線若無法直連就會直接失敗，藉此保證官方伺服器「零頻寬成本」。
+// STUN/TURN 伺服器清單（新增免費 TURN 中繼測試連線瓶頸）
+// 【注意】：由於目前的網路環境可能存在 NAT Hairpinning 限制、AP 隔離或蘋果 mDNS 遮蔽問題，
+// 這裡暫時加入一個免費的 TURN 伺服器 (openrelay.metered.ca) 以測試是否能繞過網路限制。
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
   { urls: ["stun:stun.cloudflare.com:3478"] },
+  {
+    urls: "turn:openrelay.metered.ca:80",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  },
+  {
+    urls: "turn:openrelay.metered.ca:443",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  },
+  {
+    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  }
 ];
 
 // 宣告語系翻譯字典快取
@@ -429,15 +435,21 @@ function initSignalingClient() {
         if (peerConnection) {
           await peerConnection.setRemoteDescription({ type: "answer", sdp: msg.sdp });
           console.log("[WebRTC] 遠端 Answer 已套用，ICE 協商中...");
+          flushIceCandidateQueue();
         }
         break;
       case "ice":
         // 收到遠端 ICE Candidate
-        if (peerConnection && msg.candidate) {
-          try {
-            await peerConnection.addIceCandidate(JSON.parse(msg.candidate));
-          } catch (e) {
-            console.warn("[WebRTC] 無法加入 ICE Candidate:", e);
+        if (msg.candidate) {
+          if (peerConnection && peerConnection.remoteDescription) {
+            try {
+              await peerConnection.addIceCandidate(JSON.parse(msg.candidate));
+            } catch (e) {
+              console.warn("[WebRTC] 無法加入 ICE Candidate:", e);
+            }
+          } else {
+            // peerConnection 尚未就緒或 remoteDescription 尚未設定，先加入佇列避免遺失
+            iceCandidateQueue.push(JSON.parse(msg.candidate));
           }
         }
         break;
@@ -468,6 +480,20 @@ function initSignalingClient() {
 // =========================================================================
 // WebRTC：建立 PeerConnection 並掛載 Data Channels
 // =========================================================================
+
+async function flushIceCandidateQueue() {
+  if (peerConnection && peerConnection.remoteDescription) {
+    while (iceCandidateQueue.length > 0) {
+      const candidate = iceCandidateQueue.shift();
+      try {
+        await peerConnection.addIceCandidate(candidate);
+      } catch (e) {
+        console.warn("[WebRTC] 從佇列加入 ICE Candidate 失敗:", e);
+      }
+    }
+  }
+}
+
 function createPeerConnection(remoteId: string): RTCPeerConnection {
   // 若已有舊連線，先關閉
   if (peerConnection) {
@@ -475,6 +501,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
     peerConnection = null;
     dataChannelControl = null;
     dataChannelFile = null;
+    iceCandidateQueue = [];
   }
 
   currentRemoteId = remoteId;
@@ -593,6 +620,9 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
   peerConnection = pc;
 
   await pc.setRemoteDescription({ type: "offer", sdp: sdpString });
+
+  // 遠端 Offer 套用後，即可處理在等待期間收到的 ICE candidates
+  flushIceCandidateQueue();
 
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);

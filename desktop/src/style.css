@@ -26,12 +26,12 @@
   --border-radius-lg: 16px;
   --border-radius-md: 8px;
 
-  /* 響應式間距 Token */
-  --space-xs: 8px;
-  --space-sm: 12px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 32px;
+  /* 響應式間距 Token (緊湊化以符合 700px 高度與手機螢幕) */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
 }
 
 /* =========================================================================
@@ -155,7 +155,7 @@ body {
    頂部 Header
    ========================================================================= */
 .app-header {
-  height: 56px;
+  height: 44px;
   padding: 0 var(--space-md);
   display: flex;
   justify-content: space-between;
@@ -166,7 +166,7 @@ body {
 
 @media (min-width: 600px) {
   .app-header {
-    height: 60px;
+    height: 50px;
     padding: 0 var(--space-lg);
   }
 }
@@ -237,7 +237,8 @@ body {
   flex-direction: column;
   padding: var(--space-md);
   gap: var(--space-md);
-  overflow: visible;
+  overflow-y: auto; /* Ensure scrolling on mobile if needed */
+  overflow-x: hidden;
 }
 
 @media (min-width: 768px) {
@@ -262,7 +263,7 @@ body {
 }
 
 @media (min-width: 600px) {
-  .glass-panel { padding: var(--space-lg); }
+  .glass-panel { padding: var(--space-md) var(--space-lg); }
 }
 
 /* =========================================================================
@@ -271,16 +272,16 @@ body {
 .control-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: var(--space-sm);
 }
 
 @media (min-width: 768px) {
   .control-panel {
     flex: 1.1;
     overflow-y: auto;
-    padding-right: 10px;
-    padding-bottom: var(--space-lg);
-    gap: var(--space-lg);
+    padding-right: 6px;
+    padding-bottom: var(--space-md);
+    gap: var(--space-md);
   }
 }
 
@@ -311,11 +312,10 @@ body {
   background: rgba(255, 255, 255, 0.55);
   border: 1px solid rgba(0, 0, 0, 0.08);
   color: var(--text-main);
-  /* 行動端較大觸控區域，桌面端縮回 */
-  padding: clamp(10px, 2vw, 12px) 14px;
+  padding: 8px 12px;
   border-radius: var(--border-radius-md);
   outline: none;
-  font-size: clamp(14px, 2vw, 15px);
+  font-size: 13px;
   transition: var(--transition-smooth);
   width: 100%;
 }
@@ -343,16 +343,15 @@ body {
   background: linear-gradient(135deg, var(--color-primary) 0%, hsl(220, 90%, 46%) 100%);
   color: var(--text-on-primary);
   border: none;
-  /* 行動端更大 tap target */
-  padding: clamp(12px, 3vw, 14px);
+  padding: 8px 16px;
   border-radius: var(--border-radius-md);
-  font-size: clamp(14px, 2vw, 15px);
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 4px 16px var(--color-primary-glow);
   transition: var(--transition-smooth);
   width: 100%;
-  min-height: 44px; /* WCAG 最小觸控目標 */
+  min-height: 36px;
 }
 
 .btn-primary:hover {
@@ -375,13 +374,13 @@ body {
   background: rgba(255, 255, 255, 0.5);
   border: 1px solid rgba(0, 0, 0, 0.08);
   color: var(--text-main);
-  padding: 10px 16px;
+  padding: 6px 12px;
   border-radius: var(--border-radius-md);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition-smooth);
-  min-height: 40px;
+  min-height: 32px;
   white-space: nowrap;
 }
 
@@ -505,16 +504,16 @@ body {
 .monitor-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: var(--space-sm);
 }
 
 @media (min-width: 768px) {
   .monitor-panel {
     flex: 0.9;
     overflow-y: auto;
-    padding-right: 10px;
-    padding-bottom: var(--space-lg);
-    gap: var(--space-lg);
+    padding-right: 6px;
+    padding-bottom: var(--space-md);
+    gap: var(--space-md);
   }
 }
 
@@ -543,10 +542,10 @@ body {
   background: rgba(255, 255, 255, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.7);
   border-radius: var(--border-radius-md);
-  padding: clamp(10px, 2vw, 14px);
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   box-shadow: 0 2px 8px rgba(31, 38, 135, 0.015);
 }
 
@@ -801,7 +800,7 @@ input:checked + .slider:before {
 
 .control-panel::-webkit-scrollbar-thumb,
 .monitor-panel::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(0, 0, 0, 0.15);
   border-radius: 3px;
 }
 

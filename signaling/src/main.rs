@@ -45,13 +45,15 @@ enum SignalingMessage {
     Answer { target: String, sdp: String },
     #[serde(rename = "ice")]
     Ice { target: String, candidate: String },
+    #[serde(rename = "error")]
+    Error { target: String, message: String },
 }
 
 #[derive(Serialize, Debug)]
 #[serde(tag = "type")]
 enum ServerMessage {
     #[serde(rename = "offer")]
-    Offer { source: String, sdp: String },
+    Offer { source: String, pin: String, sdp: String },
     #[serde(rename = "answer")]
     Answer { source: String, sdp: String },
     #[serde(rename = "ice")]
@@ -165,13 +167,14 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                 state.clients.write().await.insert(id, tx.clone());
                                 println!("Client logged in: {:?}", client_id);
                             }
-                            SignalingMessage::Offer { target, pin: _, sdp } => {
+                            SignalingMessage::Offer { target, pin, sdp } => {
                                 // 這裡實務上要驗證目標的 PIN（目前假定為同意或由目標自行驗證）
-                                // 為簡化，直接將 Offer 轉發給目標
+                                // 為簡化，直接將 Offer 轉發給目標，包含 PIN 碼
                                 let clients = state.clients.read().await;
                                 if let Some(target_tx) = clients.get(&target) {
                                     let out_msg = ServerMessage::Offer {
                                         source: client_id.clone().unwrap_or_default(),
+                                        pin,
                                         sdp,
                                     };
                                     let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
@@ -196,6 +199,15 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                     let out_msg = ServerMessage::Ice {
                                         source: client_id.clone().unwrap_or_default(),
                                         candidate,
+                                    };
+                                    let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
+                                }
+                            }
+                            SignalingMessage::Error { target, message } => {
+                                let clients = state.clients.read().await;
+                                if let Some(target_tx) = clients.get(&target) {
+                                    let out_msg = ServerMessage::Error {
+                                        message: format!("From {}: {}", client_id.clone().unwrap_or_default(), message),
                                     };
                                     let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
                                 }
