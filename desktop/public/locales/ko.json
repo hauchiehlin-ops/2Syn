@@ -90,5 +90,12 @@
   "protocol_p2p": "WebRTC P2P (직접)",
   "protocol_relay": "Relay (중계)",
   "encryption_gcu": "AES-256-GCM (GPU 가속)",
-  "copy_tooltip": "복사"
+  "copy_tooltip": "복사",
+  "toast_system_error": "⚠️ 시스템 오류: 우측 고급 패널을 열어 로그를 확인하세요",
+  "toggle_panel_title": "고급 패널 전환",
+  "tools_title": "고급 도구",
+  "file_transfer_title": "파일 전송",
+  "drop_zone": "여기에 파일을 드래그 앤 드롭하거나 클릭하여 업로드",
+  "btn_cancel_transfer": "전송 취소",
+  "log_title": "시스템 로그"
 }

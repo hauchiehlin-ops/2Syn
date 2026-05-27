@@ -10,6 +10,7 @@ pub enum InputEvent {
     MouseScroll { delta_x: i16, delta_y: i16 },
     KeyDown { keycode: u16, modifiers: u8 },
     KeyUp { keycode: u16, modifiers: u8 },
+    MouseRelativeMove { dx: i32, dy: i32 }, // 相對位移，用於 Pointer Lock 支援原生滑鼠加速度
 }
 
 /// 滑鼠按鍵類型
@@ -52,6 +53,11 @@ impl InputEvent {
                 buffer.push(0x06);
                 buffer.extend_from_slice(&keycode.to_be_bytes());
                 buffer.push(*modifiers);
+            }
+            InputEvent::MouseRelativeMove { dx, dy } => {
+                buffer.push(0x07);
+                buffer.extend_from_slice(&dx.to_be_bytes());
+                buffer.extend_from_slice(&dy.to_be_bytes());
             }
         }
         buffer
@@ -109,6 +115,12 @@ impl InputEvent {
                 let modifiers = data[3];
                 Ok(InputEvent::KeyUp { keycode, modifiers })
             }
+            0x07 => {
+                if data.len() < 9 { return Err(CoreError::NetworkError("MouseRelativeMove 封包長度不足".to_string())); }
+                let dx = i32::from_be_bytes(data[1..5].try_into().unwrap());
+                let dy = i32::from_be_bytes(data[5..9].try_into().unwrap());
+                Ok(InputEvent::MouseRelativeMove { dx, dy })
+            }
             _ => Err(CoreError::NetworkError(format!("未知的輸入事件類型: 0x{:02X}", event_type))),
         }
     }
@@ -162,6 +174,13 @@ impl InputEvent {
                         input.Anonymous.ki.wVk = *keycode;
                         input.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
                     }
+                    InputEvent::MouseRelativeMove { dx, dy } => {
+                        // 相對座標注入（不包含 ABSOLUTE flag），Windows 將會應用原生的滑鼠加速度設定
+                        input.r#type = INPUT_MOUSE;
+                        input.Anonymous.mi.dx = *dx;
+                        input.Anonymous.mi.dy = *dy;
+                        input.Anonymous.mi.dwFlags = MOUSEEVENTF_MOVE;
+                    }
                 }
                 
                 let sent = SendInput(1, &input, size_of::<INPUT>() as i32);
@@ -204,7 +223,7 @@ impl InputEvent {
                         MouseButton::Middle => (CGEventType::OtherMouseDown, CGMouseButton::Center),
                     };
                     // 獲取當前滑鼠位置
-                    let current_point = core_graphics::geometry::CGPoint::new(0.0, 0.0);
+                    let current_point = CGEvent::new(source.clone()).unwrap().location();
                     let event = CGEvent::new_mouse_event(source, evt_type, current_point, cg_button)
                         .map_err(|_| CoreError::SystemError("建立 macOS 按鍵壓下事件失敗".to_string()))?;
                     event.post(CGEventTapLocation::HID);
@@ -215,7 +234,7 @@ impl InputEvent {
                         MouseButton::Right => (CGEventType::RightMouseUp, CGMouseButton::Right),
                         MouseButton::Middle => (CGEventType::OtherMouseUp, CGMouseButton::Center),
                     };
-                    let current_point = core_graphics::geometry::CGPoint::new(0.0, 0.0);
+                    let current_point = CGEvent::new(source.clone()).unwrap().location();
                     let event = CGEvent::new_mouse_event(source, evt_type, current_point, cg_button)
                         .map_err(|_| CoreError::SystemError("建立 macOS 按鍵放開事件失敗".to_string()))?;
                     event.post(CGEventTapLocation::HID);
@@ -233,6 +252,18 @@ impl InputEvent {
                 InputEvent::KeyUp { keycode, modifiers: _ } => {
                     let event = CGEvent::new_keyboard_event(source, *keycode, false)
                         .map_err(|_| CoreError::SystemError("建立 macOS 鍵盤放開事件失敗".to_string()))?;
+                    event.post(CGEventTapLocation::HID);
+                }
+                InputEvent::MouseRelativeMove { dx, dy } => {
+                    // 為了保留 macOS 的滑鼠加速度，我們取當前座標疊加 dx/dy 後注入，同時設定 DeltaX/Y
+                    let current_point = CGEvent::new(source.clone()).unwrap().location();
+                    let point = core_graphics::geometry::CGPoint::new(current_point.x + *dx as f64, current_point.y + *dy as f64);
+                    let event = CGEvent::new_mouse_event(source, CGEventType::MouseMoved, point, CGMouseButton::Left)
+                        .map_err(|_| CoreError::SystemError("建立 macOS 滑鼠相對移動事件失敗".to_string()))?;
+                    
+                    // 寫入底層的 Event Delta，讓 macOS 得以計算並應用滑鼠加速度曲線
+                    event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_DELTA_X, *dx as i64);
+                    event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_DELTA_Y, *dy as i64);
                     event.post(CGEventTapLocation::HID);
                 }
             }

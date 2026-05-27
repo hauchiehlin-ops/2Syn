@@ -90,5 +90,12 @@
   "protocol_p2p": "WebRTC P2P (直連)",
   "protocol_relay": "Relay (中繼)",
   "encryption_gcu": "AES-256-GCM (GPU 加速)",
-  "copy_tooltip": "複製"
+  "copy_tooltip": "複製",
+  "toast_system_error": "⚠️ 系統錯誤：請開啟右側進階面板查看系統日誌",
+  "toggle_panel_title": "切換進階面板",
+  "tools_title": "進階工具",
+  "file_transfer_title": "檔案傳輸",
+  "drop_zone": "拖放檔案至此處或點擊上傳",
+  "btn_cancel_transfer": "取消傳輸",
+  "log_title": "系統日誌"
 }

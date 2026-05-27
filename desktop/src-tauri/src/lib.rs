@@ -1,14 +1,20 @@
 // Tauri lib entry point
 
 use syn_core::security::{generate_hwid, LicenseValidator, SecureStorage};
+#[cfg(not(target_os = "ios"))]
 use syn_core::connection::{ConnectionManager, ConnectionType};
+#[cfg(not(target_os = "ios"))]
 use syn_core::file_transfer::FileTransferEngine;
 use std::sync::Arc;
-use tauri::{State, Manager};
+use tauri::{State, Manager, Emitter};
 
 struct AppState {
+    #[cfg(not(target_os = "ios"))]
     connection_manager: Arc<ConnectionManager>,
+    #[cfg(not(target_os = "ios"))]
     file_transfer_engine: Arc<FileTransferEngine>,
+    #[cfg(not(target_os = "ios"))]
+    active_pc: tokio::sync::Mutex<Option<Arc<webrtc::peer_connection::RTCPeerConnection>>>,
 }
 
 /// 獲取本機硬體特徵碼（HWID）的 Tauri Command
@@ -160,6 +166,7 @@ async fn unplug_virtual_monitor(index: u32) -> Result<String, String> {
 }
 
 /// 產生去中心化手動 SDP Offer 資訊
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn generate_local_sdp_offer() -> Result<String, String> {
     // 未來產品化時，若發現 STUN 失敗，可動態傳入 TURN 憑證
@@ -192,18 +199,112 @@ async fn generate_local_sdp_offer() -> Result<String, String> {
     Ok(offer.sdp)
 }
 
-/// 套用對方的手動 SDP Answer 以建立去中心化 P2P 安全連線
+/// 處理遠端 Offer，建立 Answer 並啟動視訊串流 (作為被控端 Host)
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
-async fn apply_remote_sdp_answer(sdp: String) -> Result<String, String> {
-    if sdp.trim().is_empty() {
-        return Err("alert_sdp_empty".to_string());
+async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: String) -> Result<String, String> {
+    use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+
+    let session = syn_core::connection::WebRtcSession::create_session(None)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 加入視訊軌道並啟動擷取迴圈
+    let video_track = session.add_video_track().await.map_err(|e| e.to_string())?;
+    let streamer = syn_core::video::VideoStreamer::new(video_track).map_err(|e| e.to_string())?;
+    streamer.start_capture_loop().await;
+
+    let pc = session.get_peer_connection();
+    
+    // 監聽本機產生的 ICE Candidate 並透過 Tauri Event 拋給前端
+    let app_clone = app_handle.clone();
+    pc.on_ice_candidate(Box::new(move |c: Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>| {
+        if let Some(candidate) = c {
+            if let Ok(json) = candidate.to_json() {
+                let _ = app_clone.emit("rust-ice-candidate", json);
+            }
+        }
+        Box::pin(async {})
+    }));
+
+    // 處理 DataChannel 接收事件
+    let last_seq = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    pc.on_data_channel(Box::new(move |d| {
+        let label = d.label().to_owned();
+        println!("Rust 接收到 DataChannel: {}", label);
+        
+        if label == "input-control" {
+            let last_seq = Arc::clone(&last_seq);
+            d.on_message(Box::new(move |msg| {
+                let data = msg.data.to_vec();
+                let last_seq = Arc::clone(&last_seq);
+                Box::pin(async move {
+                    use std::sync::atomic::Ordering;
+                    use syn_core::input::SecureInputPacket;
+                    match SecureInputPacket::deserialize(&data) {
+                        Ok(packet) => {
+                            let prev_seq = last_seq.load(Ordering::SeqCst);
+                            match packet.verify(prev_seq) {
+                                Ok(()) => {
+                                    last_seq.store(packet.sequence_number, Ordering::SeqCst);
+                                    if let Err(e) = packet.event.simulate() {
+                                        eprintln!("[input] simulate failed: {}", e);
+                                    }
+                                }
+                                Err(e) => eprintln!("[security] packet rejected: {}", e),
+                            }
+                        }
+                        Err(err) => eprintln!("[input] deserialize failed: {:?}", err),
+                    }
+                })
+            }));
+        } else {
+            d.on_message(Box::new(move |msg| {
+                println!("收到 DataChannel ({}) 訊息: {} bytes", label, msg.data.len());
+                Box::pin(async {})
+            }));
+        }
+        Box::pin(async {})
+    }));
+
+    // 套用 Remote Offer
+    let sdp = RTCSessionDescription::offer(offer_sdp).map_err(|e| e.to_string())?;
+    pc.set_remote_description(sdp).await.map_err(|e| e.to_string())?;
+
+    // 儲存 pc 供 ICE 使用
+    let state = app_handle.state::<AppState>();
+    *state.active_pc.lock().await = Some(Arc::clone(&pc));
+
+    // 建立 Local Answer
+    let answer = pc.create_answer(None).await.map_err(|e| e.to_string())?;
+    pc.set_local_description(answer.clone()).await.map_err(|e| e.to_string())?;
+
+    Ok(answer.sdp)
+}
+
+/// 接收來自遠端的 ICE Candidate 並套用至 Rust PeerConnection
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+async fn add_ice_candidate_to_rust(state: State<'_, AppState>, candidate_str: String) -> Result<(), String> {
+    use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
+    
+    let pc_opt = state.active_pc.lock().await.clone();
+    if let Some(pc) = pc_opt {
+        match serde_json::from_str::<RTCIceCandidateInit>(&candidate_str) {
+            Ok(candidate) => {
+                pc.add_ice_candidate(candidate).await.map_err(|e| e.to_string())?;
+                println!("已成功加入遠端 ICE Candidate");
+            }
+            Err(e) => return Err(format!("JSON 解析失敗: {}", e)),
+        }
+    } else {
+        return Err("PeerConnection 尚未建立".to_string());
     }
-    // 實務上在此處呼叫 peer_connection.set_remote_description(sdp) 進行 ICE 連線建立
-    // 連線建立後，立即進行 ECDH 金鑰安全交換，取得 AES-GCM 金鑰
-    Ok("alert_sdp_applied".to_string())
+    Ok(())
 }
 
 /// 獲取當前連線品質狀態，供前端即時面板顯示
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn get_connection_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let config = state.connection_manager.get_current_config().await;
@@ -230,7 +331,8 @@ async fn get_connection_status(state: State<'_, AppState>) -> Result<serde_json:
     }))
 }
 
-/// 執行連線診斷（PoC 模擬）
+/// 執行連線診斷，返回評估報告
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn run_connection_diagnostic() -> Result<serde_json::Value, String> {
     println!("[DEBUG] 執行連線診斷");
@@ -245,6 +347,7 @@ async fn run_connection_diagnostic() -> Result<serde_json::Value, String> {
 }
 
 /// 切換網路模擬狀態
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn trigger_network_simulation(state: State<'_, AppState>, mode: String) -> Result<String, String> {
     println!("[DEBUG] 收到網路模擬請求: {}", mode);
@@ -275,6 +378,7 @@ async fn trigger_network_simulation(state: State<'_, AppState>, mode: String) ->
 
 /// 接收來自前端 WebRTC Data Channel 的二進位輸入封包並執行（被控端）
 /// 跨平台：macOS/iOS/Windows/Android 均透過此指令執行遠端控制
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn handle_remote_input(data: Vec<u8>) -> Result<(), String> {
     use syn_core::input::SecureInputPacket;
@@ -301,6 +405,7 @@ async fn handle_remote_input(data: Vec<u8>) -> Result<(), String> {
 }
 
 /// 接收來自前端 WebRTC Data Channel 的檔案資料塊並寫入磁碟（被控端）
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn receive_file_chunk(chunk: Vec<u8>) -> Result<(), String> {
     use std::io::Write;
@@ -325,6 +430,7 @@ async fn receive_file_chunk(chunk: Vec<u8>) -> Result<(), String> {
 }
 
 /// 發起檔案傳輸，後端會強制驗證連線狀態
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn send_file(state: State<'_, AppState>, path: String) -> Result<String, String> {
     // 取得當前連線狀態指標
@@ -348,6 +454,7 @@ async fn send_file(state: State<'_, AppState>, path: String) -> Result<String, S
 }
 
 /// 獲取當前所有傳輸任務狀態（供前端輪詢進度條）
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn get_active_transfers(state: State<'_, AppState>) -> Result<Vec<syn_core::file_transfer::FileTransferTask>, String> {
     let tasks = state.file_transfer_engine.get_all_snapshots().await;
@@ -355,6 +462,7 @@ async fn get_active_transfers(state: State<'_, AppState>) -> Result<Vec<syn_core
 }
 
 /// 取消指定傳輸任務
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn cancel_transfer(state: State<'_, AppState>, task_id: String) -> Result<bool, String> {
     Ok(state.file_transfer_engine.cancel_task(&task_id).await)
@@ -362,22 +470,31 @@ async fn cancel_transfer(state: State<'_, AppState>, task_id: String) -> Result<
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(not(target_os = "ios"))]
     let connection_manager = Arc::new(ConnectionManager::new());
+    #[cfg(not(target_os = "ios"))]
     let file_transfer_engine = Arc::new(FileTransferEngine::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(AppState { 
+            #[cfg(not(target_os = "ios"))]
             connection_manager,
-            file_transfer_engine 
+            #[cfg(not(target_os = "ios"))]
+            file_transfer_engine,
+            #[cfg(not(target_os = "ios"))]
+            active_pc: tokio::sync::Mutex::new(None),
         })
         .setup(|app| {
-            let state = app.state::<AppState>();
-            let manager_clone = state.connection_manager.clone();
-            // 連線品質自動調整任務
-            tauri::async_runtime::spawn(async move {
-                ConnectionManager::start_monitor_loop(manager_clone).await;
-            });
+            #[cfg(not(target_os = "ios"))]
+            {
+                let state = app.state::<AppState>();
+                let manager_clone = state.connection_manager.clone();
+                // 連線品質自動調整任務
+                tauri::async_runtime::spawn(async move {
+                    ConnectionManager::start_monitor_loop(manager_clone).await;
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -387,15 +504,27 @@ pub fn run() {
             toggle_privacy_mode,
             plug_virtual_monitor,
             unplug_virtual_monitor,
+            #[cfg(not(target_os = "ios"))]
             generate_local_sdp_offer,
-            apply_remote_sdp_answer,
+            #[cfg(not(target_os = "ios"))]
+            handle_remote_offer_as_host,
+            #[cfg(not(target_os = "ios"))]
+            add_ice_candidate_to_rust,
+            #[cfg(not(target_os = "ios"))]
             get_connection_status,
+            #[cfg(not(target_os = "ios"))]
             run_connection_diagnostic,
+            #[cfg(not(target_os = "ios"))]
             trigger_network_simulation,
+            #[cfg(not(target_os = "ios"))]
             handle_remote_input,
+            #[cfg(not(target_os = "ios"))]
             receive_file_chunk,
+            #[cfg(not(target_os = "ios"))]
             send_file,
+            #[cfg(not(target_os = "ios"))]
             get_active_transfers,
+            #[cfg(not(target_os = "ios"))]
             cancel_transfer
         ])
         .run(tauri::generate_context!())

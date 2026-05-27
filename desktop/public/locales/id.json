@@ -90,5 +90,12 @@
   "protocol_p2p": "WebRTC P2P (Langsung)",
   "protocol_relay": "Relay (TURN)",
   "encryption_gcu": "AES-256-GCM (Aksel. GPU)",
-  "copy_tooltip": "Salin"
+  "copy_tooltip": "Salin",
+  "toast_system_error": "⚠️ Kesalahan Sistem: Buka Panel Lanjutan untuk log",
+  "toggle_panel_title": "Alihkan Panel Lanjutan",
+  "tools_title": "Alat Lanjutan",
+  "file_transfer_title": "Transfer File",
+  "drop_zone": "Seret & Jatuhkan file di sini atau Klik untuk mengunggah",
+  "btn_cancel_transfer": "Batalkan Transfer",
+  "log_title": "Log Sistem"
 }

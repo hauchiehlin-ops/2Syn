@@ -90,5 +90,12 @@
   "protocol_p2p": "WebRTC P2P (Direkt)",
   "protocol_relay": "Relay (TURN)",
   "encryption_gcu": "AES-256-GCM (GPU Beschl.)",
-  "copy_tooltip": "Kopieren"
+  "copy_tooltip": "Kopieren",
+  "toast_system_error": "⚠️ Systemfehler: Öffnen Sie das erweiterte Panel für Protokolle",
+  "toggle_panel_title": "Erweitertes Panel umschalten",
+  "tools_title": "Erweiterte Werkzeuge",
+  "file_transfer_title": "Dateiübertragung",
+  "drop_zone": "Dateien hierhin ziehen & ablegen oder zum Hochladen klicken",
+  "btn_cancel_transfer": "Übertragung abbrechen",
+  "log_title": "Systemprotokolle"
 }

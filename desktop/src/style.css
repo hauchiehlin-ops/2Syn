@@ -140,15 +140,21 @@ body {
   }
 }
 
-/* 桌面端：固定尺寸（現已取消留白，維持全螢幕） */
+/* 桌面端：固定尺寸（置中） */
 @media (min-width: 1024px) {
   body {
     overflow: hidden;
-    align-items: flex-start;
+    align-items: center; /* 置中 */
+    justify-content: center; /* 置中 */
   }
   .glass-container {
-    width: 100vw;
-    height: 100dvh;
+    width: 90vw;
+    max-width: 1100px;
+    height: min(90vh, 800px);
+    border-radius: var(--border-radius-lg);
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.2);
     overflow: hidden;
   }
 }
@@ -244,13 +250,99 @@ body {
   -webkit-overflow-scrolling: touch; /* iOS 順暢捲動 */
 }
 
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   .main-content {
-    flex-direction: row;
+    flex-direction: row; /* 可以保持 row，因為右側面板是 absolute */
+    justify-content: center; /* 讓左側控制面板置中 */
     padding: var(--space-lg);
     gap: var(--space-lg);
-    overflow: hidden;
+    overflow: hidden; 
   }
+}
+
+/* =========================================================================
+   右側面板 (Collapsible Sidebar)
+   ========================================================================= */
+.monitor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.3s, width 0.3s;
+  /* 行動端預設是 Off-canvas 側邊欄 */
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 85%;
+  max-width: 380px;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  z-index: 9999;
+  padding: calc(var(--space-md) + 44px) var(--space-md) var(--space-md) var(--space-md);
+  box-shadow: -5px 0 30px rgba(0,0,0,0.1);
+  transform: translateX(100%);
+  opacity: 0;
+  pointer-events: none;
+  overflow-y: auto;
+}
+
+.monitor-panel.panel-open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (min-width: 1024px) {
+  .monitor-panel {
+    /* 桌面端也改為右側滑出的 Drawer，絕對定位於 glass-container */
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 380px;
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    box-shadow: -10px 0 30px rgba(0,0,0,0.1);
+    padding: calc(var(--space-lg) + 44px) var(--space-lg) var(--space-lg) var(--space-lg);
+    transform: translateX(100%);
+    opacity: 0;
+    pointer-events: none;
+    overflow-y: auto;
+    z-index: 100;
+  }
+  .monitor-panel.panel-open {
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: auto;
+    animation: slideInRight 0.3s forwards;
+  }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Toast 提示框樣式 */
+.toast-msg {
+  background: rgba(230, 45, 65, 0.9);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: toastIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* =========================================================================
@@ -278,7 +370,7 @@ body {
   gap: var(--space-sm);
 }
 
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   .control-panel {
     flex: none;
     padding-right: 6px;
@@ -510,7 +602,7 @@ body {
   gap: var(--space-sm);
 }
 
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   .monitor-panel {
     flex: 0.9;
     overflow-y: auto;
@@ -888,8 +980,8 @@ input:checked + .slider:before {
   }
 
   .main-content {
-    flex-direction: row;
-    overflow: hidden;
+    flex-direction: column;
+    overflow-y: auto;
   }
 }
 

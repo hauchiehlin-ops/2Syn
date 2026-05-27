@@ -1,8 +1,11 @@
+#[cfg(not(target_os = "ios"))]
 pub mod connection;
+#[cfg(not(target_os = "ios"))]
 pub mod codec;
 pub mod security;
 pub mod input;
 pub mod idd;
+#[cfg(not(target_os = "ios"))]
 pub mod file_transfer;
 
 
@@ -29,3 +32,5 @@ impl std::fmt::Display for CoreError {
 }
 
 impl std::error::Error for CoreError {}
+#[cfg(not(target_os = "ios"))]
+pub mod video;

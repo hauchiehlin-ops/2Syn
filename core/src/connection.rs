@@ -13,6 +13,9 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
+use webrtc::track::track_local::TrackLocal;
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
 /// 色彩採樣格式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,6 +244,25 @@ impl WebRtcSession {
         }));
 
         Ok(Self { peer_connection })
+    }
+
+    /// 加入本機螢幕擷取的視訊串流軌道
+    pub async fn add_video_track(&self) -> Result<Arc<TrackLocalStaticSample>, CoreError> {
+        let video_track = Arc::new(TrackLocalStaticSample::new(
+            RTCRtpCodecCapability {
+                mime_type: "video/H264".to_owned(),
+                ..Default::default()
+            },
+            "screen".to_owned(),
+            "webrtc-rs".to_owned(),
+        ));
+
+        self.peer_connection
+            .add_track(Arc::clone(&video_track) as Arc<dyn TrackLocal + Send + Sync>)
+            .await
+            .map_err(|e| CoreError::NetworkError(format!("無法加入視訊軌道: {}", e)))?;
+
+        Ok(video_track)
     }
 
     /// 建立極低延遲高優先權的滑鼠與鍵盤控制輸入通道 (Data Channel)

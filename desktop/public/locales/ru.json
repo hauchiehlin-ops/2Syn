@@ -90,5 +90,12 @@
   "protocol_p2p": "WebRTC P2P (Прямое)",
   "protocol_relay": "Relay (Транзит)",
   "encryption_gcu": "AES-256-GCM (Ускор. GPU)",
-  "copy_tooltip": "Копировать"
+  "copy_tooltip": "Копировать",
+  "toast_system_error": "⚠️ Ошибка системы: Откройте расширенную панель для просмотра логов",
+  "toggle_panel_title": "Переключить расширенную панель",
+  "tools_title": "Расширенные инструменты",
+  "file_transfer_title": "Передача файлов",
+  "drop_zone": "Перетащите файлы сюда или нажмите для загрузки",
+  "btn_cancel_transfer": "Отменить передачу",
+  "log_title": "Системные логи"
 }

@@ -90,5 +90,12 @@
   "protocol_p2p": "WebRTC P2P (โดยตรง)",
   "protocol_relay": "Relay (ทางผ่าน)",
   "encryption_gcu": "AES-256-GCM (เร่ง GPU)",
-  "copy_tooltip": "คัดลอก"
+  "copy_tooltip": "คัดลอก",
+  "toast_system_error": "⚠️ ข้อผิดพลาดของระบบ: เปิดแผงขั้นสูงเพื่อดูบันทึก",
+  "toggle_panel_title": "สลับแผงขั้นสูง",
+  "tools_title": "เครื่องมือขั้นสูง",
+  "file_transfer_title": "การถ่ายโอนไฟล์",
+  "drop_zone": "ลากและวางไฟล์ที่นี่หรือคลิกเพื่ออัปโหลด",
+  "btn_cancel_transfer": "ยกเลิกการถ่ายโอน",
+  "log_title": "บันทึกระบบ"
 }

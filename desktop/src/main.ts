@@ -1,5 +1,22 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
+
+// --- Toast Notification System ---
+function showToast(message: string, duration: number = 3000) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = 'toast-msg';
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(-20px)';
+    toast.style.transition = 'all 0.3s ease';
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
 
 // --- Debug Console Interceptor ---
 (function() {
@@ -14,8 +31,9 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
     return typeof a === 'object' ? JSON.stringify(a) : String(a);
   }
 
-  function appendLog(color: string, args: any[]) {
-    originalLog.apply(console, args);
+  function appendLog(color: string, args: any[], isError = false) {
+    if (isError) originalError.apply(console, args);
+    else originalLog.apply(console, args);
     // Ensure this runs only in browser context (when DOM is available)
     if (typeof document !== 'undefined') {
       const overlay = document.getElementById('debug-overlay');
@@ -26,12 +44,19 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
       line.textContent = `[${new Date().toISOString().split('T')[1].slice(0,-1)}] ${msg}`;
       overlay.appendChild(line);
       overlay.scrollTop = overlay.scrollHeight;
+
+      // 如果是 Error，且畫面上有 toast-container，則彈出提示
+      if (isError) {
+        // 使用 t() 取得多國語系字串
+        const toastMsg = typeof (window as any).t === "function" ? (window as any).t("toast_system_error") : "⚠️ System Error: Open Advanced Panel to view logs";
+        showToast(toastMsg, 5000);
+      }
     }
   }
   
   console.log = (...args) => appendLog('#0f0', args);
   console.warn = (...args) => appendLog('#ff0', args);
-  console.error = (...args) => appendLog('#f00', args);
+  console.error = (...args) => appendLog('#f00', args, true);
 })();
 // ---------------------------------
 
@@ -40,7 +65,10 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 // =========================================================================
 let signalingWs: WebSocket | null = null;
 let peerConnection: RTCPeerConnection | null = null;
-let iceCandidateQueue: any[] = [];
+let iceCandidateQueue: RTCIceCandidateInit[] = [];
+let rustIceCandidateQueue: string[] = [];
+let isHostMode: boolean = false; // 標記目前是否為被控端
+let rustOfferProcessed: boolean = false; // 標記 Rust 是否已經處理完 Offer
 let dataChannelControl: RTCDataChannel | null = null;
 let dataChannelFile: RTCDataChannel | null = null;
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
@@ -63,27 +91,10 @@ function getSignalingUrl(): string {
   return OFFICIAL_SIGNALING_SERVER;
 }
 
-// STUN/TURN 伺服器清單（新增免費 TURN 中繼測試連線瓶頸）
-// 【注意】：由於目前的網路環境可能存在 NAT Hairpinning 限制、AP 隔離或蘋果 mDNS 遮蔽問題，
-// 這裡暫時加入一個免費的 TURN 伺服器 (openrelay.metered.ca) 以測試是否能繞過網路限制。
+// STUN 伺服器清單（已移除 TURN 伺服器以節省營運流量成本）
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-  { urls: ["stun:stun.cloudflare.com:3478"] },
-  {
-    urls: ["turn:openrelay.metered.ca:80"],
-    username: "openrelayproject",
-    credential: "openrelayproject"
-  },
-  {
-    urls: ["turn:openrelay.metered.ca:443"],
-    username: "openrelayproject",
-    credential: "openrelayproject"
-  },
-  {
-    urls: ["turn:openrelay.metered.ca:443?transport=tcp"],
-    username: "openrelayproject",
-    credential: "openrelayproject"
-  }
+  { urls: ["stun:stun.cloudflare.com:3478"] }
 ];
 
 // 宣告語系翻譯字典快取
@@ -168,16 +179,25 @@ const fallbackTranslations: Record<string, string> = {
   "smart_auto": "Smart Quality Auto-Optimization",
   "smart_auto_active_desc": "System automatically adjusting. Network and stream quality are in optimal states.",
   "sim_advanced_header": "Advanced Developer Tools",
-  "metric_rtt": "Network Latency (RTT)",
   "metric_loss": "Packet Loss Rate",
   "metric_protocol": "Connection Protocol",
-  "metric_encryption": "Codec & Cipher Security"
+  "metric_encryption": "Codec & Cipher Security",
+  
+  // 新增UI文字翻譯
+  "toast_system_error": "⚠️ System Error: Open Advanced Panel to view logs",
+  "toggle_panel_title": "Toggle Advanced Panel",
+  "tools_title": "Advanced Tools",
+  "file_transfer_title": "File Transfer",
+  "drop_zone": "Drag & Drop files here or Click to upload",
+  "btn_cancel_transfer": "Cancel Transfer",
+  "log_title": "System Logs"
 };
 
 // 統一翻譯取值函數
 function t(key: string): string {
   return translations[key] || fallbackTranslations[key] || key;
 }
+(window as any).t = t; // Expose to global for console.error interceptor if needed
 
 let lastDiagnosticResult: {
   license_active: boolean;
@@ -288,6 +308,18 @@ function updateDomTranslations() {
   setTextContent("lbl-sim-rtt", t("sim_rtt"));
   setTextContent("lbl-sim-loss", t("sim_loss"));
   setTextContent("lbl-sim-relay", t("sim_relay"));
+
+  // 新增右側面板的翻譯綁定
+  setTextContent("txt-tools-title", t("tools_title"));
+  setTextContent("txt-file-transfer-title", t("file_transfer_title"));
+  setTextContent("txt-drop-zone", t("drop_zone"));
+  setTextContent("btn-cancel-transfer", t("btn_cancel_transfer"));
+  setTextContent("txt-log-title", t("log_title"));
+  
+  const btnTogglePanel = document.getElementById("btn-toggle-panel");
+  if (btnTogglePanel) {
+    btnTogglePanel.title = t("toggle_panel_title");
+  }
 
   // 自我診斷與手動連線相關元件語系支援
   setTextContent("txt-diag-title", t("diag_title"));
@@ -480,16 +512,34 @@ function initSignalingClient() {
       case "ice":
         // 收到遠端 ICE Candidate
         if (msg.candidate !== undefined) {
-          if (peerConnection && peerConnection.remoteDescription) {
-            try {
-              const candidateObj = JSON.parse(msg.candidate);
-              await peerConnection.addIceCandidate(candidateObj);
-            } catch (e) {
-              console.warn("[WebRTC] 無法加入 ICE Candidate:", e);
+          if (peerConnection) {
+            // 發起端 (Client) JS WebRTC 處理
+            if (peerConnection.remoteDescription) {
+              try {
+                const candidateObj = JSON.parse(msg.candidate);
+                await peerConnection.addIceCandidate(candidateObj);
+              } catch (e) {
+                console.warn("[WebRTC] 無法加入 ICE Candidate:", e);
+              }
+            } else {
+              // peerConnection 尚未就緒或 remoteDescription 尚未設定，先加入佇列避免遺失
+              iceCandidateQueue.push(JSON.parse(msg.candidate));
             }
           } else {
-            // peerConnection 尚未就緒或 remoteDescription 尚未設定，先加入佇列避免遺失
-            iceCandidateQueue.push(JSON.parse(msg.candidate));
+            // 被控端 (Host) Rust WebRTC 處理
+            if (msg.candidate === "null" || msg.candidate === "") {
+              // 忽略 ICE 結束信號，避免 Rust 解析失敗
+              break;
+            }
+            if (!rustOfferProcessed) {
+              rustIceCandidateQueue.push(msg.candidate);
+            } else {
+              try {
+                await invoke("add_ice_candidate_to_rust", { candidateStr: msg.candidate });
+              } catch (e) {
+                console.warn("[WebRTC] 無法將 ICE Candidate 傳遞給 Rust:", e);
+              }
+            }
           }
         }
         break;
@@ -595,6 +645,44 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
     }
   };
 
+  // 接收遠端視訊軌道 (只會在 iPhone / Client 端發生，因為 Mac 是 Host)
+  pc.ontrack = (event) => {
+    console.log("[WebRTC] 收到遠端視訊軌道:", event.track.kind);
+    if (event.track.kind === "video") {
+        // --- UI Setup ---
+        const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
+        const mainContent = document.querySelector(".glass-container") as HTMLElement;
+        const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
+        
+        videoEl.style.display = "block";
+        if (mainContent) mainContent.style.display = "none";
+        
+        // 如果是在手機/觸控環境上，顯示鍵盤呼叫按鈕
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+          btnKeyboard.style.display = "flex";
+        }
+        if (!videoEl.srcObject) {
+          videoEl.srcObject = event.streams && event.streams.length > 0 
+            ? event.streams[0] 
+            : new MediaStream([event.track]);
+            
+          // 啟用零延遲渲染 (Zero-Latency Rendering)
+          if ((videoEl as any).playoutDelayHint !== undefined) {
+            (videoEl as any).playoutDelayHint = 0;
+          }
+          videoEl.playsInline = true;
+          videoEl.disablePictureInPicture = true;
+          
+          try {
+            videoEl.play();
+            setupInputControl(videoEl); // 綁定輸入控制
+          } catch (err) {
+            console.error("[WebRTC] 視訊播放失敗:", err);
+          }
+        }
+    }
+  };
+
   return pc;
 }
 
@@ -621,6 +709,9 @@ async function startCall(remoteId: string, pin: string) {
       ordered: true,    // 可靠傳輸，確保檔案完整
     });
     bindFileChannel(dataChannelFile);
+
+    // 要求接收視訊軌道 (加入 m=video 至 SDP Offer)
+    pc.addTransceiver("video", { direction: "recvonly" });
 
     // 產生 SDP Offer
     const offer = await pc.createOffer();
@@ -667,6 +758,10 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
     return;
   }
 
+  rustOfferProcessed = false;
+  rustIceCandidateQueue = [];
+  currentRemoteId = sourceId;
+
   // 2. 驗證 PIN 是否符合本機 Access PIN
   if (incomingPin !== myPin) {
     console.warn(`[WebRTC] 拒絕連線：PIN 碼不符 (收到: ${incomingPin}, 預期: ${myPin})`);
@@ -681,28 +776,34 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
   }
 
   try {
-    const pc = createPeerConnection(sourceId);
-    peerConnection = pc;
+    // 轉交給 Rust 後端處理 WebRTC (方案 C: 啟動 Rust-native WebRTC 與硬體螢幕擷取)
+    console.log("[WebRTC] 交由 Rust 處理遠端 Offer...");
+    const answerSdp: string = await invoke("handle_remote_offer_as_host", { offerSdp: sdpString });
 
-    await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: sdpString }));
-
-    // 遠端 Offer 套用後，即可處理在等待期間收到的 ICE candidates
-    flushIceCandidateQueue();
-
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    // 回傳 Answer 給發起方
+    // 回傳 Rust 產生的 Answer 給發起方
     if (signalingWs?.readyState === WebSocket.OPEN) {
       signalingWs.send(JSON.stringify({
         type: "answer",
         target: sourceId,
-        sdp: answer.sdp,
+        sdp: answerSdp,
       }));
     }
-    console.log(`[WebRTC] Answer 已回傳給 ${sourceId}`);
+    console.log(`[WebRTC] Rust Answer 已回傳給 ${sourceId}`);
+    
+    // 標記 Offer 處理完畢，開始處理駐留在佇列中的 ICE Candidates
+    rustOfferProcessed = true;
+    while (rustIceCandidateQueue.length > 0) {
+      const cand = rustIceCandidateQueue.shift();
+      if (cand && cand !== "null") {
+        try {
+          await invoke("add_ice_candidate_to_rust", { candidateStr: cand });
+        } catch (e) {
+          console.warn("[WebRTC] 從佇列傳遞 ICE Candidate 給 Rust 失敗:", e);
+        }
+      }
+    }
   } catch (e) {
-    console.error("[WebRTC] handleIncomingOffer 發生嚴重錯誤:", e);
+    console.error("[WebRTC] handle_remote_offer_as_host 發生嚴重錯誤:", e);
     alert("處理遠端連線要求時發生錯誤：" + String(e));
   }
 }
@@ -780,6 +881,17 @@ function updateConnectionStatusUI(state: string) {
 // 初始化「開始連線」按鈕事件
 // =========================================================================
 function initConnectButton() {
+  listen('rust-ice-candidate', (event: any) => {
+    console.log("[WebRTC] 攔截到 Rust 產生的 ICE Candidate, 準備透過 WebSocket 轉發");
+    if (signalingWs && signalingWs.readyState === WebSocket.OPEN && currentRemoteId) {
+      signalingWs.send(JSON.stringify({
+        type: "ice",
+        target: currentRemoteId,
+        candidate: JSON.stringify(event.payload)
+      }));
+    }
+  });
+
   const btnConnect = document.getElementById("btn-connect");
   const remoteIdInput = document.getElementById("remote-id-input") as HTMLInputElement;
   const accessPinInput = document.getElementById("access-pin-input") as HTMLInputElement;
@@ -1008,7 +1120,8 @@ function startStatusPolling() {
 
       const encryptionText = t("encryption_gcu");
       setTextContent("val-metric-encryption", encryptionText);
-    } catch (error) {
+    } catch (error: any) {
+      if (typeof error === 'string' && error.includes("not found")) return;
       console.error("狀態輪詢出錯:", error);
     }
   }, 500);
@@ -1352,10 +1465,211 @@ function startTransferPolling(taskId: string) {
         clearInterval(transferPollingInterval!);
         if (progressContainer) progressContainer.style.display = "none";
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (typeof e === 'string' && e.includes("not found")) return;
       console.error(e);
     }
   }, 1000);
+}
+
+// =========================================================================
+// 遠端輸入控制 (滑鼠、觸控、鍵盤)
+// =========================================================================
+
+let inputSeqNumber = 0;
+let inputBound = false;
+
+function buildInputPacket(eventType: number, payload: Uint8Array): Uint8Array {
+  inputSeqNumber++;
+  const timestamp = Date.now();
+  const packet = new Uint8Array(12 + 1 + payload.length);
+  const view = new DataView(packet.buffer);
+  
+  view.setUint32(0, inputSeqNumber, false);
+  view.setUint32(4, Math.floor(timestamp / 0x100000000), false);
+  view.setUint32(8, timestamp % 0x100000000, false);
+  
+  packet[12] = eventType;
+  packet.set(payload, 13);
+  return packet;
+}
+
+function sendInputPacket(packet: Uint8Array) {
+  if (dataChannelControl && dataChannelControl.readyState === "open") {
+    dataChannelControl.send(packet as any);
+  }
+}
+
+function setupInputControl(videoEl: HTMLVideoElement) {
+  if (inputBound) return;
+  inputBound = true;
+
+  const sendPointerMove = (e: PointerEvent) => {
+    const rect = videoEl.getBoundingClientRect();
+    let x = (e.clientX - rect.left) / rect.width;
+    let y = (e.clientY - rect.top) / rect.height;
+    x = Math.max(0, Math.min(1, x));
+    y = Math.max(0, Math.min(1, y));
+
+    const payload = new Uint8Array(8);
+    const view = new DataView(payload.buffer);
+    view.setFloat32(0, x, false);
+    view.setFloat32(4, y, false);
+    sendInputPacket(buildInputPacket(0x01, payload));
+  };
+
+  videoEl.addEventListener("pointermove", (e) => {
+    e.preventDefault();
+    if (document.pointerLockElement === videoEl) {
+      // 在 Pointer Lock 模式下，傳送相對位移 (dx, dy)
+      const dx = Math.round(e.movementX);
+      const dy = Math.round(e.movementY);
+      const payload = new Uint8Array(8);
+      const view = new DataView(payload.buffer);
+      view.setInt32(0, dx, false);
+      view.setInt32(4, dy, false);
+      sendInputPacket(buildInputPacket(0x07, payload));
+    } else {
+      // 觸控螢幕或未鎖定時，使用絕對比例座標
+      sendPointerMove(e);
+    }
+  });
+
+  videoEl.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    
+    // 桌面端滑鼠點擊時請求游標鎖定，獲得極致原生手感
+    if (window.matchMedia("(pointer: fine)").matches && document.pointerLockElement !== videoEl) {
+      videoEl.requestPointerLock();
+    }
+    
+    // 對於觸控設備，點擊時不一定會先觸發 pointermove，必須在點下前先同步游標位置
+    if (document.pointerLockElement !== videoEl) {
+      sendPointerMove(e);
+    }
+    
+    const payload = new Uint8Array(1);
+    let btn = 1;
+    if (e.button === 2) btn = 2;
+    if (e.button === 1) btn = 3;
+    payload[0] = btn;
+    sendInputPacket(buildInputPacket(0x02, payload));
+  });
+
+  videoEl.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    const payload = new Uint8Array(1);
+    let btn = 1;
+    if (e.button === 2) btn = 2;
+    if (e.button === 1) btn = 3;
+    payload[0] = btn;
+    sendInputPacket(buildInputPacket(0x03, payload));
+  });
+
+  // 禁用右鍵選單
+  videoEl.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  window.addEventListener("keydown", (e) => {
+    if (videoEl.style.display === "none") return;
+    const payload = new Uint8Array(3);
+    const view = new DataView(payload.buffer);
+    
+    // 嘗試將鍵盤代碼轉移
+    let keyCode = e.keyCode;
+    if (keyCode === 0 || keyCode === 229) {
+      if (e.key && e.key.length === 1) {
+        keyCode = e.key.toUpperCase().charCodeAt(0);
+      }
+    }
+    view.setUint16(0, keyCode, false);
+    
+    let modifiers = 0;
+    if (e.shiftKey) modifiers |= 1;
+    if (e.ctrlKey) modifiers |= 2;
+    if (e.altKey) modifiers |= 4;
+    if (e.metaKey) modifiers |= 8;
+    payload[2] = modifiers;
+    
+    sendInputPacket(buildInputPacket(0x04, payload));
+  });
+
+  window.addEventListener("keyup", (e) => {
+    if (videoEl.style.display === "none") return;
+    const payload = new Uint8Array(3);
+    const view = new DataView(payload.buffer);
+    
+    let keyCode = e.keyCode;
+    if (keyCode === 0 || keyCode === 229) {
+      if (e.key && e.key.length === 1) {
+        keyCode = e.key.toUpperCase().charCodeAt(0);
+      }
+    }
+    view.setUint16(0, keyCode, false);
+    
+    let modifiers = 0;
+    if (e.shiftKey) modifiers |= 1;
+    if (e.ctrlKey) modifiers |= 2;
+    if (e.altKey) modifiers |= 4;
+    if (e.metaKey) modifiers |= 8;
+    payload[2] = modifiers;
+    
+    sendInputPacket(buildInputPacket(0x05, payload));
+  });
+
+  // 處理手機虛擬鍵盤觸發邏輯
+  const btnMobileKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
+  const hiddenKeyboardInput = document.getElementById("hidden-keyboard-input") as HTMLTextAreaElement;
+  
+  if (btnMobileKeyboard && hiddenKeyboardInput) {
+    // 點擊懸浮按鈕時，讓隱藏輸入框獲得焦點，強制 iOS Safari 彈出小鍵盤
+    btnMobileKeyboard.addEventListener("click", () => {
+      hiddenKeyboardInput.focus();
+      btnMobileKeyboard.style.background = "rgba(0, 132, 255, 0.4)";
+    });
+
+    // 當隱藏輸入框失去焦點時，恢復按鈕顏色
+    hiddenKeyboardInput.addEventListener("blur", () => {
+      btnMobileKeyboard.style.background = "rgba(255,255,255,0.2)";
+    });
+
+    // 攔截虛擬鍵盤的直接輸入事件 (針對無法正確觸發 keydown keyCode 的 iOS 鍵盤)
+    hiddenKeyboardInput.addEventListener("input", (e: any) => {
+      if (e.inputType === "insertText" && e.data) {
+        const char = e.data;
+        const keyCode = char.toUpperCase().charCodeAt(0);
+        
+        // 送出 KeyDown
+        const downPayload = new Uint8Array(3);
+        const downView = new DataView(downPayload.buffer);
+        downView.setUint16(0, keyCode, false);
+        downPayload[2] = 0;
+        sendInputPacket(buildInputPacket(0x04, downPayload));
+
+        // 送出 KeyUp
+        const upPayload = new Uint8Array(3);
+        const upView = new DataView(upPayload.buffer);
+        upView.setUint16(0, keyCode, false);
+        upPayload[2] = 0;
+        sendInputPacket(buildInputPacket(0x05, upPayload));
+        
+        hiddenKeyboardInput.value = ""; // 清空
+      }
+    });
+  }
+}
+
+// =========================================================================
+// UI Toggle 邏輯 (右側進階面板)
+// =========================================================================
+function initPanelToggle() {
+  const btnTogglePanel = document.getElementById("btn-toggle-panel");
+  const advancedPanel = document.getElementById("advanced-panel");
+  
+  if (btnTogglePanel && advancedPanel) {
+    btnTogglePanel.addEventListener("click", () => {
+      advancedPanel.classList.toggle("panel-open");
+    });
+  }
 }
 
 // =========================================================================
@@ -1376,6 +1690,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initLicenseVerification();
   initPrivacyMode();
   initNetworkSimulator();
+  initPanelToggle();
   initOfflineSdpMode();
   initSystemDiagnostic();
   initHelpButtons();

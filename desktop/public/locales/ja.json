@@ -90,5 +90,12 @@
   "protocol_p2p": "WebRTC P2P (直接)",
   "protocol_relay": "Relay (中継)",
   "encryption_gcu": "AES-256-GCM (GPU加速)",
-  "copy_tooltip": "コピー"
+  "copy_tooltip": "コピー",
+  "toast_system_error": "⚠️ システムエラー：右側の詳細パネルを開いてログを確認してください",
+  "toggle_panel_title": "詳細パネルを切り替える",
+  "tools_title": "高度なツール",
+  "file_transfer_title": "ファイル転送",
+  "drop_zone": "ファイルをここにドラッグ＆ドロップするか、クリックしてアップロード",
+  "btn_cancel_transfer": "転送をキャンセル",
+  "log_title": "システムログ"
 }

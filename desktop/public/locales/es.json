@@ -90,5 +90,12 @@
   "protocol_p2p": "WebRTC P2P (Directo)",
   "protocol_relay": "Relay (Intermediario)",
   "encryption_gcu": "AES-256-GCM (Acel. GPU)",
-  "copy_tooltip": "Copiar"
+  "copy_tooltip": "Copiar",
+  "toast_system_error": "⚠️ Error del sistema: Abra el panel avanzado para ver los registros",
+  "toggle_panel_title": "Alternar panel avanzado",
+  "tools_title": "Herramientas avanzadas",
+  "file_transfer_title": "Transferencia de archivos",
+  "drop_zone": "Arrastre y suelte archivos aquí o haga clic para subir",
+  "btn_cancel_transfer": "Cancelar transferencia",
+  "log_title": "Registros del sistema"
 }
