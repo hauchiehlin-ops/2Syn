@@ -94,7 +94,7 @@ impl VideoStreamer {
         })
     }
 
-    pub async fn start_capture_loop(&self, status_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>) {
+    pub async fn start_capture_loop(&self, status_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>, config_rx: tokio::sync::watch::Receiver<crate::connection::QualityConfig>) {
         let monitors = Monitor::all().unwrap_or_default();
         if monitors.is_empty() {
             eprintln!("[Video] 無法找到顯示器");
@@ -128,17 +128,29 @@ impl VideoStreamer {
             let mut tick = std::time::Instant::now();
             let mut frame_count = 0;
             loop {
-                let frame_time = std::time::Duration::from_millis(33); // 約 30fps
+                // 從 config_rx 取得當前的網路品質配置 (無鎖同步讀取)
+                let current_config = config_rx.borrow().clone();
+                let target_fps = current_config.target_fps.max(1); // 避免為 0
+                let frame_time = std::time::Duration::from_millis((1000 / target_fps) as u64);
+                
+                // 根據頻寬限制動態決定畫面解析度上限 (ABR 降階邏輯)
+                let max_width = if current_config.bitrate_limit_kbps < 3000 {
+                    854.0 // 480p 級別
+                } else if current_config.bitrate_limit_kbps < 10000 {
+                    1280.0 // 720p 級別
+                } else {
+                    1920.0 // 1080p 級別
+                };
                 
                 // 擷取螢幕
                 if let Ok(mut image) = monitor_clone.capture_image() {
                     let mut width = image.width() as usize;
                     let mut height = image.height() as usize;
                     
-                    // 如果是 Retina 螢幕或 4K，降解析度到 1080p 以提升速度
-                    if width > 1920 {
-                        let scale = 1920.0 / width as f32;
-                        let new_width = 1920;
+                    // 動態降階解析度以符合當前網路頻寬
+                    if width as f32 > max_width {
+                        let scale = max_width / width as f32;
+                        let new_width = max_width as u32;
                         let new_height = (height as f32 * scale) as u32;
                         image = image::imageops::resize(
                             &image,

@@ -2,7 +2,7 @@ use crate::CoreError;
 use crate::input::SecureInputPacket;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 use std::time::Duration;
 
 use webrtc::api::media_engine::MediaEngine;
@@ -60,13 +60,10 @@ pub struct NetworkMetrics {
     pub connection_type: ConnectionType,
 }
 
-type QualityChangeCallback = Arc<Mutex<Option<Box<dyn Fn(QualityConfig) + Send + Sync>>>>;
-
-/// 動態連線管理器
 pub struct ConnectionManager {
     current_metrics: Arc<Mutex<NetworkMetrics>>,
     current_config: Arc<Mutex<QualityConfig>>,
-    quality_change_callback: QualityChangeCallback,
+    config_tx: watch::Sender<QualityConfig>,
 }
 
 impl Default for ConnectionManager {
@@ -77,24 +74,23 @@ impl Default for ConnectionManager {
 
 impl ConnectionManager {
     pub fn new() -> Self {
+        let default_config = QualityConfig::default();
+        let (config_tx, _) = watch::channel(default_config.clone());
+
         Self {
             current_metrics: Arc::new(Mutex::new(NetworkMetrics {
                 rtt_ms: 10,
                 packet_loss_rate: 0.0,
                 connection_type: ConnectionType::P2PDirect,
             })),
-            current_config: Arc::new(Mutex::new(QualityConfig::default())),
-            quality_change_callback: Arc::new(Mutex::new(None)),
+            current_config: Arc::new(Mutex::new(default_config)),
+            config_tx,
         }
     }
 
-    /// 設定畫質變更回呼函式，用於通知編碼器與 Data Channel 調整參數
-    pub async fn on_quality_change<F>(&self, callback: F)
-    where
-        F: Fn(QualityConfig) + Send + Sync + 'static,
-    {
-        let mut cb = self.quality_change_callback.lock().await;
-        *cb = Some(Box::new(callback));
+    /// 訂閱畫質與網路配置變更
+    pub fn subscribe(&self) -> watch::Receiver<QualityConfig> {
+        self.config_tx.subscribe()
     }
 
     /// 更新當前網路狀態指標並執行決策樹
@@ -105,17 +101,14 @@ impl ConnectionManager {
         let new_config = self.decide_quality(&metrics);
         let mut current_c = self.current_config.lock().await;
         
-        // 只有在配置有變更時才觸發回呼
+        // 只有在配置有變更時才觸發廣播
         if new_config.target_fps != current_c.target_fps
             || new_config.color_format != current_c.color_format
             || new_config.bitrate_limit_kbps != current_c.bitrate_limit_kbps
             || new_config.file_transfer_enabled != current_c.file_transfer_enabled
         {
             *current_c = new_config.clone();
-            let cb = self.quality_change_callback.lock().await;
-            if let Some(ref callback) = *cb {
-                callback(new_config);
-            }
+            let _ = self.config_tx.send(new_config);
         }
     }
 

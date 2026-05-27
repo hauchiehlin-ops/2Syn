@@ -213,7 +213,10 @@ async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: St
         }
     });
 
-    streamer.start_capture_loop(Some(status_tx)).await;
+    use tauri::Manager;
+    let state = app_handle.state::<AppState>();
+    let config_rx = state.connection_manager.subscribe();
+    streamer.start_capture_loop(Some(status_tx), config_rx).await;
 
     let pc = session.get_peer_connection();
     
