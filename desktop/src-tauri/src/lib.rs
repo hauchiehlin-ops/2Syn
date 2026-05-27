@@ -5,8 +5,12 @@ use syn_core::security::{generate_hwid, LicenseValidator, SecureStorage};
 use syn_core::connection::{ConnectionManager, ConnectionType};
 #[cfg(not(target_os = "ios"))]
 use syn_core::file_transfer::FileTransferEngine;
+#[cfg(not(target_os = "ios"))]
 use std::sync::Arc;
+#[cfg(not(target_os = "ios"))]
 use tauri::{State, Manager, Emitter};
+#[cfg(target_os = "ios")]
+use tauri::State;
 
 struct AppState {
     #[cfg(not(target_os = "ios"))]
@@ -338,24 +342,30 @@ async fn get_connection_status(state: State<'_, AppState>) -> Result<serde_json:
 /// 檢查本機網路體質 (IPv6 與 Tailscale)
 #[tauri::command]
 async fn check_network_health() -> Result<serde_json::Value, String> {
-    let output = std::process::Command::new("ifconfig").output().map_err(|e| e.to_string())?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    
-    // IPv6 通常會包含 inet6 且不只是 ::1 (loopback) 或是 fe80 (link-local)
-    // 為了簡化，只要有 inet6 且不是只有 loopback，就當作有 IPv6 支援
-    let has_ipv6 = stdout.contains("inet6") && stdout.lines().any(|l| l.contains("inet6") && !l.contains("::1") && !l.contains("fe80::"));
-    
-    // 尋找 utun 或 100. 開頭的 Tailscale 虛擬網段 IP
-    let has_tailscale = stdout.lines().any(|l| l.contains("100.") || l.contains("fd7a:115c:a1e0:"));
+    #[cfg(target_os = "ios")]
+    {
+        // iOS 無法執行 ifconfig，預設回傳基礎支援
+        Ok(serde_json::json!({
+            "has_ipv6": true,
+            "has_tailscale": false
+        }))
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let output = std::process::Command::new("ifconfig").output().map_err(|e| e.to_string())?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        
+        let has_ipv6 = stdout.contains("inet6") && stdout.lines().any(|l| l.contains("inet6") && !l.contains("::1") && !l.contains("fe80::"));
+        let has_tailscale = stdout.lines().any(|l| l.contains("100.") || l.contains("fd7a:115c:a1e0:"));
 
-    Ok(serde_json::json!({
-        "has_ipv6": has_ipv6,
-        "has_tailscale": has_tailscale
-    }))
+        Ok(serde_json::json!({
+            "has_ipv6": has_ipv6,
+            "has_tailscale": has_tailscale
+        }))
+    }
 }
 
 /// 執行連線診斷，返回評估報告
-#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 async fn run_connection_diagnostic() -> Result<serde_json::Value, String> {
     println!("[DEBUG] 執行連線診斷");
@@ -524,7 +534,6 @@ pub fn run() {
             add_ice_candidate_to_rust,
             #[cfg(not(target_os = "ios"))]
             get_connection_status,
-            #[cfg(not(target_os = "ios"))]
             check_network_health,
             run_connection_diagnostic,
             #[cfg(not(target_os = "ios"))]
