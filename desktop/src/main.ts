@@ -1624,10 +1624,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   videoEl.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     
-    // 桌面端滑鼠點擊時請求游標鎖定，獲得極致原生手感
-    if (window.matchMedia("(pointer: fine)").matches && document.pointerLockElement !== videoEl) {
-      videoEl.requestPointerLock();
-    }
+    // 移除 requestPointerLock，因為 macOS 原生截圖 API 不會擷取遠端硬體游標，
+    // 若將本地端游標隱藏 (Pointer Lock) 會導致使用者完全看不到滑鼠（沒有游標）。
+    // 我們讓本地端保留游標顯示，並依賴絕對座標系統來精準對位。
     
     // 對於觸控設備，點擊時不一定會先觸發 pointermove，必須在點下前先同步游標位置
     if (document.pointerLockElement !== videoEl) {
@@ -1679,6 +1678,35 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     sendInputPacket(buildInputPacket(0x04, payload));
   });
 
+  // 攔截鍵盤按下 (KeyDown)
+  window.addEventListener("keydown", (e) => {
+    if (videoEl.style.display === "none") return;
+    
+    // 阻止預設行為 (例如空白鍵向下捲動、Tab 切換焦點)，讓按鍵能完整送給遠端
+    e.preventDefault(); 
+    
+    const payload = new Uint8Array(3);
+    const view = new DataView(payload.buffer);
+    
+    let keyCode = e.keyCode;
+    if (keyCode === 0 || keyCode === 229) {
+      if (e.key && e.key.length === 1) {
+        keyCode = e.key.toUpperCase().charCodeAt(0);
+      }
+    }
+    view.setUint16(0, keyCode, false);
+    
+    let modifiers = 0;
+    if (e.shiftKey) modifiers |= 1;
+    if (e.ctrlKey) modifiers |= 2;
+    if (e.altKey) modifiers |= 4;
+    if (e.metaKey) modifiers |= 8;
+    payload[2] = modifiers;
+    
+    sendInputPacket(buildInputPacket(0x05, payload)); // 0x05 是 KeyDown
+  });
+
+  // 攔截鍵盤放開 (KeyUp)
   window.addEventListener("keyup", (e) => {
     if (videoEl.style.display === "none") return;
     const payload = new Uint8Array(3);
@@ -1699,7 +1727,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (e.metaKey) modifiers |= 8;
     payload[2] = modifiers;
     
-    sendInputPacket(buildInputPacket(0x05, payload));
+    sendInputPacket(buildInputPacket(0x06, payload)); // 0x06 是 KeyUp
   });
 
   // 處理手機虛擬鍵盤觸發邏輯
