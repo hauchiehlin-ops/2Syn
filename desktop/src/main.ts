@@ -1732,6 +1732,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let initialZoom = 1;
   let lastTouchX = 0;
   let lastTouchY = 0;
+  
+  let lastTapTime = 0;
+  let isDragging = false;
+  let touchStartTime = 0;
+  let touchStartPos = { x: 0, y: 0 };
 
   function getPinchDistance(touches: TouchList) {
     const dx = touches[0].clientX - touches[1].clientX;
@@ -1752,9 +1757,19 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       lastTouchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
     } else if (e.touches.length === 1) {
       handleTouchMove(e);
-      const payload = new Uint8Array(1);
-      payload[0] = 1; // Left click
-      sendInputPacket(buildInputPacket(0x02, payload));
+      const now = Date.now();
+      if (now - lastTapTime < 300) {
+        // Double tap: Start dragging
+        isDragging = true;
+        const payload = new Uint8Array(1);
+        payload[0] = 1; // Left click
+        sendInputPacket(buildInputPacket(0x02, payload));
+      } else {
+        // Single touch down (Hover)
+        isDragging = false;
+        touchStartTime = now;
+        touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
     }
   }, { passive: false });
 
@@ -1802,9 +1817,35 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       initialPinchDistance = -1;
       lastTouchX = 0;
       lastTouchY = 0;
-      const payload = new Uint8Array(1);
-      payload[0] = 1; // Left click release
-      sendInputPacket(buildInputPacket(0x03, payload));
+      
+      if (isDragging) {
+        const payload = new Uint8Array(1);
+        payload[0] = 1; // Left click release
+        sendInputPacket(buildInputPacket(0x03, payload));
+        isDragging = false;
+      } else {
+        // Check for single tap (click)
+        if (touchStartTime > 0) {
+          const now = Date.now();
+          if (e.changedTouches.length > 0) {
+            const endX = e.changedTouches[0].clientX;
+            const endY = e.changedTouches[0].clientY;
+            const dist = Math.sqrt(Math.pow(endX - touchStartPos.x, 2) + Math.pow(endY - touchStartPos.y, 2));
+            if (now - touchStartTime < 300 && dist < 15) {
+              // Valid Tap
+              const payloadDown = new Uint8Array(1);
+              payloadDown[0] = 1;
+              sendInputPacket(buildInputPacket(0x02, payloadDown));
+              
+              const payloadUp = new Uint8Array(1);
+              payloadUp[0] = 1;
+              sendInputPacket(buildInputPacket(0x03, payloadUp));
+            }
+          }
+        }
+      }
+      touchStartTime = 0;
+      lastTapTime = Date.now();
     } else if (e.touches.length === 1) {
       // 雙指放開一指，重新設定單指位置避免跳躍
       initialPinchDistance = -1;
