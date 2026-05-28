@@ -97,5 +97,12 @@
   "file_transfer_title": "Dateiübertragung",
   "drop_zone": "Dateien hierhin ziehen & ablegen oder zum Hochladen klicken",
   "btn_cancel_transfer": "Übertragung abbrechen",
-  "log_title": "Systemprotokolle"
+  "log_title": "Systemprotokolle",
+  "help_title": "Help & Privacy",
+  "help_inst_title": "How to Use",
+  "help_inst_1": "<strong>Trackpad Mode:</strong> Use one finger to move cursor. Tap to left-click, double-tap to drag.",
+  "help_inst_2": "<strong>Two-Finger:</strong> Swipe with two fingers to scroll. Tap with two fingers for right-click.",
+  "help_inst_3": "<strong>Keyboard:</strong> Tap the ⌨️ icon in the bottom right corner when connected.",
+  "help_priv_title": "Privacy Policy",
+  "help_priv_desc": "Your privacy is our priority. 2syn utilizes peer-to-peer WebRTC technology with end-to-end encryption. Your screen data and inputs are transmitted directly between your devices and are never stored or inspected by our servers. We do not collect or sell your personal data."
 }

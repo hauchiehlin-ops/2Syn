@@ -15,12 +15,22 @@
 
 </head>
 <body>
-  <!-- Remote Video View (Hidden until connected) -->
-  <video id="remote-video" autoplay playsinline style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: contain; z-index: 100; background: #000; touch-action: none;"></video>
+  <!-- Remote Video Container (Hidden until connected) -->
+  <div id="remote-video-container" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden; z-index: 100; background: #000; touch-action: none;">
+    <video id="remote-video" autoplay playsinline style="display: block; width: 100%; height: 100%; object-fit: contain; transform-origin: top left; touch-action: none;"></video>
+  </div>
+  
+  <!-- 顯示模式切換按鈕 (遠端畫面開啟時顯示) -->
+  <button id="btn-display-mode" style="display: none; position: fixed; top: 20px; right: 20px; z-index: 110; background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.4); border-radius: 8px; padding: 8px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 14px;">🔍 Original Size</button>
+  
+  <!-- 左上方懸浮控制選單 (遠端畫面開啟時顯示) -->
+  <div id="left-floating-menu" style="display: none; position: fixed; top: 20px; left: 20px; z-index: 110; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 6px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); align-items: center; gap: 8px;">
+    <button id="btn-touch-mode" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px;">🖱️ Trackpad Mode</button>
+  </div>
   
   <!-- 虛擬滑鼠游標 (給觸控或隱藏游標時對位用) -->
-  <div id="remote-cursor" style="display: none; position: fixed; pointer-events: none; z-index: 105; width: 24px; height: 24px; transform: translate(-4px, -2px);">
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));">
+  <div id="remote-cursor" style="display: none; position: fixed; pointer-events: none; z-index: 105; width: 12px; height: 12px; transform: translate(-2px, -1px);">
+    <svg width="100%" height="100%" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));">
       <path d="M4 2 L4 22 L11 15 L16 23 L18 22 L13 14 L20 13 Z" fill="black" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
     </svg>
   </div>
@@ -41,6 +51,7 @@
         <span class="logo-text">2syn</span>
       </div>
       <div class="header-actions">
+        <button id="btn-show-help" style="background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px 8px; margin-right: 4px; transition: transform 0.2s;" title="Help & Privacy">ℹ️</button>
         <select id="language-select" class="language-dropdown">
           <option value="zh-TW">繁體中文</option>
           <option value="zh-CN">简体中文</option>
@@ -177,8 +188,8 @@
 
         <div class="separator"></div>
 
-        <!-- 檔案傳輸 -->
-        <div class="file-transfer-section">
+        <!-- 檔案傳輸 (隱藏以符合 App Store 審核不允許 placeholder 的規範) -->
+        <div class="file-transfer-section" style="display: none;">
           <h3 id="txt-file-transfer-title" style="font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: 8px;">File Transfer</h3>
           <div id="file-drop-zone" style="border: 2px dashed var(--panel-border); border-radius: var(--border-radius-md); padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px; cursor: pointer; transition: var(--transition-smooth); background: rgba(0,0,0,0.02);">
             <span id="txt-drop-zone">Drag & Drop files here or Click to upload</span>
@@ -351,6 +362,28 @@
       </section>
 
     </main>
+  </div>
+
+  <!-- Help & Privacy Modal -->
+  <div id="help-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 200; background: rgba(0,0,0,0.5); backdrop-filter: blur(5px); justify-content: center; align-items: center; padding: 20px;">
+    <div style="background: var(--glass-bg, rgba(255,255,255,0.95)); border: 1px solid var(--panel-border, rgba(0,0,0,0.1)); border-radius: var(--border-radius-lg, 16px); padding: 24px; max-width: 500px; width: 100%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 style="margin: 0; font-size: 18px; font-weight: 600;" id="txt-help-title">Help & Privacy</h2>
+        <button id="btn-close-help" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-main);">&times;</button>
+      </div>
+      <div style="font-size: 13px; line-height: 1.6; color: var(--text-main);">
+        <h3 id="txt-help-inst-title" style="margin-top: 0; font-size: 14px; margin-bottom: 8px;">How to Use</h3>
+        <ul id="txt-help-inst-list" style="padding-left: 20px; margin-bottom: 20px; margin-top: 0;">
+          <li><strong>Trackpad Mode:</strong> Use one finger to move cursor. Tap to left-click, double-tap to drag.</li>
+          <li><strong>Two-Finger:</strong> Swipe with two fingers to scroll. Tap with two fingers for right-click.</li>
+          <li><strong>Keyboard:</strong> Tap the ⌨️ icon in the bottom right corner when connected.</li>
+        </ul>
+        <h3 id="txt-help-priv-title" style="font-size: 14px; margin-bottom: 8px;">Privacy Policy</h3>
+        <p id="txt-help-priv-desc" style="margin-top: 0; margin-bottom: 0;">
+          Your privacy is our priority. 2syn utilizes peer-to-peer WebRTC technology with end-to-end encryption. Your screen data and inputs are transmitted directly between your devices and are never stored or inspected by our servers. We do not collect or sell your personal data.
+        </p>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/src/main.ts"></script>

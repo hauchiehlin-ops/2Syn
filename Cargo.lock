@@ -5894,7 +5894,7 @@ dependencies = [
 
 [[package]]
 name = "syn-core"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "aes-gcm",
  "base32",
@@ -5926,8 +5926,9 @@ dependencies = [
 
 [[package]]
 name = "syn-desktop"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
+ "core-foundation 0.9.4",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
@@ -5942,7 +5943,7 @@ dependencies = [
 
 [[package]]
 name = "syn-signaling"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "axum",
  "futures-util",

@@ -117,12 +117,9 @@ impl ConnectionManager {
         let mut config = QualityConfig::default();
 
         // 1. 判斷連線媒介是否為 Relay
+        // （堅持不使用 TURN 策略：不會出現 Relay 狀態，保留分支以備未來擴展如 Tailscale Relay）
         if metrics.connection_type == ConnectionType::Relay {
-            config.target_fps = 60;
-            config.color_format = ColorFormat::Yuv420;
-            config.bitrate_limit_kbps = 5000;
-            config.file_transfer_enabled = false;
-            return config;
+            // 目前維持預設不調整，依賴 STUN P2P
         }
 
         // 2. 基於網路延遲 (RTT) 與丟包率的動態降級 (P2P 狀態下)
@@ -197,13 +194,13 @@ impl WebRtcSession {
             .with_media_engine(m)
             .build();
 
-        // 高可用性 STUN 備援清單
+        // 高可用性 STUN 清單 (堅持不使用 TURN 以符合架構設計)
         let ice_servers = vec![
             RTCIceServer {
                 urls: vec![
                     "stun:stun.l.google.com:19302".to_string(),
                     "stun:stun1.l.google.com:19302".to_string(),
-                    "stun:stun.cloudflare.com:3478".to_string(), // Cloudflare 作為全球備援
+                    "stun:stun.cloudflare.com:3478".to_string(),
                 ],
                 ..Default::default()
             }
@@ -248,12 +245,11 @@ impl WebRtcSession {
         Ok(video_track)
     }
 
-    /// 建立極低延遲高優先權的滑鼠與鍵盤控制輸入通道 (Data Channel)
+    /// 建立高優先權的滑鼠與鍵盤控制輸入通道 (可靠傳輸)
     pub async fn setup_input_channel(&self) -> Result<Arc<RTCDataChannel>, CoreError> {
-        // 設定 Data Channel 為不可靠、免重傳以求極致低延遲
         let init = RTCDataChannelInit {
             ordered: Some(true),
-            max_retransmits: Some(0), // 不重傳
+            max_retransmits: None, // 允許無限重傳，保證按鍵不遺失
             ..Default::default()
         };
 
@@ -262,34 +258,76 @@ impl WebRtcSession {
             .await
             .map_err(|e| CoreError::NetworkError(format!("無法建立輸入控制通道: {}", e)))?;
 
-        // 反重放序號計數器（原子操作，執行緒安全）
+        // 反重放序號計數器
         let last_seq = Arc::new(AtomicU32::new(0));
 
-        // 註冊資料通道接收回呼
         let _dc = Arc::clone(&data_channel);
         data_channel.on_message(Box::new(move |msg| {
             let data = msg.data.to_vec();
             let last_seq = Arc::clone(&last_seq);
             Box::pin(async move {
-                // 以 SecureInputPacket 進行反序列化，強制驗證序號遞增與時間戳記時效（抵禦重放攻擊）
                 match SecureInputPacket::deserialize(&data) {
                     Ok(packet) => {
                         let prev_seq = last_seq.load(Ordering::SeqCst);
                         match packet.verify(prev_seq) {
                             Ok(()) => {
-                                // 更新已知最新序號
                                 last_seq.store(packet.sequence_number, Ordering::SeqCst);
                                 if let Err(e) = packet.event.simulate() {
-                                    eprintln!("[input] simulate failed: {}", e);
+                                    eprintln!("[input-control] simulate failed: {}", e);
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[security] packet rejected: {}", e);
+                                eprintln!("[security input-control] packet rejected: {}", e);
                             }
                         }
                     }
                     Err(err) => {
-                        eprintln!("[input] deserialize failed: {:?}", err);
+                        eprintln!("[input-control] deserialize failed: {:?}", err);
+                    }
+                }
+            })
+        }));
+
+        Ok(data_channel)
+    }
+
+    /// 建立非可靠、不重傳、不保證順序的輸入通道 (用於滑鼠移動等高頻且可遺失的數據)
+    pub async fn setup_unreliable_input_channel(&self) -> Result<Arc<RTCDataChannel>, CoreError> {
+        let init = RTCDataChannelInit {
+            ordered: Some(false),
+            max_retransmits: Some(0), // 不重傳
+            ..Default::default()
+        };
+
+        let data_channel = self.peer_connection
+            .create_data_channel("input-unreliable", Some(init))
+            .await
+            .map_err(|e| CoreError::NetworkError(format!("無法建立非可靠輸入通道: {}", e)))?;
+
+        let last_seq = Arc::new(AtomicU32::new(0));
+
+        let _dc = Arc::clone(&data_channel);
+        data_channel.on_message(Box::new(move |msg| {
+            let data = msg.data.to_vec();
+            let last_seq = Arc::clone(&last_seq);
+            Box::pin(async move {
+                match SecureInputPacket::deserialize(&data) {
+                    Ok(packet) => {
+                        let prev_seq = last_seq.load(Ordering::SeqCst);
+                        match packet.verify(prev_seq) {
+                            Ok(()) => {
+                                last_seq.store(packet.sequence_number, Ordering::SeqCst);
+                                if let Err(e) = packet.event.simulate() {
+                                    eprintln!("[input-unreliable] simulate failed: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[security input-unreliable] packet rejected: {}", e);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("[input-unreliable] deserialize failed: {:?}", err);
                     }
                 }
             })

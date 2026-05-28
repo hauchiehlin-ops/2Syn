@@ -126,8 +126,10 @@ impl VideoStreamer {
 
         tokio::task::spawn_blocking(move || {
             let mut tick = std::time::Instant::now();
-            let mut frame_count = 0;
+            let mut frame_count: u64 = 0;
             loop {
+                // catch_unwind 防線：確保任何內部 panic 不會傳播到 tao 主執行緒
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // 從 config_rx 取得當前的網路品質配置 (無鎖同步讀取)
                 let current_config = config_rx.borrow().clone();
                 let target_fps = current_config.target_fps.max(1); // 避免為 0
@@ -147,11 +149,16 @@ impl VideoStreamer {
                     let mut width = image.width() as usize;
                     let mut height = image.height() as usize;
                     
+                    // 防呆：擷取到空白畫面時跳過此幀
+                    if width == 0 || height == 0 {
+                        return;
+                    }
+                    
                     // 動態降階解析度以符合當前網路頻寬
                     if width as f32 > max_width {
                         let scale = max_width / width as f32;
-                        let new_width = max_width as u32;
-                        let new_height = (height as f32 * scale) as u32;
+                        let new_width = (max_width as u32).max(2);
+                        let new_height = ((height as f32 * scale) as u32).max(2);
                         image = image::imageops::resize(
                             &image,
                             new_width,
@@ -162,9 +169,13 @@ impl VideoStreamer {
                         height = image.height() as usize;
                     }
 
-                    // 為了確保 YUV 420 轉換正常，長寬必須是偶數
+                    // 為了確保 YUV 420 轉換正常，長寬必須是偶數且至少為 2
                     let adj_width = if width % 2 != 0 { width - 1 } else { width };
                     let adj_height = if height % 2 != 0 { height - 1 } else { height };
+                    
+                    if adj_width < 2 || adj_height < 2 {
+                        return;
+                    }
 
                     let yuv = RgbaToYuv420::new(image.as_raw(), adj_width, adj_height);
                     
@@ -209,6 +220,14 @@ impl VideoStreamer {
                     std::thread::sleep(frame_time - elapsed);
                 }
                 tick = std::time::Instant::now();
+                })); // end catch_unwind closure
+                
+                if let Err(panic_info) = result {
+                    eprintln!("[Video] Capture loop caught panic: {:?}", panic_info);
+                    // 短暫休眠後繼續，避免無限快速迴圈
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    tick = std::time::Instant::now();
+                }
             }
         });
     }

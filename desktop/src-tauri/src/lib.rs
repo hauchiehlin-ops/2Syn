@@ -209,6 +209,7 @@ async fn generate_local_sdp_offer() -> Result<String, String> {
         
     let pc = session.get_peer_connection();
     session.setup_input_channel().await.map_err(|e| e.to_string())?;
+    session.setup_unreliable_input_channel().await.map_err(|e| e.to_string())?;
     
     let offer = pc.create_offer(None)
         .await
@@ -267,14 +268,16 @@ async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: St
         Box::pin(async {})
     }));
 
-    // 處理 DataChannel 接收事件
-    let last_seq = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    // 處理 DataChannel 接收事件，將序列號追蹤分為可靠與不可靠通道
+    let control_last_seq = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let unreliable_last_seq = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    
     pc.on_data_channel(Box::new(move |d| {
         let label = d.label().to_owned();
         println!("Rust 接收到 DataChannel: {}", label);
         
         if label == "input-control" {
-            let last_seq = Arc::clone(&last_seq);
+            let last_seq = Arc::clone(&control_last_seq);
             d.on_message(Box::new(move |msg| {
                 let data = msg.data.to_vec();
                 let last_seq = Arc::clone(&last_seq);
@@ -288,13 +291,38 @@ async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: St
                                 Ok(()) => {
                                     last_seq.store(packet.sequence_number, Ordering::SeqCst);
                                     if let Err(e) = packet.event.simulate() {
-                                        eprintln!("[input] simulate failed: {}", e);
+                                        eprintln!("[input-control] simulate failed: {}", e);
                                     }
                                 }
-                                Err(e) => eprintln!("[security] packet rejected: {}", e),
+                                Err(e) => eprintln!("[security input-control] packet rejected: {}", e),
                             }
                         }
-                        Err(err) => eprintln!("[input] deserialize failed: {:?}", err),
+                        Err(err) => eprintln!("[input-control] deserialize failed: {:?}", err),
+                    }
+                })
+            }));
+        } else if label == "input-unreliable" {
+            let last_seq = Arc::clone(&unreliable_last_seq);
+            d.on_message(Box::new(move |msg| {
+                let data = msg.data.to_vec();
+                let last_seq = Arc::clone(&last_seq);
+                Box::pin(async move {
+                    use std::sync::atomic::Ordering;
+                    use syn_core::input::SecureInputPacket;
+                    match SecureInputPacket::deserialize(&data) {
+                        Ok(packet) => {
+                            let prev_seq = last_seq.load(Ordering::SeqCst);
+                            match packet.verify(prev_seq) {
+                                Ok(()) => {
+                                    last_seq.store(packet.sequence_number, Ordering::SeqCst);
+                                    if let Err(e) = packet.event.simulate() {
+                                        eprintln!("[input-unreliable] simulate failed: {}", e);
+                                    }
+                                }
+                                Err(e) => eprintln!("[security input-unreliable] packet rejected: {}", e),
+                            }
+                        }
+                        Err(err) => eprintln!("[input-unreliable] deserialize failed: {:?}", err),
                     }
                 })
             }));
@@ -429,6 +457,13 @@ async fn trigger_network_simulation(state: State<'_, AppState>, rtt_ms: u32, los
     
     state.connection_manager.update_metrics(metrics).await;
     Ok("ok".to_string())
+}
+
+mod permissions;
+
+#[tauri::command]
+fn check_macos_permissions() -> bool {
+    permissions::check_and_request_permissions()
 }
 
 /// 接收來自前端 WebRTC Data Channel 的二進位輸入封包並執行（被控端）
@@ -583,7 +618,8 @@ pub fn run() {
             #[cfg(not(target_os = "ios"))]
             get_active_transfers,
             #[cfg(not(target_os = "ios"))]
-            cancel_transfer
+            cancel_transfer,
+            check_macos_permissions
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 應用程序執行時發生錯誤");

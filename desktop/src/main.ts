@@ -68,11 +68,22 @@ function showToast(message: string, duration: number = 3000) {
 // =========================================================================
 let signalingWs: WebSocket | null = null;
 let peerConnection: RTCPeerConnection | null = null;
+let videoScale = 1;
+let videoTranslateX = 0;
+let videoTranslateY = 0;
+let isLocalPinching = false;
+let pinchStartScale = 1;
+let pinchStartTx = 0;
+let pinchStartTy = 0;
+let pinchStartCx = 0;
+let pinchStartCy = 0;
+
 let iceCandidateQueue: RTCIceCandidateInit[] = [];
 let rustIceCandidateQueue: string[] = [];
 let isHostMode: boolean = false; // 標記目前是否為被控端
 let rustOfferProcessed: boolean = false; // 標記 Rust 是否已經處理完 Offer
 let dataChannelControl: RTCDataChannel | null = null;
+let dataChannelUnreliable: RTCDataChannel | null = null;
 let dataChannelFile: RTCDataChannel | null = null;
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
 let myId: string = "";                        // 本機 9 位數 ID
@@ -94,20 +105,10 @@ function getSignalingUrl(): string {
   return OFFICIAL_SIGNALING_SERVER;
 }
 
-// STUN 與 TURN 伺服器清單（已恢復 TURN 備援機制，確保極端網路環境下的高可用性）
+// STUN 伺服器清單（堅持不使用 TURN，避免未來營運成本）
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-  { urls: ["stun:stun.cloudflare.com:3478"] },
-  {
-    urls: ["turn:openrelay.metered.ca:80"],
-    username: "openrelayproject",
-    credential: "openrelayproject"
-  },
-  {
-    urls: ["turn:openrelay.metered.ca:443"],
-    username: "openrelayproject",
-    credential: "openrelayproject"
-  }
+  { urls: ["stun:stun.cloudflare.com:3478"] }
 ];
 
 // 宣告語系翻譯字典快取
@@ -171,7 +172,7 @@ const fallbackTranslations: Record<string, string> = {
   "metric_color": "Color Sampling",
   "metric_bitrate": "Max Bitrate Limit",
   "metric_file": "File Transfer",
-  "sim_title": "PoC Network Simulator",
+  "sim_title": "Network Connection Mode",
   "sim_desc": "Adjust network parameters to verify the dynamic degradation of the quality decision tree.",
   "sim_rtt": "RTT Latency",
   "sim_loss": "Packet Loss Rate",
@@ -322,6 +323,20 @@ function updateDomTranslations() {
   setTextContent("lbl-sim-loss", t("sim_loss"));
   setTextContent("lbl-sim-relay", t("sim_relay"));
 
+  setTextContent("txt-help-title", t("help_title"));
+  setTextContent("txt-help-inst-title", t("help_inst_title"));
+  setTextContent("txt-help-priv-title", t("help_priv_title"));
+  setTextContent("txt-help-priv-desc", t("help_priv_desc"));
+  
+  const helpInstList = document.getElementById("txt-help-inst-list");
+  if (helpInstList) {
+    helpInstList.innerHTML = `
+      <li>${t("help_inst_1")}</li>
+      <li>${t("help_inst_2")}</li>
+      <li>${t("help_inst_3")}</li>
+    `;
+  }
+
   // 新增右側面板的翻譯綁定
   setTextContent("txt-tools-title", t("tools_title"));
   setTextContent("txt-file-transfer-title", t("file_transfer_title"));
@@ -436,11 +451,11 @@ function generateMockMyId(): string {
   const valMyId = document.getElementById("val-my-id");
   const r = () => Math.floor(100 + Math.random() * 900);
   
-  // 從 sessionStorage 取回已產生的 ID，確保重整後 ID 一致
-  let storedId = sessionStorage.getItem("2syn_my_id");
+  // 從 localStorage 取回已產生的 ID，確保重開程式後 ID 永久一致
+  let storedId = localStorage.getItem("2syn_my_id");
   if (!storedId) {
     storedId = `${r()}${r()}${r()}`;
-    sessionStorage.setItem("2syn_my_id", storedId);
+    localStorage.setItem("2syn_my_id", storedId);
   }
   
   if (valMyId) {
@@ -492,6 +507,7 @@ function initAccessPin() {
 
 // 初始化固定密碼設定邏輯
 async function initStaticPassword() {
+  if (!isTauri()) return;
   const btnSetPwd = document.getElementById("btn-set-static-pwd") as HTMLButtonElement;
   const inputPwd = document.getElementById("input-static-pwd") as HTMLInputElement;
   const statusSpan = document.getElementById("static-pwd-status");
@@ -549,7 +565,7 @@ function initSignalingClient() {
       if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
         signalingWs.send(JSON.stringify({ type: "ping" }));
       }
-    }, 30000);
+    }, 15000); // 縮短至 15 秒，避免 macOS App Nap 導致計時器延遲而超過 Render 的 55 秒閒置限制
   };
 
   signalingWs.onmessage = async (event) => {
@@ -611,24 +627,44 @@ function initSignalingClient() {
       case "error":
         console.error("[Signaling] 伺服器錯誤:", msg.message);
         if (msg.message === "Target offline") {
-          alert(t("err_target_offline") || "對方不在線上，請確認設備 ID 是否正確。");
+          const offlineMsg = t("err_target_offline") || "對方不在線上，請確認設備 ID 是否正確。";
+          const btnConnect = document.getElementById("btn-connect");
+          if (btnConnect) {
+            btnConnect.textContent = offlineMsg;
+            btnConnect.style.backgroundColor = "#e74c3c";
+            setTimeout(() => {
+              btnConnect.textContent = t("btn_connect") || "開始連線";
+              btnConnect.style.backgroundColor = "";
+            }, 3000);
+          }
           resetConnectionUI();
         } else if (msg.message.includes("Connection rejected")) {
-          alert("連線被拒絕：PIN 碼錯誤或對方拒絕連線。");
+          const rejectMsg = t("err_rejected") || "連線被拒絕：PIN 碼錯誤或對方拒絕連線。";
+          const btnConnect = document.getElementById("btn-connect");
+          if (btnConnect) {
+            btnConnect.textContent = rejectMsg;
+            btnConnect.style.backgroundColor = "#e74c3c";
+            setTimeout(() => {
+              btnConnect.textContent = t("btn_connect") || "開始連線";
+              btnConnect.style.backgroundColor = "";
+            }, 3000);
+          }
           resetConnectionUI();
         }
         break;
     }
   };
 
-  signalingWs.onclose = () => {
+  signalingWs.onclose = function(this: WebSocket) {
     console.warn("[Signaling] WebSocket 已斷線，5 秒後重新嘗試...");
-    signalingWs = null;
-    if (heartbeatTimer) {
-      clearInterval(heartbeatTimer);
-      heartbeatTimer = null;
+    if (signalingWs === this) {
+      signalingWs = null;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      setTimeout(initSignalingClient, 5000);
     }
-    setTimeout(initSignalingClient, 5000);
   };
 
   signalingWs.onerror = (err) => {
@@ -720,11 +756,17 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
     if (event.track.kind === "video") {
         // --- UI Setup ---
         const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
+        const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
+        const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
         const mainContent = document.querySelector(".glass-container") as HTMLElement;
         const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
         
-        videoEl.style.display = "block";
+        if (videoContainer) videoContainer.style.display = "block";
+        if (btnDisplayMode) btnDisplayMode.style.display = "block";
         if (mainContent) mainContent.style.display = "none";
+        
+        const leftFloatingMenu = document.getElementById("left-floating-menu");
+        if (leftFloatingMenu) leftFloatingMenu.style.display = "flex";
         
         // 如果是在手機/觸控環境上，顯示鍵盤呼叫按鈕
         if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
@@ -770,9 +812,14 @@ async function startCall(remoteId: string, pin: string) {
     // 主動端建立 Data Channels
     dataChannelControl = pc.createDataChannel("input-control", {
       ordered: true,
-      maxRetransmits: 0, // 低延遲，不重傳
     });
     bindControlChannel(dataChannelControl);
+
+    dataChannelUnreliable = pc.createDataChannel("input-unreliable", {
+      ordered: false,
+      maxRetransmits: 0,
+    });
+    bindUnreliableChannel(dataChannelUnreliable);
 
     dataChannelFile = pc.createDataChannel("file-transfer", {
       ordered: true,    // 可靠傳輸，確保檔案完整
@@ -903,6 +950,23 @@ function bindControlChannel(ch: RTCDataChannel) {
   };
 }
 
+// 非可靠控制通道綁定
+function bindUnreliableChannel(ch: RTCDataChannel) {
+  ch.onopen = () => console.log("[DataChannel] input-unreliable 已開啟");
+  ch.onclose = () => console.log("[DataChannel] input-unreliable 已關閉");
+  ch.onmessage = async (event) => {
+    try {
+      const data: Uint8Array = event.data instanceof ArrayBuffer
+        ? new Uint8Array(event.data)
+        : new Uint8Array(await event.data.arrayBuffer());
+      // 交由 Rust 後端執行實際的滑鼠操作 (MouseMove 等)
+      await invoke("handle_remote_input", { data: Array.from(data) });
+    } catch (e) {
+      console.error("[Control-Unreliable] 執行遠端輸入失敗:", e);
+    }
+  };
+}
+
 // 檔案傳輸通道綁定
 function bindFileChannel(ch: RTCDataChannel) {
   ch.binaryType = "arraybuffer";
@@ -929,16 +993,32 @@ function resetConnectionUI() {
   const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
   const mainContent = document.querySelector(".glass-container") as HTMLElement;
   const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
+  const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
+  const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
   
+  if (videoContainer) {
+    videoContainer.style.display = "none";
+  }
   if (videoEl) {
-    videoEl.style.display = "none";
     videoEl.srcObject = null;
+    videoEl.style.objectFit = "contain";
+    videoEl.style.width = "100%";
+    videoEl.style.height = "100%";
+  }
+  if (btnDisplayMode) {
+    btnDisplayMode.style.display = "none";
+    btnDisplayMode.textContent = "🔍 Original Size";
   }
   if (mainContent) {
     mainContent.style.display = "flex";
   }
   if (btnKeyboard) {
     btnKeyboard.style.display = "none";
+  }
+  
+  const leftFloatingMenu = document.getElementById("left-floating-menu");
+  if (leftFloatingMenu) {
+    leftFloatingMenu.style.display = "none";
   }
 }
 
@@ -951,6 +1031,7 @@ function updateConnectionStatusUI(state: string) {
     failed:     t("conn_failed")     || "連線失敗",
     closed:     t("conn_closed")     || "已關閉",
   };
+
   const label = statusMap[state];
   if (label) {
     // 更新連線按鈕文字以提供即時回饋
@@ -981,6 +1062,18 @@ function updateConnectionStatusUI(state: string) {
 // 初始化「開始連線」按鈕事件
 // =========================================================================
 function initConnectButton() {
+  const btnFixNetwork = document.getElementById('btn-fix-network');
+  const networkIndicator = document.getElementById('network-health-indicator');
+  const networkText = document.getElementById('network-health-text');
+  const networkDesc = document.getElementById('network-health-desc');
+
+  if (btnFixNetwork) {
+    btnFixNetwork.addEventListener('click', () => {
+      window.open('https://tailscale.com/download', '_blank');
+      alert(t("txt-tailscale-alert") || '由於您的網路環境受限（無公網 IP 或嚴格 NAT），建議您與遠端主機雙方皆下載並安裝 Tailscale。\n\n登入後即可獲得無限距的高速穿透能力！安裝完成後，此燈號會自動轉為綠色。');
+    });
+  }
+
   if (isTauri()) {
     // 監聽來自 Rust 的影像擷取與編碼狀態 (例如沒有權限、編碼失敗等)
   listen<string>('rust-video-status', (event) => {
@@ -991,18 +1084,6 @@ function initConnectButton() {
     console.log(`[WebRTC-Rust] 狀態變更: ${event.payload}`);
   });
 
-  
-  const btnFixNetwork = document.getElementById('btn-fix-network');
-  const networkIndicator = document.getElementById('network-health-indicator');
-  const networkText = document.getElementById('network-health-text');
-  const networkDesc = document.getElementById('network-health-desc');
-
-  if (btnFixNetwork) {
-    btnFixNetwork.addEventListener('click', () => {
-      open('https://tailscale.com/download');
-      alert('請下載並安裝 Tailscale，登入後即可獲得無限距穿透能力！\n安裝完成後，此燈號會自動轉為綠色。');
-    });
-  }
 
   // 定期檢查網路體質
   if (networkIndicator && networkText && networkDesc && btnFixNetwork) {
@@ -1180,7 +1261,6 @@ function initPrivacyMode() {
   if (chkPrivacy) {
     chkPrivacy.addEventListener("change", async () => {
       if (!isTauri()) {
-        alert("Web 模式下不支援實體防窺切換");
         chkPrivacy.checked = !chkPrivacy.checked;
         return;
       }
@@ -1197,6 +1277,7 @@ function initPrivacyMode() {
 
 // 模擬網路參數異動並傳遞至後端決策樹
 async function updateNetworkSimulation() {
+  if (!isTauri()) return;
   const rttInput = document.getElementById("range-rtt") as HTMLInputElement;
   const lossInput = document.getElementById("range-loss") as HTMLInputElement;
   const chkRelay = document.getElementById("chk-sim-relay") as HTMLInputElement;
@@ -1314,8 +1395,11 @@ function initOfflineSdpMode() {
         currentRemoteId = "manual";
 
         // 建立 Data Channels
-        dataChannelControl = pc.createDataChannel("input-control", { ordered: true, maxRetransmits: 0 });
+        dataChannelControl = pc.createDataChannel("input-control", { ordered: true });
         bindControlChannel(dataChannelControl);
+        
+        dataChannelUnreliable = pc.createDataChannel("input-unreliable", { ordered: false, maxRetransmits: 0 });
+        bindUnreliableChannel(dataChannelUnreliable);
         dataChannelFile = pc.createDataChannel("file-transfer", { ordered: true });
         bindFileChannel(dataChannelFile);
 
@@ -1333,6 +1417,7 @@ function initOfflineSdpMode() {
         pc.onconnectionstatechange = () => updateConnectionStatusUI(pc.connectionState);
         pc.ondatachannel = (event) => {
           if (event.channel.label === "input-control") bindControlChannel(event.channel);
+          if (event.channel.label === "input-unreliable") bindUnreliableChannel(event.channel);
           if (event.channel.label === "file-transfer") bindFileChannel(event.channel);
         };
 
@@ -1374,6 +1459,7 @@ function initOfflineSdpMode() {
           pc.onconnectionstatechange = () => updateConnectionStatusUI(pc.connectionState);
           pc.ondatachannel = (event) => {
             if (event.channel.label === "input-control") bindControlChannel(event.channel);
+            if (event.channel.label === "input-unreliable") bindUnreliableChannel(event.channel);
             if (event.channel.label === "file-transfer") bindFileChannel(event.channel);
           };
 
@@ -1569,39 +1655,15 @@ function initFileTransfer() {
     // Tauri 需要絕對路徑才能讀取，這邊為了 PoC 我們先假設可以從某些管道取得路徑
     // 實務上在 Tauri，如果開啟拖曳支援，event 中會有檔案路徑，或者可以使用 Tauri 的對話框
     // 這裡我們示範呼叫，實際路徑處理要看 Tauri plugin-fs 設定
-    // 先寫死一個假路徑，或者透過 Tauri API 挑選檔案
-    alert("In a real Tauri app, we would use the absolute path of this file. PoC will simulate the transfer.");
     
-    // 模擬啟動傳輸（若被封鎖會跳警告）
-    if (!isTauri()) {
-        alert("Web 模式下不支援檔案傳輸");
-        return;
-      }
-      try {
-      const taskId = await invoke<string>("send_file", { path: "/tmp/dummy_file.txt" });
-      currentTransferTaskId = taskId;
-      
-      if (filenameEl) filenameEl.textContent = file.name;
-      if (progressContainer) progressContainer.style.display = "flex";
-      
-      // 啟動進度輪詢
-      startTransferPolling(taskId);
-      
-    } catch (e) {
-      alert(t(String(e)) || String(e));
-    }
+    // 目前檔案傳輸功能尚未實裝，此區塊 UI 已隱藏
+    console.warn("File transfer is not yet fully implemented.");
   });
 
   if (btnCancel) {
     btnCancel.addEventListener("click", async () => {
-      if (!isTauri()) return;
-      if (currentTransferTaskId) {
-        await invoke("cancel_transfer", { taskId: currentTransferTaskId });
-        currentTransferTaskId = null;
-        if (progressContainer) progressContainer.style.display = "none";
-        if (transferPollingInterval) clearInterval(transferPollingInterval);
-        alert("Transfer cancelled.");
-      }
+      // 檔案傳輸尚未實作，此按鈕已隨面板隱藏
+      console.warn("Cancel transfer clicked, but feature is disabled.");
     });
   }
 }
@@ -1650,16 +1712,25 @@ function startTransferPolling(taskId: string) {
 // 遠端輸入控制 (滑鼠、觸控、鍵盤)
 // =========================================================================
 
-let inputSeqNumber = 0;
+let controlSeqNumber = 0;
+let unreliableSeqNumber = 0;
 let inputBound = false;
 
 function buildInputPacket(eventType: number, payload: Uint8Array): Uint8Array {
-  inputSeqNumber++;
+  const isUnreliable = (eventType === 0x01 || eventType === 0x07);
+  let seq = 0;
+  if (isUnreliable) {
+    unreliableSeqNumber++;
+    seq = unreliableSeqNumber;
+  } else {
+    controlSeqNumber++;
+    seq = controlSeqNumber;
+  }
   const timestamp = Date.now();
   const packet = new Uint8Array(12 + 1 + payload.length);
   const view = new DataView(packet.buffer);
   
-  view.setUint32(0, inputSeqNumber, false);
+  view.setUint32(0, seq, false);
   view.setUint32(4, Math.floor(timestamp / 0x100000000), false);
   view.setUint32(8, timestamp % 0x100000000, false);
   
@@ -1669,6 +1740,13 @@ function buildInputPacket(eventType: number, payload: Uint8Array): Uint8Array {
 }
 
 function sendInputPacket(packet: Uint8Array) {
+  const eventType = packet[12];
+  if (eventType === 0x01 || eventType === 0x07) {
+    if (dataChannelUnreliable && dataChannelUnreliable.readyState === "open") {
+      dataChannelUnreliable.send(packet as any);
+      return;
+    }
+  }
   if (dataChannelControl && dataChannelControl.readyState === "open") {
     dataChannelControl.send(packet as any);
   }
@@ -1678,7 +1756,133 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   if (inputBound) return;
   inputBound = true;
 
-  // Trackpad Mode 變數
+  // --- 邊緣平移與顯示模式狀態 ---
+  let isOriginalSize = false;
+  let panRafId: number | null = null;
+  let currentCursorPercentX = 0.5;
+  let currentCursorPercentY = 0.5;
+  const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
+  const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
+
+  if (btnDisplayMode) {
+    btnDisplayMode.onclick = () => {
+      isOriginalSize = !isOriginalSize;
+      if (isOriginalSize) {
+        btnDisplayMode.textContent = "🔍 適應視窗 (Scale to Fit)";
+        videoEl.style.objectFit = "none";
+        // 將視訊大小強制設定為真實解析度
+        videoEl.style.width = videoEl.videoWidth + "px";
+        videoEl.style.height = videoEl.videoHeight + "px";
+        videoContainer.style.overflow = "hidden";
+      } else {
+        btnDisplayMode.textContent = "🔍 原始大小 (Original Size)";
+        videoEl.style.objectFit = "contain";
+        videoEl.style.width = "100%";
+        videoEl.style.height = "100%";
+        // 重置 Pinch 放大相關的 transform 狀態，回歸適應視窗
+        videoScale = 1.0;
+        videoTranslateX = 0;
+        videoTranslateY = 0;
+        videoEl.style.transform = "";
+      }
+    };
+  }
+
+  function startEdgePanLoop() {
+    if (panRafId !== null) return;
+    const loop = () => {
+      if (!videoContainer) return;
+      
+      const edgeThreshold = 0.08; // 游標接近邊緣 8%
+      const panSpeed = 15;       // 平移速度 (px/frame)
+      
+      let dx = 0;
+      let dy = 0;
+      
+      if (currentCursorPercentX < edgeThreshold) {
+        dx = -panSpeed;
+      } else if (currentCursorPercentX > 1.0 - edgeThreshold) {
+        dx = panSpeed;
+      }
+      
+      if (currentCursorPercentY < edgeThreshold) {
+        dy = -panSpeed;
+      } else if (currentCursorPercentY > 1.0 - edgeThreshold) {
+        dy = panSpeed;
+      }
+      
+      if (dx !== 0 || dy !== 0) {
+        if (isOriginalSize) {
+          // 模式一：物理大小模式，平移 container 滾動條
+          videoContainer.scrollLeft += dx;
+          videoContainer.scrollTop += dy;
+        } else if (videoScale > 1.0) {
+          // 模式二：Scale 放大模式，平移 CSS transform
+          const rect = videoEl.getBoundingClientRect();
+          const maxTx = ((videoScale - 1) * rect.width) / 2;
+          const maxTy = ((videoScale - 1) * rect.height) / 2;
+          
+          // 畫面往反方向帶：dx > 0 (游標在右側) -> 視訊向左移 (videoTranslateX 減少)
+          videoTranslateX -= dx;
+          videoTranslateY -= dy;
+          
+          videoTranslateX = Math.max(-maxTx, Math.min(maxTx, videoTranslateX));
+          videoTranslateY = Math.max(-maxTy, Math.min(maxTy, videoTranslateY));
+          
+          videoEl.style.transform = `translate(${videoTranslateX}px, ${videoTranslateY}px) scale(${videoScale})`;
+        }
+      }
+      
+      panRafId = requestAnimationFrame(loop);
+    };
+    panRafId = requestAnimationFrame(loop);
+  }
+
+  // 啟動全時邊緣平移檢測
+  startEdgePanLoop();
+
+  // --- 速率限制 (Rate Limiting) 與 60Hz 節流機制 ---
+  let pendingMouseMoveX: number | null = null;
+  let pendingMouseMoveY: number | null = null;
+  let pendingRelativeDX = 0;
+  let pendingRelativeDY = 0;
+  let moveRafActive = false;
+
+  function triggerMoveRaf() {
+    if (moveRafActive) return;
+    moveRafActive = true;
+    requestAnimationFrame(sendPendingMoves);
+  }
+
+  function sendPendingMoves() {
+    moveRafActive = false;
+    
+    // 優先發送相對位移 (Pointer Lock 模式)
+    if (pendingRelativeDX !== 0 || pendingRelativeDY !== 0) {
+      const payload = new Uint8Array(8);
+      const view = new DataView(payload.buffer);
+      view.setInt32(0, pendingRelativeDX, false);
+      view.setInt32(4, pendingRelativeDY, false);
+      sendInputPacket(buildInputPacket(0x07, payload));
+      
+      pendingRelativeDX = 0;
+      pendingRelativeDY = 0;
+    }
+    
+    // 發送絕對座標
+    if (pendingMouseMoveX !== null && pendingMouseMoveY !== null) {
+      const payload = new Uint8Array(8);
+      const view = new DataView(payload.buffer);
+      view.setFloat32(0, pendingMouseMoveX, false);
+      view.setFloat32(4, pendingMouseMoveY, false);
+      sendInputPacket(buildInputPacket(0x01, payload));
+      
+      pendingMouseMoveX = null;
+      pendingMouseMoveY = null;
+    }
+  }
+
+  // --- 觸控與手勢引擎狀態 ---
   let trackpadCursorX = 0.5;
   let trackpadCursorY = 0.5;
   let touchStartTime = 0;
@@ -1688,6 +1892,42 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let lastTouchY = 0;
   let touchStartPos = { x: 0, y: 0 };
   let initialPinchDistance = -1;
+  let maxTouches = 0;
+  let isLocalPinching = false;
+
+  let pinchStartScale = 1.0;
+  let pinchStartTx = 0;
+  let pinchStartTy = 0;
+  let pinchStartCx = 0;
+  let pinchStartCy = 0;
+
+  // 觸控模式 (絕對觸控 vs 虛擬軌跡板)
+  let isDirectTouchMode = false; // 預設為軌跡板模式
+  let longPressTimer: any = null;
+  let touchStartClientX = 0;
+  let touchStartClientY = 0;
+  let hasTriggeredLongPress = false;
+
+  // 初始化懸浮選單與 Toggle 切換按鈕
+  const leftFloatingMenu = document.getElementById("left-floating-menu");
+  if (leftFloatingMenu) {
+    leftFloatingMenu.style.display = "flex";
+  }
+
+  const btnTouchMode = document.getElementById("btn-touch-mode") as HTMLButtonElement;
+  if (btnTouchMode) {
+    btnTouchMode.onclick = () => {
+      isDirectTouchMode = !isDirectTouchMode;
+      if (isDirectTouchMode) {
+        btnTouchMode.textContent = "👆 Direct Touch";
+        // 絕對觸控模式下隱藏本地游標
+        const cursorEl = document.getElementById("remote-cursor");
+        if (cursorEl) cursorEl.style.display = "none";
+      } else {
+        btnTouchMode.textContent = "🖱️ Trackpad Mode";
+      }
+    };
+  }
 
   function getPinchDistance(touches: TouchList) {
     const dx = touches[0].clientX - touches[1].clientX;
@@ -1695,50 +1935,64 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     return Math.sqrt(dx * dx + dy * dy);
   }
 
+  // --- 滑鼠事件對應 (Pointer Lock 模式) ---
   videoEl.addEventListener("pointermove", (e) => {
     e.preventDefault();
-    if (e.pointerType === "touch" || e.pointerType === "pen") return; // 由 touch 系列事件處理
+    if (e.pointerType === "touch" || e.pointerType === "pen") return; // 由觸控手勢處理
     
     if (document.pointerLockElement === videoEl) {
-      // 在 Pointer Lock 模式下，傳送相對位移 (dx, dy)
-      const dx = Math.round(e.movementX);
-      const dy = Math.round(e.movementY);
-      const payload = new Uint8Array(8);
-      const view = new DataView(payload.buffer);
-      view.setInt32(0, dx, false);
-      view.setInt32(4, dy, false);
-      sendInputPacket(buildInputPacket(0x07, payload));
+      pendingRelativeDX += Math.round(e.movementX);
+      pendingRelativeDY += Math.round(e.movementY);
+      triggerMoveRaf();
+      currentCursorPercentX = 0.5;
+      currentCursorPercentY = 0.5;
     } else {
-      // 滑鼠未鎖定時，使用絕對比例座標
-      const rect = videoEl.getBoundingClientRect();
-      const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
-      const containerRatio = rect.width / rect.height;
-      
-      let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
-      if (containerRatio > videoRatio) {
-        renderedHeight = rect.height;
-        renderedWidth = renderedHeight * videoRatio;
-        offsetX = (rect.width - renderedWidth) / 2;
+      let x = 0, y = 0;
+      if (isOriginalSize && videoContainer) {
+        x = (e.clientX + videoContainer.scrollLeft) / videoEl.videoWidth;
+        y = (e.clientY + videoContainer.scrollTop) / videoEl.videoHeight;
       } else {
-        renderedWidth = rect.width;
-        renderedHeight = renderedWidth / videoRatio;
-        offsetY = (rect.height - renderedHeight) / 2;
+        const rect = videoEl.getBoundingClientRect();
+        const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+        const containerRatio = rect.width / rect.height;
+        
+        let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
+        if (containerRatio > videoRatio) {
+          renderedHeight = rect.height;
+          renderedWidth = renderedHeight * videoRatio;
+          offsetX = (rect.width - renderedWidth) / 2;
+        } else {
+          renderedWidth = rect.width;
+          renderedHeight = renderedWidth / videoRatio;
+          offsetY = (rect.height - renderedHeight) / 2;
+        }
+ 
+        x = (e.clientX - rect.left - offsetX) / renderedWidth;
+        y = (e.clientY - rect.top - offsetY) / renderedHeight;
       }
 
-      let x = (e.clientX - rect.left - offsetX) / renderedWidth;
-      let y = (e.clientY - rect.top - offsetY) / renderedHeight;
       x = Math.max(0, Math.min(1, x));
       y = Math.max(0, Math.min(1, y));
       
-      trackpadCursorX = x;
-      trackpadCursorY = y;
-      
-      const payload = new Uint8Array(8);
-      const view = new DataView(payload.buffer);
-      view.setFloat32(0, x, false);
-      view.setFloat32(4, y, false);
-      sendInputPacket(buildInputPacket(0x01, payload));
+      pendingMouseMoveX = x;
+      pendingMouseMoveY = y;
+      triggerMoveRaf();
+
+      // 在軌跡板模式下，滑鼠移動時同步更新本地游標位置
+      if (!isDirectTouchMode) {
+        trackpadCursorX = x;
+        trackpadCursorY = y;
+      }
+
+      currentCursorPercentX = x;
+      currentCursorPercentY = y;
     }
+  });
+
+  videoEl.addEventListener("pointerleave", () => {
+    // 移出時終止邊緣平移
+    currentCursorPercentX = 0.5;
+    currentCursorPercentY = 0.5;
   });
 
   videoEl.addEventListener("pointerdown", (e) => {
@@ -1763,28 +2017,109 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     sendInputPacket(buildInputPacket(0x03, payload));
   });
 
+  // --- 手勢辨識與狀態機 ---
   videoEl.addEventListener("touchstart", (e) => {
     e.preventDefault();
+    maxTouches = Math.max(maxTouches, e.touches.length);
+    
     if (e.touches.length === 2) {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
       initialPinchDistance = getPinchDistance(e.touches);
       lastTouchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       lastTouchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       touchStartTime = Date.now();
+      touchStartPos = { x: lastTouchX, y: lastTouchY };
+      isLocalPinching = false;
+      pinchStartScale = videoScale;
+      pinchStartTx = videoTranslateX;
+      pinchStartTy = videoTranslateY;
+      pinchStartCx = lastTouchX;
+      pinchStartCy = lastTouchY;
     } else if (e.touches.length === 1) {
       lastTouchX = e.touches[0].clientX;
       lastTouchY = e.touches[0].clientY;
       const now = Date.now();
       
-      if (now - lastTapTime < 300) {
-        // 單指雙擊：開始拖曳
+      touchStartTime = now;
+      touchStartPos = { x: lastTouchX, y: lastTouchY };
+      touchStartClientX = lastTouchX;
+      touchStartClientY = lastTouchY;
+      hasTriggeredLongPress = false;
+
+      if (longPressTimer) clearTimeout(longPressTimer);
+      longPressTimer = setTimeout(() => {
+        hasTriggeredLongPress = true;
+        
+        if (isDragging) {
+          const payloadLeftUp = new Uint8Array(1);
+          payloadLeftUp[0] = 1; // Left click release
+          sendInputPacket(buildInputPacket(0x03, payloadLeftUp));
+          isDragging = false;
+        }
+
+        // 發送右鍵按下與放開
+        const payloadDown = new Uint8Array(1);
+        payloadDown[0] = 2; // Right click down
+        sendInputPacket(buildInputPacket(0x02, payloadDown));
+        
+        const payloadUp = new Uint8Array(1);
+        payloadUp[0] = 2; // Right click up
+        sendInputPacket(buildInputPacket(0x03, payloadUp));
+        
+        if (typeof navigator.vibrate === "function") {
+          navigator.vibrate(30);
+        }
+        console.log("[Gesture] 單指長按，觸發右鍵點擊與震動");
+      }, 500);
+      
+      if (isDirectTouchMode) {
         isDragging = true;
+        
+        const rect = videoEl.getBoundingClientRect();
+        const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+        const containerRatio = rect.width / rect.height;
+        
+        let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
+        if (containerRatio > videoRatio) {
+          renderedHeight = rect.height;
+          renderedWidth = renderedHeight * videoRatio;
+          offsetX = (rect.width - renderedWidth) / 2;
+        } else {
+          renderedWidth = rect.width;
+          renderedHeight = renderedWidth / videoRatio;
+          offsetY = (rect.height - renderedHeight) / 2;
+        }
+        
+        let x = (lastTouchX - rect.left - offsetX) / renderedWidth;
+        let y = (lastTouchY - rect.top - offsetY) / renderedHeight;
+        x = Math.max(0, Math.min(1, x));
+        y = Math.max(0, Math.min(1, y));
+        
+        // 點擊處即為滑鼠最新位置
+        pendingMouseMoveX = x;
+        pendingMouseMoveY = y;
+        triggerMoveRaf();
+        
+        currentCursorPercentX = x;
+        currentCursorPercentY = y;
+
+        // 發送 LeftMouseDown
         const payload = new Uint8Array(1);
-        payload[0] = 1; // Left click down
+        payload[0] = 1;
         sendInputPacket(buildInputPacket(0x02, payload));
       } else {
-        isDragging = false;
-        touchStartTime = now;
-        touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        if (now - lastTapTime < 300) {
+          // 雙擊拖曳
+          isDragging = true;
+          const payload = new Uint8Array(1);
+          payload[0] = 1;
+          sendInputPacket(buildInputPacket(0x02, payload));
+        } else {
+          isDragging = false;
+        }
       }
     }
   }, { passive: false });
@@ -1792,13 +2127,37 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   videoEl.addEventListener("touchmove", (e) => {
     e.preventDefault();
     if (e.touches.length === 2) {
-      // 雙指拖曳 (Scroll) 或雙指移動
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
       const currentDistance = getPinchDistance(e.touches);
       const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       
-      if (initialPinchDistance > 0 && Math.abs(currentDistance - initialPinchDistance) < 20) {
-        // 雙指距離變化不大，視為 Scroll
+      if (!isLocalPinching && initialPinchDistance > 0 && Math.abs(currentDistance - initialPinchDistance) > 30) {
+        isLocalPinching = true;
+      }
+
+      if (isLocalPinching) {
+        const scaleChange = currentDistance / initialPinchDistance;
+        let newScale = pinchStartScale * scaleChange;
+        newScale = Math.max(1.0, Math.min(newScale, 5.0));
+        
+        const dx = centerX - pinchStartCx;
+        const dy = centerY - pinchStartCy;
+        
+        videoScale = newScale;
+        videoTranslateX = pinchStartTx + dx;
+        videoTranslateY = pinchStartTy + dy;
+        
+        if (videoScale === 1.0) {
+          videoTranslateX = 0;
+          videoTranslateY = 0;
+        }
+        
+        videoEl.style.transform = `translate(${videoTranslateX}px, ${videoTranslateY}px) scale(${videoScale})`;
+      } else if (initialPinchDistance > 0) {
         if (lastTouchX !== 0 && lastTouchY !== 0) {
           const dy = Math.round((centerY - lastTouchY) * 1.5);
           const dx = Math.round((centerX - lastTouchX) * 1.5);
@@ -1806,48 +2165,82 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           if (dy !== 0 || dx !== 0) {
             const payload = new Uint8Array(4);
             const view = new DataView(payload.buffer);
-            // 0x04 is MouseScroll, taking two i16 (4 bytes)
             view.setInt16(0, dx, false);
             view.setInt16(2, dy, false);
             sendInputPacket(buildInputPacket(0x04, payload));
+            
+            lastTouchX += (dx / 1.5);
+            lastTouchY += (dy / 1.5);
           }
         }
       }
-      lastTouchX = centerX;
-      lastTouchY = centerY;
     } else if (e.touches.length === 1) {
-      // 單指軌跡板模式 (Trackpad Mode - 前端維護絕對座標以顯示虛擬游標)
       const currentX = e.touches[0].clientX;
       const currentY = e.touches[0].clientY;
       
-      if (lastTouchX !== 0 && lastTouchY !== 0) {
-        const dx = currentX - lastTouchX;
-        const dy = currentY - lastTouchY;
-        
-        const rect = videoEl.getBoundingClientRect();
-        const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
-        const containerRatio = rect.width / rect.height;
-        let renderedWidth, renderedHeight;
-        if (containerRatio > videoRatio) {
-          renderedHeight = rect.height;
-          renderedWidth = renderedHeight * videoRatio;
-        } else {
-          renderedWidth = rect.width;
-          renderedHeight = renderedWidth / videoRatio;
+      const dist = Math.sqrt(Math.pow(currentX - touchStartClientX, 2) + Math.pow(currentY - touchStartClientY, 2));
+      if (dist > 10) {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
         }
+      }
 
-        // 更新前端維護的虛擬軌跡板座標 (靈敏度 1.5 倍)
-        trackpadCursorX += (dx * 1.5) / renderedWidth;
-        trackpadCursorY += (dy * 1.5) / renderedHeight;
+      if (hasTriggeredLongPress) {
+        return;
+      }
+      
+      const rect = videoEl.getBoundingClientRect();
+      const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+      const containerRatio = rect.width / rect.height;
+      
+      let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
+      if (containerRatio > videoRatio) {
+        renderedHeight = rect.height;
+        renderedWidth = renderedHeight * videoRatio;
+        offsetX = (rect.width - renderedWidth) / 2;
+      } else {
+        renderedWidth = rect.width;
+        renderedHeight = renderedWidth / videoRatio;
+        offsetY = (rect.height - renderedHeight) / 2;
+      }
+      
+      renderedWidth = renderedWidth || window.innerWidth || 1;
+      renderedHeight = renderedHeight || window.innerHeight || 1;
+
+      if (isDirectTouchMode) {
+        let x = (currentX - rect.left - offsetX) / renderedWidth;
+        let y = (currentY - rect.top - offsetY) / renderedHeight;
+        x = Math.max(0, Math.min(1, x));
+        y = Math.max(0, Math.min(1, y));
         
-        trackpadCursorX = Math.max(0, Math.min(1, trackpadCursorX));
-        trackpadCursorY = Math.max(0, Math.min(1, trackpadCursorY));
-        
-        const payload = new Uint8Array(8);
-        const view = new DataView(payload.buffer);
-        view.setFloat32(0, trackpadCursorX, false);
-        view.setFloat32(4, trackpadCursorY, false);
-        sendInputPacket(buildInputPacket(0x01, payload)); // 發送絕對座標
+        pendingMouseMoveX = x;
+        pendingMouseMoveY = y;
+        triggerMoveRaf();
+
+        currentCursorPercentX = x;
+        currentCursorPercentY = y;
+      } else {
+        if (lastTouchX !== 0 && lastTouchY !== 0) {
+          const dx = currentX - lastTouchX;
+          const dy = currentY - lastTouchY;
+          
+          trackpadCursorX += (dx * 1.5) / renderedWidth;
+          trackpadCursorY += (dy * 1.5) / renderedHeight;
+          
+          if (isNaN(trackpadCursorX)) trackpadCursorX = 0.5;
+          if (isNaN(trackpadCursorY)) trackpadCursorY = 0.5;
+          
+          trackpadCursorX = Math.max(0, Math.min(1, trackpadCursorX));
+          trackpadCursorY = Math.max(0, Math.min(1, trackpadCursorY));
+          
+          pendingMouseMoveX = trackpadCursorX;
+          pendingMouseMoveY = trackpadCursorY;
+          triggerMoveRaf();
+
+          currentCursorPercentX = trackpadCursorX;
+          currentCursorPercentY = trackpadCursorY;
+        }
       }
       
       lastTouchX = currentX;
@@ -1857,50 +2250,110 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   videoEl.addEventListener("touchend", (e) => {
     e.preventDefault();
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    
     if (e.touches.length === 0) {
+      // 抬起手指時，立刻重置邊緣平移
+      currentCursorPercentX = 0.5;
+      currentCursorPercentY = 0.5;
+
       const now = Date.now();
       
-      if (isDragging) {
-        const payload = new Uint8Array(1);
-        payload[0] = 1; // Left click release
-        sendInputPacket(buildInputPacket(0x03, payload));
-        isDragging = false;
+      if (hasTriggeredLongPress) {
+        hasTriggeredLongPress = false;
+        initialPinchDistance = -1;
+        touchStartTime = 0;
+        lastTapTime = now;
+        lastTouchX = 0;
+        lastTouchY = 0;
+        maxTouches = 0;
+        return;
+      }
+      
+      if (isDirectTouchMode) {
+        if (isDragging) {
+          const payload = new Uint8Array(1);
+          payload[0] = 1; // Left click release
+          sendInputPacket(buildInputPacket(0x03, payload));
+          isDragging = false;
+        }
       } else {
-        if (touchStartTime > 0 && now - touchStartTime < 300) {
-          if (initialPinchDistance > 0) {
-            // 雙指輕觸 -> 右鍵點擊
-            const payloadDown = new Uint8Array(1);
-            payloadDown[0] = 2; // Right click
-            sendInputPacket(buildInputPacket(0x02, payloadDown));
-            const payloadUp = new Uint8Array(1);
-            payloadUp[0] = 2;
-            sendInputPacket(buildInputPacket(0x03, payloadUp));
-          } else {
-            // 單指輕觸 -> 左鍵點擊
-            const endX = e.changedTouches.length > 0 ? e.changedTouches[0].clientX : touchStartPos.x;
-            const endY = e.changedTouches.length > 0 ? e.changedTouches[0].clientY : touchStartPos.y;
-            const dist = Math.sqrt(Math.pow(endX - touchStartPos.x, 2) + Math.pow(endY - touchStartPos.y, 2));
-            if (dist < 15) {
+        if (isDragging) {
+          const payload = new Uint8Array(1);
+          payload[0] = 1; // Left click release
+          sendInputPacket(buildInputPacket(0x03, payload));
+          isDragging = false;
+        } else {
+          if (touchStartTime > 0 && now - touchStartTime < 300) {
+            if (maxTouches >= 2) {
+              // 雙指輕觸 -> 右鍵點擊
               const payloadDown = new Uint8Array(1);
-              payloadDown[0] = 1;
+              payloadDown[0] = 2; // Right click
               sendInputPacket(buildInputPacket(0x02, payloadDown));
               const payloadUp = new Uint8Array(1);
-              payloadUp[0] = 1;
+              payloadUp[0] = 2;
               sendInputPacket(buildInputPacket(0x03, payloadUp));
+            } else {
+              // 單指輕觸 -> 左鍵點擊
+              const endX = e.changedTouches.length > 0 ? e.changedTouches[0].clientX : touchStartPos.x;
+              const endY = e.changedTouches.length > 0 ? e.changedTouches[0].clientY : touchStartPos.y;
+              const dist = Math.sqrt(Math.pow(endX - touchStartPos.x, 2) + Math.pow(endY - touchStartPos.y, 2));
+              if (dist < 15) {
+                const payloadDown = new Uint8Array(1);
+                payloadDown[0] = 1;
+                sendInputPacket(buildInputPacket(0x02, payloadDown));
+                const payloadUp = new Uint8Array(1);
+                payloadUp[0] = 1;
+                sendInputPacket(buildInputPacket(0x03, payloadUp));
+              }
             }
           }
         }
       }
+      
       initialPinchDistance = -1;
       touchStartTime = 0;
       lastTapTime = now;
       lastTouchX = 0;
       lastTouchY = 0;
+      maxTouches = 0;
     } else if (e.touches.length === 1) {
       initialPinchDistance = -1;
       lastTouchX = e.touches[0].clientX;
       lastTouchY = e.touches[0].clientY;
     }
+  }, { passive: false });
+
+  // 增加觸控防護：當遭遇衝突時，強制發送 MouseUp 並重置狀態，防止滑鼠死鎖
+  videoEl.addEventListener("touchcancel", (e) => {
+    e.preventDefault();
+    console.log("[Gesture] 觸控被取消，重置狀態，釋放滑鼠按鍵");
+    
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    hasTriggeredLongPress = false;
+    currentCursorPercentX = 0.5;
+    currentCursorPercentY = 0.5;
+    
+    const payloadLeft = new Uint8Array(1);
+    payloadLeft[0] = 1;
+    sendInputPacket(buildInputPacket(0x03, payloadLeft));
+
+    const payloadRight = new Uint8Array(1);
+    payloadRight[0] = 2;
+    sendInputPacket(buildInputPacket(0x03, payloadRight));
+
+    isDragging = false;
+    initialPinchDistance = -1;
+    touchStartTime = 0;
+    lastTouchX = 0;
+    lastTouchY = 0;
+    maxTouches = 0;
   }, { passive: false });
 
   videoEl.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -1923,6 +2376,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
       // 如果正在輸入密碼等欄位，不要攔截
       if (document.activeElement.id !== "hidden-keyboard-input") return;
+      // 虛擬鍵盤輸入時不阻擋事件，讓輸入法正常運作
+      // 由 input 事件負責計算差異並送出
+      return;
     }
     
     e.preventDefault(); 
@@ -1948,61 +2404,23 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     sendInputPacket(buildInputPacket(0x05, payload)); 
   });
 
-  window.addEventListener("keyup", (e) => {
-    if (videoEl.style.display === "none") return;
-    if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
-      if (document.activeElement.id !== "hidden-keyboard-input") return;
+  // 監聽失去焦點與頁面隱藏事件，清空 Host 卡死按鍵
+  const onResetTrigger = () => {
+    if (videoEl.style.display !== "none") {
+      const payload = new Uint8Array(0);
+      sendInputPacket(buildInputPacket(0xFF, payload));
+      console.log("[Input] 失去焦點或切換分頁，發送 ResetState (0xFF) 清空被控端修飾鍵狀態");
     }
-    
-    const payload = new Uint8Array(3);
-    const view = new DataView(payload.buffer);
-    
-    let keyCode = e.keyCode;
-    if (keyCode === 0 || keyCode === 229) {
-      if (e.key && e.key.length === 1) {
-        keyCode = e.key.toUpperCase().charCodeAt(0);
-      }
+  };
+
+  window.addEventListener("blur", onResetTrigger);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      onResetTrigger();
     }
-    view.setUint16(0, keyCode, false);
-    
-    let modifiers = 0;
-    if (e.shiftKey) modifiers |= 1;
-    if (e.ctrlKey) modifiers |= 2;
-    if (e.altKey) modifiers |= 4;
-    if (e.metaKey) modifiers |= 8;
-    payload[2] = modifiers;
-    
-    sendInputPacket(buildInputPacket(0x06, payload));
   });
 
-  // 處理手機虛擬鍵盤觸發邏輯與 Unicode 注入
-  const btnMobileKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
-  const hiddenKeyboardInput = document.getElementById("hidden-keyboard-input") as HTMLTextAreaElement;
-  
-  if (btnMobileKeyboard && hiddenKeyboardInput) {
-    btnMobileKeyboard.addEventListener("click", () => {
-      hiddenKeyboardInput.focus();
-      btnMobileKeyboard.style.background = "rgba(0, 132, 255, 0.4)";
-    });
-
-    hiddenKeyboardInput.addEventListener("blur", () => {
-      btnMobileKeyboard.style.background = "rgba(255,255,255,0.2)";
-    });
-
-    // 攔截原生的文字輸入事件，並封裝成 TextInput (0x08)
-    hiddenKeyboardInput.addEventListener("input", (e: any) => {
-      if ((e.inputType === "insertText" || e.inputType === "insertCompositionText" || e.inputType === "insertFromPaste") && e.data) {
-        const text = e.data;
-        const textEncoder = new TextEncoder();
-        const utf8Bytes = textEncoder.encode(text);
-        
-        // 送出 TextInput
-        sendInputPacket(buildInputPacket(0x08, utf8Bytes));
-        
-        hiddenKeyboardInput.value = ""; // 清空
-      }
-    });
-  }
+  // 舊事件與舊渲染迴圈已被清理，已併入全新的 setupInputControl 實作。
 }
 
 // =========================================================================
@@ -2017,6 +2435,24 @@ function initPanelToggle() {
       advancedPanel.classList.toggle("panel-open");
     });
   }
+
+  const btnShowHelp = document.getElementById("btn-show-help");
+  const btnCloseHelp = document.getElementById("btn-close-help");
+  const helpModal = document.getElementById("help-modal");
+  
+  if (btnShowHelp && btnCloseHelp && helpModal) {
+    btnShowHelp.addEventListener("click", () => {
+      helpModal.style.display = "flex";
+    });
+    btnCloseHelp.addEventListener("click", () => {
+      helpModal.style.display = "none";
+    });
+    helpModal.addEventListener("click", (e) => {
+      if (e.target === helpModal) {
+        helpModal.style.display = "none";
+      }
+    });
+  }
 }
 
 // =========================================================================
@@ -2024,6 +2460,16 @@ function initPanelToggle() {
 // =========================================================================
 window.addEventListener("DOMContentLoaded", async () => {
   await initI18n();
+
+  // 啟動時檢查並請求 macOS 權限 (螢幕錄影、輔助使用)
+  try {
+    const permissionsGranted = await invoke<boolean>("check_macos_permissions");
+    if (!permissionsGranted) {
+      console.warn("macOS permissions are missing. Native prompt should have appeared.");
+    }
+  } catch (err) {
+    console.error("Failed to check macOS permissions:", err);
+  }
 
   const generatedId = generateMockMyId();
   if (generatedId) myId = generatedId;
@@ -2034,7 +2480,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   initLicenseVerification();
   initPrivacyMode();
   initNetworkSimulator();
-  initSignalingClient();
   initAccessPin();
   initStaticPassword();
   // 在 initAccessPin 執行後，才能取得正確產生的 PIN 碼

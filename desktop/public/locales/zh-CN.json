@@ -14,7 +14,7 @@
   "metric_color": "色彩格式",
   "metric_bitrate": "码率上限",
   "metric_file": "文件传输",
-  "sim_title": "PoC 网络波动模拟器",
+  "sim_title": "网络波动模拟器",
   "sim_desc": "调整网络参数，即时验证智能降级决策树运行状态。",
   "sim_rtt": "网络延迟 (RTT)",
   "sim_loss": "丢包率",
@@ -97,5 +97,12 @@
   "file_transfer_title": "文件传输",
   "drop_zone": "拖放文件至此处或点击上传",
   "btn_cancel_transfer": "取消传输",
-  "log_title": "系统日志"
+  "log_title": "系统日志",
+  "help_title": "说明与隐私权",
+  "help_inst_title": "操作说明",
+  "help_inst_1": "<strong>轨迹板模式：</strong>单指滑动移动光标，单击左键，双击拖拽。",
+  "help_inst_2": "<strong>双指操作：</strong>双指滑动为滚动，双指单击为右键。",
+  "help_inst_3": "<strong>键盘输入：</strong>连接后可点击右下角 ⌨️ 图标。",
+  "help_priv_title": "隐私权政策",
+  "help_priv_desc": "我们极度重视您的隐私。2syn 采用端对端加密的 WebRTC 点对点技术，您的画面与操作数据仅在设备间直接传输，服务器绝不储存或侧录任何资料，我们也不收集或贩售您的个人信息。"
 }

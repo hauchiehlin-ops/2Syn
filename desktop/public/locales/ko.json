@@ -14,7 +14,7 @@
   "metric_color": "색상 형식",
   "metric_bitrate": "최대 비트레이트 제한",
   "metric_file": "파일 전송",
-  "sim_title": "PoC 네트워크 시뮬레이터",
+  "sim_title": "네트워크 시뮬레이터",
   "sim_desc": "동적 강등 결정 트리의 동작을 실시간으로 확인합니다.",
   "sim_rtt": "네트워크 지연 (RTT)",
   "sim_loss": "패킷 손실률",
@@ -97,5 +97,12 @@
   "file_transfer_title": "파일 전송",
   "drop_zone": "여기에 파일을 드래그 앤 드롭하거나 클릭하여 업로드",
   "btn_cancel_transfer": "전송 취소",
-  "log_title": "시스템 로그"
+  "log_title": "시스템 로그",
+  "help_title": "Help & Privacy",
+  "help_inst_title": "How to Use",
+  "help_inst_1": "<strong>Trackpad Mode:</strong> Use one finger to move cursor. Tap to left-click, double-tap to drag.",
+  "help_inst_2": "<strong>Two-Finger:</strong> Swipe with two fingers to scroll. Tap with two fingers for right-click.",
+  "help_inst_3": "<strong>Keyboard:</strong> Tap the ⌨️ icon in the bottom right corner when connected.",
+  "help_priv_title": "Privacy Policy",
+  "help_priv_desc": "Your privacy is our priority. 2syn utilizes peer-to-peer WebRTC technology with end-to-end encryption. Your screen data and inputs are transmitted directly between your devices and are never stored or inspected by our servers. We do not collect or sell your personal data."
 }

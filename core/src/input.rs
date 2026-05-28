@@ -12,6 +12,7 @@ pub enum InputEvent {
     KeyUp { keycode: u16, modifiers: u8 },
     MouseRelativeMove { dx: i32, dy: i32 }, // 相對位移，用於 Pointer Lock 支援原生滑鼠加速度
     TextInput { text: String }, // 原生字元注入 (Unicode)
+    ResetState,
 }
 
 /// 滑鼠按鍵類型
@@ -63,6 +64,9 @@ impl InputEvent {
             InputEvent::TextInput { text } => {
                 buffer.push(0x08);
                 buffer.extend_from_slice(text.as_bytes());
+            }
+            InputEvent::ResetState => {
+                buffer.push(0xFF);
             }
         }
         buffer
@@ -127,8 +131,11 @@ impl InputEvent {
                 Ok(InputEvent::MouseRelativeMove { dx, dy })
             }
             0x08 => {
-                let text = String::from_utf8_lossy(&data[1..]).into_owned();
+                let text = String::from_utf8_lossy(data).into_owned();
                 Ok(InputEvent::TextInput { text })
+            }
+            0xFF => {
+                Ok(InputEvent::ResetState)
             }
             _ => Err(CoreError::NetworkError(format!("未知的輸入事件類型: 0x{:02X}", event_type))),
         }
@@ -146,10 +153,12 @@ impl InputEvent {
                 
                 match self {
                     InputEvent::MouseMove { x, y } => {
+                        let clamped_x = x.clamp(0.0, 1.0);
+                        let clamped_y = y.clamp(0.0, 1.0);
                         // 設定為絕對座標定位，對應螢幕解析度 (0 ~ 65535)
                         input.r#type = INPUT_MOUSE;
-                        input.Anonymous.mi.dx = (*x * 65535.0) as i32;
-                        input.Anonymous.mi.dy = (*y * 65535.0) as i32;
+                        input.Anonymous.mi.dx = (clamped_x * 65535.0) as i32;
+                        input.Anonymous.mi.dy = (clamped_y * 65535.0) as i32;
                         input.Anonymous.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
                     }
                     InputEvent::MouseDown { button } => {
@@ -208,6 +217,29 @@ impl InputEvent {
                         }
                         return Ok(());
                     }
+                    InputEvent::ResetState => {
+                        input.r#type = INPUT_KEYBOARD;
+                        input.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
+                        // 釋放 Shift, Ctrl, Alt, Win 鍵
+                        let keys_to_release = [
+                            VK_LSHIFT, VK_RSHIFT,
+                            VK_LCONTROL, VK_RCONTROL,
+                            VK_LMENU, VK_RMENU,
+                            VK_LWIN, VK_RWIN
+                        ];
+                        for &vk in &keys_to_release {
+                            input.Anonymous.ki.wVk = vk;
+                            SendInput(1, &input, size_of::<INPUT>() as i32);
+                        }
+                        
+                        // 釋放滑鼠按鍵
+                        input.r#type = INPUT_MOUSE;
+                        input.Anonymous.mi.dx = 0;
+                        input.Anonymous.mi.dy = 0;
+                        input.Anonymous.mi.dwFlags = MOUSEEVENTF_LEFTUP | MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_MIDDLEUP;
+                        SendInput(1, &input, size_of::<INPUT>() as i32);
+                        return Ok(());
+                    }
                 }
                 
                 let sent = SendInput(1, &input, size_of::<INPUT>() as i32);
@@ -222,9 +254,82 @@ impl InputEvent {
         {
             use core_graphics::event::{CGEvent, CGEventTapLocation, CGMouseButton, CGEventType};
             use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+            use std::sync::atomic::{AtomicBool, Ordering};
+            
+            static LEFT_BTN_DOWN: AtomicBool = AtomicBool::new(false);
+            static RIGHT_BTN_DOWN: AtomicBool = AtomicBool::new(false);
 
             let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
                 .map_err(|_| CoreError::SystemError("無法建立 CGEventSource".to_string()))?;
+
+            // Windows VK to Mac CGKeyCode 對照表
+            fn vk_to_mac_keycode(vk: u16) -> u16 {
+                match vk {
+                    65 => 0,   // A
+                    83 => 1,   // S
+                    68 => 2,   // D
+                    70 => 3,   // F
+                    72 => 4,   // H
+                    71 => 5,   // G
+                    90 => 6,   // Z
+                    88 => 7,   // X
+                    67 => 8,   // C
+                    86 => 9,   // V
+                    66 => 11,  // B
+                    81 => 12,  // Q
+                    87 => 13,  // W
+                    69 => 14,  // E
+                    82 => 15,  // R
+                    89 => 16,  // Y
+                    84 => 17,  // T
+                    49 => 18,  // 1
+                    50 => 19,  // 2
+                    51 => 20,  // 3
+                    52 => 21,  // 4
+                    54 => 22,  // 6
+                    53 => 23,  // 5
+                    187 => 24, // =
+                    57 => 25,  // 9
+                    55 => 26,  // 7
+                    189 => 27, // -
+                    56 => 28,  // 8
+                    48 => 29,  // 0
+                    221 => 30, // ]
+                    79 => 31,  // O
+                    85 => 32,  // U
+                    219 => 33, // [
+                    73 => 34,  // I
+                    80 => 35,  // P
+                    13 => 36,  // Return
+                    76 => 37,  // L
+                    74 => 38,  // J
+                    222 => 39, // '
+                    75 => 40,  // K
+                    186 => 41, // ;
+                    220 => 42, // \
+                    188 => 43, // ,
+                    191 => 44, // /
+                    78 => 45,  // N
+                    77 => 46,  // M
+                    190 => 47, // .
+                    9 => 48,   // Tab
+                    32 => 49,  // Space
+                    192 => 50, // `
+                    8 => 51,   // Backspace
+                    27 => 53,  // Esc
+                    91 => 55,  // Command/Windows
+                    93 => 55,  // Right Command
+                    16 => 56,  // Shift
+                    20 => 57,  // CapsLock
+                    18 => 58,  // Alt/Option
+                    17 => 59,  // Ctrl
+                    38 => 126, // Up
+                    40 => 125, // Down
+                    37 => 123, // Left
+                    39 => 124, // Right
+                    _ => vk,   // Fallback
+                }
+            }
 
             // 動態獲取 Mac 主螢幕解析度物理邊界，避免 Retina 螢幕或不同螢幕比例下的座標漂移失真
             let bounds = core_graphics::display::CGDisplay::main().bounds();
@@ -233,35 +338,55 @@ impl InputEvent {
 
             match self {
                 InputEvent::MouseMove { x, y } => {
-                    let point = core_graphics::geometry::CGPoint::new((*x as f64 * screen_w), (*y as f64 * screen_h));
-                    let event = CGEvent::new_mouse_event(
-                        source,
-                        CGEventType::MouseMoved,
-                        point,
-                        CGMouseButton::Left
-                    ).map_err(|_| CoreError::SystemError("建立 macOS 滑鼠移動事件失敗".to_string()))?;
+                    let clamped_x = x.clamp(0.0, 1.0);
+                    let clamped_y = y.clamp(0.0, 1.0);
+                    let point = core_graphics::geometry::CGPoint::new((clamped_x as f64 * screen_w), (clamped_y as f64 * screen_h));
+                    
+                    let mut event_type = CGEventType::MouseMoved;
+                    let mut mouse_btn = CGMouseButton::Left;
+                    
+                    if LEFT_BTN_DOWN.load(Ordering::Relaxed) {
+                        event_type = CGEventType::LeftMouseDragged;
+                    } else if RIGHT_BTN_DOWN.load(Ordering::Relaxed) {
+                        event_type = CGEventType::RightMouseDragged;
+                        mouse_btn = CGMouseButton::Right;
+                    }
+                    
+                    let event = CGEvent::new_mouse_event(source, event_type, point, mouse_btn)
+                        .map_err(|_| CoreError::SystemError("建立 macOS 滑鼠移動事件失敗".to_string()))?;
                     
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseDown { button } => {
+                    let current_point = CGEvent::new(source.clone()).unwrap().location();
                     let (evt_type, cg_button) = match button {
-                        MouseButton::Left => (CGEventType::LeftMouseDown, CGMouseButton::Left),
-                        MouseButton::Right => (CGEventType::RightMouseDown, CGMouseButton::Right),
+                        MouseButton::Left => {
+                            LEFT_BTN_DOWN.store(true, Ordering::Relaxed);
+                            (CGEventType::LeftMouseDown, CGMouseButton::Left)
+                        },
+                        MouseButton::Right => {
+                            RIGHT_BTN_DOWN.store(true, Ordering::Relaxed);
+                            (CGEventType::RightMouseDown, CGMouseButton::Right)
+                        },
                         MouseButton::Middle => (CGEventType::OtherMouseDown, CGMouseButton::Center),
                     };
-                    // 獲取當前滑鼠位置
-                    let current_point = CGEvent::new(source.clone()).unwrap().location();
                     let event = CGEvent::new_mouse_event(source, evt_type, current_point, cg_button)
                         .map_err(|_| CoreError::SystemError("建立 macOS 按鍵壓下事件失敗".to_string()))?;
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseUp { button } => {
+                    let current_point = CGEvent::new(source.clone()).unwrap().location();
                     let (evt_type, cg_button) = match button {
-                        MouseButton::Left => (CGEventType::LeftMouseUp, CGMouseButton::Left),
-                        MouseButton::Right => (CGEventType::RightMouseUp, CGMouseButton::Right),
+                        MouseButton::Left => {
+                            LEFT_BTN_DOWN.store(false, Ordering::Relaxed);
+                            (CGEventType::LeftMouseUp, CGMouseButton::Left)
+                        },
+                        MouseButton::Right => {
+                            RIGHT_BTN_DOWN.store(false, Ordering::Relaxed);
+                            (CGEventType::RightMouseUp, CGMouseButton::Right)
+                        },
                         MouseButton::Middle => (CGEventType::OtherMouseUp, CGMouseButton::Center),
                     };
-                    let current_point = CGEvent::new(source.clone()).unwrap().location();
                     let event = CGEvent::new_mouse_event(source, evt_type, current_point, cg_button)
                         .map_err(|_| CoreError::SystemError("建立 macOS 按鍵放開事件失敗".to_string()))?;
                     event.post(CGEventTapLocation::HID);
@@ -272,12 +397,14 @@ impl InputEvent {
                     println!("macOS 滾輪模擬: {}", delta_y);
                 }
                 InputEvent::KeyDown { keycode, modifiers: _ } => {
-                    let event = CGEvent::new_keyboard_event(source, *keycode, true)
+                    let mac_key = vk_to_mac_keycode(*keycode);
+                    let event = CGEvent::new_keyboard_event(source, mac_key, true)
                         .map_err(|_| CoreError::SystemError("建立 macOS 鍵盤按下事件失敗".to_string()))?;
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::KeyUp { keycode, modifiers: _ } => {
-                    let event = CGEvent::new_keyboard_event(source, *keycode, false)
+                    let mac_key = vk_to_mac_keycode(*keycode);
+                    let event = CGEvent::new_keyboard_event(source, mac_key, false)
                         .map_err(|_| CoreError::SystemError("建立 macOS 鍵盤放開事件失敗".to_string()))?;
                     event.post(CGEventTapLocation::HID);
                 }
@@ -285,7 +412,18 @@ impl InputEvent {
                     // 為了保留 macOS 的滑鼠加速度，我們取當前座標疊加 dx/dy 後注入，同時設定 DeltaX/Y
                     let current_point = CGEvent::new(source.clone()).unwrap().location();
                     let point = core_graphics::geometry::CGPoint::new(current_point.x + *dx as f64, current_point.y + *dy as f64);
-                    let event = CGEvent::new_mouse_event(source, CGEventType::MouseMoved, point, CGMouseButton::Left)
+                    
+                    let mut event_type = CGEventType::MouseMoved;
+                    let mut mouse_btn = CGMouseButton::Left;
+                    
+                    if LEFT_BTN_DOWN.load(Ordering::Relaxed) {
+                        event_type = CGEventType::LeftMouseDragged;
+                    } else if RIGHT_BTN_DOWN.load(Ordering::Relaxed) {
+                        event_type = CGEventType::RightMouseDragged;
+                        mouse_btn = CGMouseButton::Right;
+                    }
+                    
+                    let event = CGEvent::new_mouse_event(source, event_type, point, mouse_btn)
                         .map_err(|_| CoreError::SystemError("建立 macOS 滑鼠相對移動事件失敗".to_string()))?;
                     
                     // 寫入底層的 Event Delta，讓 macOS 得以計算並應用滑鼠加速度曲線
@@ -294,8 +432,6 @@ impl InputEvent {
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::TextInput { text } => {
-                    let event = CGEvent::new_keyboard_event(source.clone(), 0, true)
-                        .map_err(|_| CoreError::SystemError("建立 macOS 鍵盤注入事件失敗".to_string()))?;
                     let utf16: Vec<u16> = text.encode_utf16().collect();
                     unsafe {
                         extern "C" {
@@ -305,14 +441,58 @@ impl InputEvent {
                                 unicodeString: *const u16,
                             );
                         }
+                        
                         use foreign_types_shared::ForeignType;
-                        CGEventKeyboardSetUnicodeString(
-                            event.as_ptr() as *mut _,
-                            utf16.len() as libc::size_t,
-                            utf16.as_ptr(),
-                        );
+                        // macOS limits Unicode string to 20 characters per event
+                        for chunk in utf16.chunks(20) {
+                            // KeyDown (使用 0 代表 dummy keycode，因為 0xFFFF 在某些 macOS版本會導致 CoreGraphics 崩潰)
+                            if let Ok(event_down) = CGEvent::new_keyboard_event(source.clone(), 0, true) {
+                                CGEventKeyboardSetUnicodeString(
+                                    event_down.as_ptr() as *mut _,
+                                    chunk.len() as libc::size_t,
+                                    chunk.as_ptr(),
+                                );
+                                event_down.post(CGEventTapLocation::HID);
+                            }
+                            
+                            // KeyUp
+                            if let Ok(event_up) = CGEvent::new_keyboard_event(source.clone(), 0, false) {
+                                CGEventKeyboardSetUnicodeString(
+                                    event_up.as_ptr() as *mut _,
+                                    chunk.len() as libc::size_t,
+                                    chunk.as_ptr(),
+                                );
+                                event_up.post(CGEventTapLocation::HID);
+                            }
+                        }
                     }
-                    event.post(CGEventTapLocation::HID);
+                }
+                InputEvent::ResetState => {
+                    // 重置滑鼠狀態
+                    LEFT_BTN_DOWN.store(false, Ordering::Relaxed);
+                    RIGHT_BTN_DOWN.store(false, Ordering::Relaxed);
+
+                    // 釋放滑鼠按鍵
+                    let current_point = CGEvent::new(source.clone()).unwrap().location();
+                    if let Ok(event_lup) = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseUp, current_point, CGMouseButton::Left) {
+                        event_lup.post(CGEventTapLocation::HID);
+                    }
+                    if let Ok(event_rup) = CGEvent::new_mouse_event(source.clone(), CGEventType::RightMouseUp, current_point, CGMouseButton::Right) {
+                        event_rup.post(CGEventTapLocation::HID);
+                    }
+                    if let Ok(event_mup) = CGEvent::new_mouse_event(source.clone(), CGEventType::OtherMouseUp, current_point, CGMouseButton::Center) {
+                        event_mup.post(CGEventTapLocation::HID);
+                    }
+
+                    // 釋放修飾鍵
+                    // macOS Command (55), Shift (56), Option (58), Control (59)
+                    let mac_keys_to_release = [55, 56, 58, 59];
+                    for &key in &mac_keys_to_release {
+                        if let Ok(event) = CGEvent::new_keyboard_event(source.clone(), key, false) {
+                            event.post(CGEventTapLocation::HID);
+                        }
+                    }
+                    return Ok(());
                 }
             }
             Ok(())
