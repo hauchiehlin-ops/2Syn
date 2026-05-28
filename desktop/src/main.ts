@@ -2,7 +2,6 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 
-
 // --- Toast Notification System ---
 function showToast(message: string, duration: number = 3000) {
   const container = document.getElementById('toast-container');
@@ -482,11 +481,50 @@ function initAccessPin() {
 
   if (btnCopyPin && valPin) {
     btnCopyPin.addEventListener("click", () => {
-      const pinText = valPin.textContent || "";
+      const pinText = (window as any).__localAccessPin || myPin;
       navigator.clipboard.writeText(pinText).then(() => {
         btnCopyPin.textContent = "✓";
         setTimeout(() => { btnCopyPin.textContent = "📋"; }, 1500);
       });
+    });
+  }
+}
+
+// 初始化固定密碼設定邏輯
+async function initStaticPassword() {
+  const btnSetPwd = document.getElementById("btn-set-static-pwd") as HTMLButtonElement;
+  const inputPwd = document.getElementById("input-static-pwd") as HTMLInputElement;
+  const statusSpan = document.getElementById("static-pwd-status");
+
+  // 初始化時檢查是否已設定
+  try {
+    const hasPwd = await invoke("check_has_static_password");
+    if (statusSpan) {
+      statusSpan.textContent = hasPwd ? "Status: Set" : "Status: Not Set";
+      statusSpan.style.color = hasPwd ? "var(--success-color, #2ecc71)" : "var(--text-muted)";
+    }
+  } catch (e) {
+    console.warn("檢查固定密碼狀態失敗:", e);
+  }
+
+  if (btnSetPwd && inputPwd) {
+    btnSetPwd.addEventListener("click", async () => {
+      const pwd = inputPwd.value.trim();
+      if (!pwd) {
+        alert("請輸入固定密碼！");
+        return;
+      }
+      try {
+        await invoke("set_static_password", { password: pwd });
+        inputPwd.value = "";
+        if (statusSpan) {
+          statusSpan.textContent = "Status: Set";
+          statusSpan.style.color = "var(--success-color, #2ecc71)";
+        }
+        showToast("固定密碼設定成功！");
+      } catch (e) {
+        alert("設定固定密碼失敗：" + e);
+      }
     });
   }
 }
@@ -793,14 +831,23 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
   rustIceCandidateQueue = [];
   currentRemoteId = sourceId;
 
-  // 2. 驗證 PIN 是否符合本機 Access PIN
-  if (incomingPin !== myPin) {
-    console.warn(`[WebRTC] 拒絕連線：PIN 碼不符 (收到: ${incomingPin}, 預期: ${myPin})`);
+  // 2. 驗證 PIN 碼 (雙軌制：檢查隨機 PIN 或 固定密碼)
+  let isStaticValid = false;
+  if (incomingPin && incomingPin !== myPin) {
+    try {
+      isStaticValid = await invoke("verify_static_password", { password: incomingPin });
+    } catch (e) {
+      console.warn("驗證固定密碼時發生錯誤:", e);
+    }
+  }
+
+  if (incomingPin !== myPin && !isStaticValid) {
+    console.warn(`[WebRTC] 拒絕連線：PIN 碼不符`);
     if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
       signalingWs.send(JSON.stringify({
         type: "error",
         target: sourceId,
-        message: "Connection rejected"
+        message: "Connection rejected: Invalid PIN or Password"
       }));
     }
     return;
@@ -918,7 +965,12 @@ function updateConnectionStatusUI(state: string) {
     }
   }
   if (state === "failed") {
-    alert(t("err_rtc_failed") || "P2P 連線失敗。\n請確認雙方均已啟動 2syn，且防火牆允許 UDP 流量。");
+    alert(t("err_rtc_failed") || "P2P 連線失敗。\n\n若因網路環境受限（例如雙方均無公網 IP、或是行動網路 NAT 過於嚴格），請查看下方的「網路體質與穿透狀態」面板，並點擊【🚀 啟用穿透模式】即可無縫切換為中繼連線。");
+    const fixBtn = document.getElementById("btn-fix-network");
+    if (fixBtn && fixBtn.style.display !== "none") {
+        fixBtn.classList.add("pulse-highlight");
+        setTimeout(() => fixBtn.classList.remove("pulse-highlight"), 5000);
+    }
     resetConnectionUI();
   } else if (state === "disconnected" || state === "closed") {
     resetConnectionUI();
@@ -1626,22 +1678,27 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   if (inputBound) return;
   inputBound = true;
 
-  const sendPointerMove = (e: PointerEvent) => {
-    const rect = videoEl.getBoundingClientRect();
-    let x = (e.clientX - rect.left) / rect.width;
-    let y = (e.clientY - rect.top) / rect.height;
-    x = Math.max(0, Math.min(1, x));
-    y = Math.max(0, Math.min(1, y));
+  // Trackpad Mode 變數
+  let trackpadCursorX = 0.5;
+  let trackpadCursorY = 0.5;
+  let touchStartTime = 0;
+  let lastTapTime = 0;
+  let isDragging = false;
+  let lastTouchX = 0;
+  let lastTouchY = 0;
+  let touchStartPos = { x: 0, y: 0 };
+  let initialPinchDistance = -1;
 
-    const payload = new Uint8Array(8);
-    const view = new DataView(payload.buffer);
-    view.setFloat32(0, x, false);
-    view.setFloat32(4, y, false);
-    sendInputPacket(buildInputPacket(0x01, payload));
-  };
+  function getPinchDistance(touches: TouchList) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
 
   videoEl.addEventListener("pointermove", (e) => {
     e.preventDefault();
+    if (e.pointerType === "touch" || e.pointerType === "pen") return; // 由 touch 系列事件處理
+    
     if (document.pointerLockElement === videoEl) {
       // 在 Pointer Lock 模式下，傳送相對位移 (dx, dy)
       const dx = Math.round(e.movementX);
@@ -1652,23 +1709,41 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       view.setInt32(4, dy, false);
       sendInputPacket(buildInputPacket(0x07, payload));
     } else {
-      // 觸控螢幕或未鎖定時，使用絕對比例座標
-      sendPointerMove(e);
+      // 滑鼠未鎖定時，使用絕對比例座標
+      const rect = videoEl.getBoundingClientRect();
+      const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+      const containerRatio = rect.width / rect.height;
+      
+      let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
+      if (containerRatio > videoRatio) {
+        renderedHeight = rect.height;
+        renderedWidth = renderedHeight * videoRatio;
+        offsetX = (rect.width - renderedWidth) / 2;
+      } else {
+        renderedWidth = rect.width;
+        renderedHeight = renderedWidth / videoRatio;
+        offsetY = (rect.height - renderedHeight) / 2;
+      }
+
+      let x = (e.clientX - rect.left - offsetX) / renderedWidth;
+      let y = (e.clientY - rect.top - offsetY) / renderedHeight;
+      x = Math.max(0, Math.min(1, x));
+      y = Math.max(0, Math.min(1, y));
+      
+      trackpadCursorX = x;
+      trackpadCursorY = y;
+      
+      const payload = new Uint8Array(8);
+      const view = new DataView(payload.buffer);
+      view.setFloat32(0, x, false);
+      view.setFloat32(4, y, false);
+      sendInputPacket(buildInputPacket(0x01, payload));
     }
   });
 
   videoEl.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch" || e.pointerType === "pen") return;
     e.preventDefault();
-    
-    // 移除 requestPointerLock，因為 macOS 原生截圖 API 不會擷取遠端硬體游標，
-    // 若將本地端游標隱藏 (Pointer Lock) 會導致使用者完全看不到滑鼠（沒有游標）。
-    // 我們讓本地端保留游標顯示，並依賴絕對座標系統來精準對位。
-    
-    // 對於觸控設備，點擊時不一定會先觸發 pointermove，必須在點下前先同步游標位置
-    if (document.pointerLockElement !== videoEl) {
-      sendPointerMove(e);
-    }
-    
     const payload = new Uint8Array(1);
     let btn = 1;
     if (e.button === 2) btn = 2;
@@ -1678,6 +1753,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   });
 
   videoEl.addEventListener("pointerup", (e) => {
+    if (e.pointerType === "touch" || e.pointerType === "pen") return;
     e.preventDefault();
     const payload = new Uint8Array(1);
     let btn = 1;
@@ -1687,85 +1763,25 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     sendInputPacket(buildInputPacket(0x03, payload));
   });
 
-  // 特別針對 iOS WKWebView 的 touch 事件進行攔截，轉換為相對應的絕對座標與左鍵點擊
-  const handleTouchMove = (e: TouchEvent) => {
-    e.preventDefault();
-    if (e.touches.length > 0) {
-      const touch = e.touches[0];
-      const rect = videoEl.getBoundingClientRect();
-      
-      // 計算真實的影片內容邊界 (扣除 object-fit: contain 產生的黑邊)
-      const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
-      const containerRatio = rect.width / rect.height;
-      
-      let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
-      
-      if (containerRatio > videoRatio) {
-        // 左右有黑邊 (Pillarboxed)
-        renderedHeight = rect.height;
-        renderedWidth = renderedHeight * videoRatio;
-        offsetX = (rect.width - renderedWidth) / 2;
-      } else {
-        // 上下有黑邊 (Letterboxed)
-        renderedWidth = rect.width;
-        renderedHeight = renderedWidth / videoRatio;
-        offsetY = (rect.height - renderedHeight) / 2;
-      }
-
-      let x = (touch.clientX - rect.left - offsetX) / renderedWidth;
-      let y = (touch.clientY - rect.top - offsetY) / renderedHeight;
-      x = Math.max(0, Math.min(1, x));
-      y = Math.max(0, Math.min(1, y));
-  
-      const payload = new Uint8Array(8);
-      const view = new DataView(payload.buffer);
-      view.setFloat32(0, x, false);
-      view.setFloat32(4, y, false);
-      sendInputPacket(buildInputPacket(0x01, payload));
-    }
-  };
-
-  let currentZoom = 1;
-  let currentPanX = 0;
-  let currentPanY = 0;
-  let initialPinchDistance = -1;
-  let initialZoom = 1;
-  let lastTouchX = 0;
-  let lastTouchY = 0;
-  
-  let lastTapTime = 0;
-  let isDragging = false;
-  let touchStartTime = 0;
-  let touchStartPos = { x: 0, y: 0 };
-
-  function getPinchDistance(touches: TouchList) {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  function updateVideoTransform() {
-    videoEl.style.transform = `translate(${currentPanX}px, ${currentPanY}px) scale(${currentZoom})`;
-  }
-
   videoEl.addEventListener("touchstart", (e) => {
     e.preventDefault();
     if (e.touches.length === 2) {
       initialPinchDistance = getPinchDistance(e.touches);
-      initialZoom = currentZoom;
       lastTouchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       lastTouchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      touchStartTime = Date.now();
     } else if (e.touches.length === 1) {
-      handleTouchMove(e);
+      lastTouchX = e.touches[0].clientX;
+      lastTouchY = e.touches[0].clientY;
       const now = Date.now();
+      
       if (now - lastTapTime < 300) {
-        // Double tap: Start dragging
+        // 單指雙擊：開始拖曳
         isDragging = true;
         const payload = new Uint8Array(1);
-        payload[0] = 1; // Left click
+        payload[0] = 1; // Left click down
         sendInputPacket(buildInputPacket(0x02, payload));
       } else {
-        // Single touch down (Hover)
         isDragging = false;
         touchStartTime = now;
         touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -1776,47 +1792,73 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   videoEl.addEventListener("touchmove", (e) => {
     e.preventDefault();
     if (e.touches.length === 2) {
-      // 雙指縮放與平移
+      // 雙指拖曳 (Scroll) 或雙指移動
       const currentDistance = getPinchDistance(e.touches);
-      if (initialPinchDistance > 0) {
-        currentZoom = Math.max(1, Math.min(5, initialZoom * (currentDistance / initialPinchDistance)));
-      }
-      
       const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       
-      if (lastTouchX !== 0 && lastTouchY !== 0) {
-        currentPanX += (centerX - lastTouchX);
-        currentPanY += (centerY - lastTouchY);
+      if (initialPinchDistance > 0 && Math.abs(currentDistance - initialPinchDistance) < 20) {
+        // 雙指距離變化不大，視為 Scroll
+        if (lastTouchX !== 0 && lastTouchY !== 0) {
+          const dy = Math.round((centerY - lastTouchY) * 1.5);
+          const dx = Math.round((centerX - lastTouchX) * 1.5);
+          
+          if (dy !== 0 || dx !== 0) {
+            const payload = new Uint8Array(4);
+            const view = new DataView(payload.buffer);
+            // 0x04 is MouseScroll, taking two i16 (4 bytes)
+            view.setInt16(0, dx, false);
+            view.setInt16(2, dy, false);
+            sendInputPacket(buildInputPacket(0x04, payload));
+          }
+        }
       }
-      
       lastTouchX = centerX;
       lastTouchY = centerY;
-      
-      // 限制平移範圍，不讓畫面跑出界外太多
-      // 注意：必須使用原始未縮放的尺寸 (offsetWidth/offsetHeight)
-      const originalWidth = videoEl.offsetWidth;
-      const originalHeight = videoEl.offsetHeight;
-      
-      const maxPanX = (originalWidth * (currentZoom - 1)) / 2;
-      const maxPanY = (originalHeight * (currentZoom - 1)) / 2;
-      
-      currentPanX = Math.max(-maxPanX, Math.min(maxPanX, currentPanX));
-      currentPanY = Math.max(-maxPanY, Math.min(maxPanY, currentPanY));
-      
-      updateVideoTransform();
     } else if (e.touches.length === 1) {
-      // 單指控制滑鼠
-      handleTouchMove(e);
+      // 單指軌跡板模式 (Trackpad Mode - 前端維護絕對座標以顯示虛擬游標)
+      const currentX = e.touches[0].clientX;
+      const currentY = e.touches[0].clientY;
+      
+      if (lastTouchX !== 0 && lastTouchY !== 0) {
+        const dx = currentX - lastTouchX;
+        const dy = currentY - lastTouchY;
+        
+        const rect = videoEl.getBoundingClientRect();
+        const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+        const containerRatio = rect.width / rect.height;
+        let renderedWidth, renderedHeight;
+        if (containerRatio > videoRatio) {
+          renderedHeight = rect.height;
+          renderedWidth = renderedHeight * videoRatio;
+        } else {
+          renderedWidth = rect.width;
+          renderedHeight = renderedWidth / videoRatio;
+        }
+
+        // 更新前端維護的虛擬軌跡板座標 (靈敏度 1.5 倍)
+        trackpadCursorX += (dx * 1.5) / renderedWidth;
+        trackpadCursorY += (dy * 1.5) / renderedHeight;
+        
+        trackpadCursorX = Math.max(0, Math.min(1, trackpadCursorX));
+        trackpadCursorY = Math.max(0, Math.min(1, trackpadCursorY));
+        
+        const payload = new Uint8Array(8);
+        const view = new DataView(payload.buffer);
+        view.setFloat32(0, trackpadCursorX, false);
+        view.setFloat32(4, trackpadCursorY, false);
+        sendInputPacket(buildInputPacket(0x01, payload)); // 發送絕對座標
+      }
+      
+      lastTouchX = currentX;
+      lastTouchY = currentY;
     }
   }, { passive: false });
 
   videoEl.addEventListener("touchend", (e) => {
     e.preventDefault();
     if (e.touches.length === 0) {
-      initialPinchDistance = -1;
-      lastTouchX = 0;
-      lastTouchY = 0;
+      const now = Date.now();
       
       if (isDragging) {
         const payload = new Uint8Array(1);
@@ -1824,19 +1866,24 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         sendInputPacket(buildInputPacket(0x03, payload));
         isDragging = false;
       } else {
-        // Check for single tap (click)
-        if (touchStartTime > 0) {
-          const now = Date.now();
-          if (e.changedTouches.length > 0) {
-            const endX = e.changedTouches[0].clientX;
-            const endY = e.changedTouches[0].clientY;
+        if (touchStartTime > 0 && now - touchStartTime < 300) {
+          if (initialPinchDistance > 0) {
+            // 雙指輕觸 -> 右鍵點擊
+            const payloadDown = new Uint8Array(1);
+            payloadDown[0] = 2; // Right click
+            sendInputPacket(buildInputPacket(0x02, payloadDown));
+            const payloadUp = new Uint8Array(1);
+            payloadUp[0] = 2;
+            sendInputPacket(buildInputPacket(0x03, payloadUp));
+          } else {
+            // 單指輕觸 -> 左鍵點擊
+            const endX = e.changedTouches.length > 0 ? e.changedTouches[0].clientX : touchStartPos.x;
+            const endY = e.changedTouches.length > 0 ? e.changedTouches[0].clientY : touchStartPos.y;
             const dist = Math.sqrt(Math.pow(endX - touchStartPos.x, 2) + Math.pow(endY - touchStartPos.y, 2));
-            if (now - touchStartTime < 300 && dist < 15) {
-              // Valid Tap
+            if (dist < 15) {
               const payloadDown = new Uint8Array(1);
               payloadDown[0] = 1;
               sendInputPacket(buildInputPacket(0x02, payloadDown));
-              
               const payloadUp = new Uint8Array(1);
               payloadUp[0] = 1;
               sendInputPacket(buildInputPacket(0x03, payloadUp));
@@ -1844,48 +1891,40 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           }
         }
       }
-      touchStartTime = 0;
-      lastTapTime = Date.now();
-    } else if (e.touches.length === 1) {
-      // 雙指放開一指，重新設定單指位置避免跳躍
       initialPinchDistance = -1;
+      touchStartTime = 0;
+      lastTapTime = now;
       lastTouchX = 0;
       lastTouchY = 0;
+    } else if (e.touches.length === 1) {
+      initialPinchDistance = -1;
+      lastTouchX = e.touches[0].clientX;
+      lastTouchY = e.touches[0].clientY;
     }
   }, { passive: false });
 
-  // 禁用右鍵選單
   videoEl.addEventListener("contextmenu", (e) => e.preventDefault());
 
-  window.addEventListener("keydown", (e) => {
-    if (videoEl.style.display === "none") return;
-    const payload = new Uint8Array(3);
+  videoEl.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const payload = new Uint8Array(4);
     const view = new DataView(payload.buffer);
+    const dx = Math.round(e.deltaX * -1); 
+    const dy = Math.round(e.deltaY * -1);
     
-    // 嘗試將鍵盤代碼轉移
-    let keyCode = e.keyCode;
-    if (keyCode === 0 || keyCode === 229) {
-      if (e.key && e.key.length === 1) {
-        keyCode = e.key.toUpperCase().charCodeAt(0);
-      }
-    }
-    view.setUint16(0, keyCode, false);
-    
-    let modifiers = 0;
-    if (e.shiftKey) modifiers |= 1;
-    if (e.ctrlKey) modifiers |= 2;
-    if (e.altKey) modifiers |= 4;
-    if (e.metaKey) modifiers |= 8;
-    payload[2] = modifiers;
-    
-    sendInputPacket(buildInputPacket(0x04, payload));
-  });
+    view.setInt16(0, dx, false);
+    view.setInt16(2, dy, false);
+    sendInputPacket(buildInputPacket(0x04, payload)); // 0x04 is MouseScroll
+  }, { passive: false });
 
-  // 攔截鍵盤按下 (KeyDown)
+  // 攔截鍵盤輸入
   window.addEventListener("keydown", (e) => {
     if (videoEl.style.display === "none") return;
+    if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
+      // 如果正在輸入密碼等欄位，不要攔截
+      if (document.activeElement.id !== "hidden-keyboard-input") return;
+    }
     
-    // 阻止預設行為 (例如空白鍵向下捲動、Tab 切換焦點)，讓按鍵能完整送給遠端
     e.preventDefault(); 
     
     const payload = new Uint8Array(3);
@@ -1906,12 +1945,15 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (e.metaKey) modifiers |= 8;
     payload[2] = modifiers;
     
-    sendInputPacket(buildInputPacket(0x05, payload)); // 0x05 是 KeyDown
+    sendInputPacket(buildInputPacket(0x05, payload)); 
   });
 
-  // 攔截鍵盤放開 (KeyUp)
   window.addEventListener("keyup", (e) => {
     if (videoEl.style.display === "none") return;
+    if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
+      if (document.activeElement.id !== "hidden-keyboard-input") return;
+    }
+    
     const payload = new Uint8Array(3);
     const view = new DataView(payload.buffer);
     
@@ -1930,44 +1972,32 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (e.metaKey) modifiers |= 8;
     payload[2] = modifiers;
     
-    sendInputPacket(buildInputPacket(0x06, payload)); // 0x06 是 KeyUp
+    sendInputPacket(buildInputPacket(0x06, payload));
   });
 
-  // 處理手機虛擬鍵盤觸發邏輯
+  // 處理手機虛擬鍵盤觸發邏輯與 Unicode 注入
   const btnMobileKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
   const hiddenKeyboardInput = document.getElementById("hidden-keyboard-input") as HTMLTextAreaElement;
   
   if (btnMobileKeyboard && hiddenKeyboardInput) {
-    // 點擊懸浮按鈕時，讓隱藏輸入框獲得焦點，強制 iOS Safari 彈出小鍵盤
     btnMobileKeyboard.addEventListener("click", () => {
       hiddenKeyboardInput.focus();
       btnMobileKeyboard.style.background = "rgba(0, 132, 255, 0.4)";
     });
 
-    // 當隱藏輸入框失去焦點時，恢復按鈕顏色
     hiddenKeyboardInput.addEventListener("blur", () => {
       btnMobileKeyboard.style.background = "rgba(255,255,255,0.2)";
     });
 
-    // 攔截虛擬鍵盤的直接輸入事件 (針對無法正確觸發 keydown keyCode 的 iOS 鍵盤)
+    // 攔截原生的文字輸入事件，並封裝成 TextInput (0x08)
     hiddenKeyboardInput.addEventListener("input", (e: any) => {
-      if (e.inputType === "insertText" && e.data) {
-        const char = e.data;
-        const keyCode = char.toUpperCase().charCodeAt(0);
+      if ((e.inputType === "insertText" || e.inputType === "insertCompositionText" || e.inputType === "insertFromPaste") && e.data) {
+        const text = e.data;
+        const textEncoder = new TextEncoder();
+        const utf8Bytes = textEncoder.encode(text);
         
-        // 送出 KeyDown
-        const downPayload = new Uint8Array(3);
-        const downView = new DataView(downPayload.buffer);
-        downView.setUint16(0, keyCode, false);
-        downPayload[2] = 0;
-        sendInputPacket(buildInputPacket(0x04, downPayload));
-
-        // 送出 KeyUp
-        const upPayload = new Uint8Array(3);
-        const upView = new DataView(upPayload.buffer);
-        upView.setUint16(0, keyCode, false);
-        upPayload[2] = 0;
-        sendInputPacket(buildInputPacket(0x05, upPayload));
+        // 送出 TextInput
+        sendInputPacket(buildInputPacket(0x08, utf8Bytes));
         
         hiddenKeyboardInput.value = ""; // 清空
       }
@@ -1999,14 +2029,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (generatedId) myId = generatedId;
 
   await fetchHwid();
-  initAccessPin();
-  // 在 initAccessPin 執行後，才能取得正確產生的 PIN 碼
-  myPin = (window as any).__localAccessPin || "";
   
   initConnectButton();
   initLicenseVerification();
   initPrivacyMode();
   initNetworkSimulator();
+  initSignalingClient();
+  initAccessPin();
+  initStaticPassword();
+  // 在 initAccessPin 執行後，才能取得正確產生的 PIN 碼
+  myPin = (window as any).__localAccessPin || "";
   initPanelToggle();
   initOfflineSdpMode();
   initSystemDiagnostic();

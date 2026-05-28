@@ -11,6 +11,7 @@ pub enum InputEvent {
     KeyDown { keycode: u16, modifiers: u8 },
     KeyUp { keycode: u16, modifiers: u8 },
     MouseRelativeMove { dx: i32, dy: i32 }, // 相對位移，用於 Pointer Lock 支援原生滑鼠加速度
+    TextInput { text: String }, // 原生字元注入 (Unicode)
 }
 
 /// 滑鼠按鍵類型
@@ -58,6 +59,10 @@ impl InputEvent {
                 buffer.push(0x07);
                 buffer.extend_from_slice(&dx.to_be_bytes());
                 buffer.extend_from_slice(&dy.to_be_bytes());
+            }
+            InputEvent::TextInput { text } => {
+                buffer.push(0x08);
+                buffer.extend_from_slice(text.as_bytes());
             }
         }
         buffer
@@ -121,6 +126,10 @@ impl InputEvent {
                 let dy = i32::from_be_bytes(data[5..9].try_into().unwrap());
                 Ok(InputEvent::MouseRelativeMove { dx, dy })
             }
+            0x08 => {
+                let text = String::from_utf8_lossy(&data[1..]).into_owned();
+                Ok(InputEvent::TextInput { text })
+            }
             _ => Err(CoreError::NetworkError(format!("未知的輸入事件類型: 0x{:02X}", event_type))),
         }
     }
@@ -175,11 +184,29 @@ impl InputEvent {
                         input.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
                     }
                     InputEvent::MouseRelativeMove { dx, dy } => {
-                        // 相對座標注入（不包含 ABSOLUTE flag），Windows 將會應用原生的滑鼠加速度設定
                         input.r#type = INPUT_MOUSE;
                         input.Anonymous.mi.dx = *dx;
                         input.Anonymous.mi.dy = *dy;
                         input.Anonymous.mi.dwFlags = MOUSEEVENTF_MOVE;
+                    }
+                    InputEvent::TextInput { text } => {
+                        for ch in text.encode_utf16() {
+                            let mut txt_input = std::mem::zeroed::<INPUT>();
+                            txt_input.r#type = INPUT_KEYBOARD;
+                            txt_input.Anonymous.ki.wVk = 0;
+                            txt_input.Anonymous.ki.wScan = ch;
+                            txt_input.Anonymous.ki.dwFlags = KEYEVENTF_UNICODE;
+                            
+                            if SendInput(1, &txt_input, size_of::<INPUT>() as i32) == 0 {
+                                return Err(CoreError::SystemError("Windows SendInput(Unicode) 呼叫失敗".to_string()));
+                            }
+                            
+                            txt_input.Anonymous.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+                            if SendInput(1, &txt_input, size_of::<INPUT>() as i32) == 0 {
+                                return Err(CoreError::SystemError("Windows SendInput(Unicode KeyUp) 呼叫失敗".to_string()));
+                            }
+                        }
+                        return Ok(());
                     }
                 }
                 
@@ -264,6 +291,27 @@ impl InputEvent {
                     // 寫入底層的 Event Delta，讓 macOS 得以計算並應用滑鼠加速度曲線
                     event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_DELTA_X, *dx as i64);
                     event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_DELTA_Y, *dy as i64);
+                    event.post(CGEventTapLocation::HID);
+                }
+                InputEvent::TextInput { text } => {
+                    let event = CGEvent::new_keyboard_event(source.clone(), 0, true)
+                        .map_err(|_| CoreError::SystemError("建立 macOS 鍵盤注入事件失敗".to_string()))?;
+                    let utf16: Vec<u16> = text.encode_utf16().collect();
+                    unsafe {
+                        extern "C" {
+                            pub fn CGEventKeyboardSetUnicodeString(
+                                event: core_graphics::sys::CGEventRef,
+                                stringLength: libc::size_t,
+                                unicodeString: *const u16,
+                            );
+                        }
+                        use foreign_types_shared::ForeignType;
+                        CGEventKeyboardSetUnicodeString(
+                            event.as_ptr() as *mut _,
+                            utf16.len() as libc::size_t,
+                            utf16.as_ptr(),
+                        );
+                    }
                     event.post(CGEventTapLocation::HID);
                 }
             }

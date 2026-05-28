@@ -1,6 +1,6 @@
 // Tauri lib entry point
 
-use syn_core::security::{generate_hwid, LicenseValidator, SecureStorage};
+use syn_core::security::{generate_hwid, LicenseValidator, SecureStorage, TotpAuthenticator};
 #[cfg(not(target_os = "ios"))]
 use syn_core::connection::{ConnectionManager, ConnectionType};
 #[cfg(not(target_os = "ios"))]
@@ -27,6 +27,36 @@ async fn get_device_hwid() -> Result<String, String> {
     generate_hwid().map_err(|e| e.to_string())
 }
 
+const STATIC_PWD_KEY: &str = "2syn_static_password";
+
+/// 設定靜態無人值守密碼
+#[tauri::command]
+async fn set_static_password(password: String) -> Result<(), String> {
+    if password.is_empty() {
+        // 清除密碼 (如果 keyring 支援 delete_secret)
+        // 為了簡單起見，如果是空的，我們存一個特殊標記或拒絕
+        return Err("Password cannot be empty".to_string());
+    }
+    SecureStorage::save_secret(STATIC_PWD_KEY, &password).map_err(|e| e.to_string())
+}
+
+/// 驗證靜態無人值守密碼
+#[tauri::command]
+async fn verify_static_password(password: String) -> Result<bool, String> {
+    match SecureStorage::load_secret(STATIC_PWD_KEY) {
+        Ok(saved_pwd) => Ok(saved_pwd == password),
+        Err(_) => Ok(false), // 沒設定時，皆回傳 false
+    }
+}
+
+/// 檢查是否已設定靜態密碼
+#[tauri::command]
+async fn check_has_static_password() -> Result<bool, String> {
+    match SecureStorage::load_secret(STATIC_PWD_KEY) {
+        Ok(pwd) => Ok(!pwd.is_empty()),
+        Err(_) => Ok(false),
+    }
+}
 #[derive(serde::Deserialize)]
 struct ServerActivateResponse {
     success: bool,
@@ -524,6 +554,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_device_hwid,
+            set_static_password,
+            verify_static_password,
+            check_has_static_password,
             verify_license_key,
             check_license_status,
             toggle_privacy_mode,

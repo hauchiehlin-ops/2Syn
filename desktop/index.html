@@ -17,7 +17,15 @@
 <body>
   <!-- Remote Video View (Hidden until connected) -->
   <video id="remote-video" autoplay playsinline style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: contain; z-index: 100; background: #000; touch-action: none;"></video>
-  <button id="btn-mobile-keyboard" style="display: none; position: fixed; bottom: 20px; right: 20px; z-index: 110; background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.4); border-radius: 50%; width: 50px; height: 50px; font-size: 24px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;">⌨️</button>
+  
+  <!-- 虛擬滑鼠游標 (給觸控或隱藏游標時對位用) -->
+  <div id="remote-cursor" style="display: none; position: fixed; pointer-events: none; z-index: 105; width: 24px; height: 24px; transform: translate(-4px, -2px);">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));">
+      <path d="M4 2 L4 22 L11 15 L16 23 L18 22 L13 14 L20 13 Z" fill="black" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>
+  </div>
+
+  <button id="btn-mobile-keyboard" style="display: none; position: fixed; bottom: 20px; right: 20px; z-index: 110; background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.4); border-radius: 50%; width: 50px; height: 50px; font-size: 24px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;">⌨️</button>
   <textarea id="hidden-keyboard-input" style="position: fixed; top: 0; left: 0; opacity: 0.01; width: 1px; height: 1px; border: none; padding: 0; margin: 0; pointer-events: auto; z-index: -1;"></textarea>
 
   <!-- 景深霓虹背景光暈球 -->
@@ -127,6 +135,15 @@
               <button class="btn-copy" id="btn-refresh-pin" type="button" title="Refresh PIN">🔄</button>
               <button class="btn-copy" id="btn-copy-pin" type="button" title="Copy">📋</button>
             </div>
+          </div>
+          
+          <div class="info-row" style="flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+            <span id="lbl-static-pwd" style="font-size: 13px;">Static Access Password:</span>
+            <div class="input-with-button" style="width: 100%;">
+              <input type="password" id="input-static-pwd" placeholder="Set Unattended Password" style="flex: 1;">
+              <button id="btn-set-static-pwd" class="btn-secondary" style="padding: 6px 12px;">Save</button>
+            </div>
+            <span id="static-pwd-status" style="font-size: 12px; color: var(--text-muted);">Status: Not Set</span>
           </div>
           
           <div class="input-group license-group">

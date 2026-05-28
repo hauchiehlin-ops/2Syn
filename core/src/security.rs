@@ -261,6 +261,31 @@ impl LicenseValidator {
 pub struct TotpAuthenticator;
 
 impl TotpAuthenticator {
+    /// 獲取現有或產生新的 TOTP 綁定用 QR Code URL
+    pub fn get_or_create_setup_url(user_email: &str) -> Result<String, CoreError> {
+        match SecureStorage::load_secret("2syn_totp_secret") {
+            Ok(secret) => {
+                let raw_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, &secret)
+                    .ok_or_else(|| CoreError::CryptoError("無法將 TOTP 金鑰解碼".to_string()))?;
+                let totp = TOTP::new(
+                    Algorithm::SHA1,
+                    6,
+                    1,
+                    30,
+                    raw_bytes,
+                    Some("2syn-Remote".to_string()),
+                    user_email.to_string(),
+                ).map_err(|e| CoreError::CryptoError(e.to_string()))?;
+                Ok(totp.get_url())
+            }
+            Err(_) => {
+                let (secret_str, qr_code_url) = Self::new_secret(user_email)?;
+                SecureStorage::save_secret("2syn_totp_secret", &secret_str)?;
+                Ok(qr_code_url)
+            }
+        }
+    }
+
     /// 產生全新的 TOTP 金鑰與配置，完全自定義以防範編譯器版本衝突
     pub fn new_secret(user_email: &str) -> Result<(String, String), CoreError> {
         let rng = ring::rand::SystemRandom::new();
@@ -303,6 +328,24 @@ impl TotpAuthenticator {
         ).map_err(|e| CoreError::CryptoError(format!("初始化 TOTP 失敗: {}", e)))?;
         
         Ok(totp.check_current(token).unwrap_or(false))
+    }
+
+    /// 產生當下這一秒的正確 6 位數密碼
+    pub fn generate_current_pin(secret_base32: &str) -> Result<String, CoreError> {
+        let raw_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret_base32)
+            .ok_or_else(|| CoreError::CryptoError("無法將 TOTP 金鑰由 Base32 解碼".to_string()))?;
+            
+        let totp = TOTP::new(
+            Algorithm::SHA1,
+            6,
+            1,
+            30,
+            raw_bytes,
+            Some("2syn-Remote".to_string()),
+            "client@2syn.local".to_string(),
+        ).map_err(|e| CoreError::CryptoError(format!("初始化 TOTP 失敗: {}", e)))?;
+        
+        totp.generate_current().map_err(|e| CoreError::CryptoError(format!("產生 TOTP 密碼失敗: {}", e)))
     }
 }
 

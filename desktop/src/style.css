@@ -955,3 +955,49 @@ input:checked + .slider:before {
     height: min(88vh, 720px);
   }
 }
+
+/* TOTP QR Code Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-content {
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  padding: 30px;
+  border-radius: 20px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  max-width: 400px;
+  text-align: center;
+}
+
+/* Network Fix Button Pulse Highlight */
+@keyframes pulse-highlight-anim {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(0, 168, 255, 0.7); }
+  50% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(0, 168, 255, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(0, 168, 255, 0); }
+}
+.pulse-highlight {
+  animation: pulse-highlight-anim 1s infinite;
+  border: 2px solid var(--accent-color) !important;
+}
+
+/* Mobile Keyboard Button Pulse */
+@keyframes keyboard-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4); }
+  70% { box-shadow: 0 0 0 15px rgba(255, 255, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+}
+#btn-mobile-keyboard {
+  animation: keyboard-pulse 2s infinite;
+}
