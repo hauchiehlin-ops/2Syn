@@ -2501,6 +2501,34 @@ window.addEventListener("DOMContentLoaded", async () => {
   // 啟動狀態輪詢
   startStatusPolling();
 
+  // 若為純網頁環境，優化左側面板顯示，並常態開啟穿透提示按鈕
+  if (!isTauri()) {
+    const localHostInfo = document.getElementById("local-host-info-section");
+    if (localHostInfo) {
+      localHostInfo.style.display = "none";
+      if (localHostInfo.previousElementSibling) {
+        (localHostInfo.previousElementSibling as HTMLElement).style.display = "none";
+      }
+    }
+
+    const networkIndicator = document.getElementById("network-health-indicator");
+    const networkText = document.getElementById("network-health-text");
+    const networkDesc = document.getElementById("network-health-desc");
+    const btnFixNetwork = document.getElementById("btn-fix-network");
+
+    if (networkIndicator) networkIndicator.style.backgroundColor = "var(--success-color, #10b981)";
+    if (networkText) {
+      networkText.textContent = "Web Client (P2P Ready)";
+      networkText.style.color = "var(--success-color, #10b981)";
+    }
+    if (networkDesc) {
+      networkDesc.textContent = "純網頁控制端。連線建立時將會自動評估最佳傳輸管線。若因雙方處於嚴格 NAT 或防火牆後導致連線失敗，請點擊【🚀 啟用穿透模式】。";
+    }
+    if (btnFixNetwork) {
+      btnFixNetwork.style.display = "inline-block";
+    }
+  }
+
   // 啟動信令 WebSocket 連線（信令伺服器必須先啟動）
   initSignalingClient();
 });
