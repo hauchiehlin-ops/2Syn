@@ -242,6 +242,7 @@ const ICE_SERVERS: RTCIceServer[] = [
 
 // 宣告語系翻譯字典快取
 let translations: Record<string, string> = {};
+let isPinVisible = false;
 
 // 萬用英文 Fallback 字典，供載入錯誤或翻譯遺漏時調用，徹底與寫死中文解耦
 const fallbackTranslations: Record<string, string> = {
@@ -418,7 +419,9 @@ const fallbackTranslations: Record<string, string> = {
   "ts_step_2_desc": "Launch Tailscale. Both devices must log in to the same account (e.g., the same Google account) so they automatically join the same secure virtual private network.",
   "ts_step_3_title": "Step 3: Enable VPN Connection",
   "ts_step_3_desc": "Toggle the switch to 'Connected' in the mobile App (accept VPN configuration prompts if requested). Confirm that the Tailscale menu bar icon on your Mac displays 'Connected'.",
-  "ts_step_4_desc": "💡 Once completed, the connection indicator on the Mac host will automatically turn green, allowing your controller device to establish a direct connection without failed or black screen issues."
+  "ts_step_4_desc": "💡 Once completed, the connection indicator on the Mac host will automatically turn green, allowing your controller device to establish a direct connection without failed or black screen issues.",
+  "btn_show": "Show",
+  "btn_hide": "Hide"
 };
 
 // 統一翻譯取值函數
@@ -669,6 +672,12 @@ function updateDomTranslations() {
   setTextContent("txt-ts-step-3-title", t("ts_step_3_title"));
   setTextContent("txt-ts-step-3-desc", t("ts_step_3_desc"));
   setTextContent("txt-ts-step-4-desc", t("ts_step_4_desc"));
+
+  // 切換 PIN 顯示按鈕翻譯更新
+  const btnTogglePin = document.getElementById("btn-toggle-pin");
+  if (btnTogglePin) {
+    btnTogglePin.textContent = isPinVisible ? t("btn_hide") : t("btn_show");
+  }
 }
 
 function setTextContent(id: string, text: string) {
@@ -3159,6 +3168,29 @@ function initTailscaleGuide() {
 }
 
 // =========================================================================
+// Access PIN 顯示/隱藏切換事件綁定
+// =========================================================================
+function initPinToggle() {
+  const btnToggle = document.getElementById("btn-toggle-pin");
+  const inputPin = document.getElementById("access-pin-input") as HTMLInputElement;
+
+  if (btnToggle && inputPin) {
+    btnToggle.addEventListener("click", () => {
+      isPinVisible = !isPinVisible;
+      if (isPinVisible) {
+        (inputPin.style as any).webkitTextSecurity = "none";
+        (inputPin.style as any).textSecurity = "none";
+        btnToggle.textContent = t("btn_hide");
+      } else {
+        (inputPin.style as any).webkitTextSecurity = "disc";
+        (inputPin.style as any).textSecurity = "disc";
+        btnToggle.textContent = t("btn_show");
+      }
+    });
+  }
+}
+
+// =========================================================================
 // 應用程式初始化入口點
 // =========================================================================
 window.addEventListener("DOMContentLoaded", async () => {
@@ -3240,6 +3272,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initFileTransfer();
   initRemoteLogsDiagnostics();
   initTailscaleGuide();
+  initPinToggle();
   initVisualViewportListener();
   
   // 啟動狀態輪詢

@@ -229,5 +229,7 @@
   "ts_step_2_desc": "启动 Tailscale，双端**必须登录同一个帐号**（如相同 Google 帐号），这样两台设备才会自动加入同一个虚拟网域。",
   "ts_step_3_title": "步骤三：开启 VPN 连接",
   "ts_step_3_desc": "在手机端 App 切换开关为 「Connected」（若提示 VPN 授权请允许并输入密码）。Mac 端确认菜单栏图标状态为 「Connected」。",
-  "ts_step_4_desc": "💡 完成后，Mac 端的 2syn 灯号会自动变为绿色，手机端即可通过 2syn 顺利发起超低延迟直连，不再有连接失败与黑屏问题。"
+  "ts_step_4_desc": "💡 完成后，Mac 端的 2syn 灯号会自动变为绿色，手机端即可通过 2syn 顺利发起超低延迟直连，不再有连接失败与黑屏问题。",
+  "btn_show": "显示",
+  "btn_hide": "隐藏"
 }
