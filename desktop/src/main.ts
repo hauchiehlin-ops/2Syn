@@ -2019,6 +2019,12 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   videoEl.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "touch" || e.pointerType === "pen") return;
     e.preventDefault();
+    
+    // 點擊畫面時，如果尚未處於鎖定狀態，且為實實滑鼠點擊，嘗試鎖定滑鼠
+    if (document.pointerLockElement !== videoEl) {
+      videoEl.requestPointerLock();
+    }
+    
     const payload = new Uint8Array(1);
     let btn = 1;
     if (e.button === 2) btn = 2;
@@ -2026,6 +2032,153 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     payload[0] = btn;
     sendInputPacket(buildInputPacket(0x02, payload));
   });
+
+  // 監聽 Pointer Lock 變更
+  document.addEventListener("pointerlockchange", () => {
+    const tooltip = document.getElementById("pointer-lock-tooltip");
+    if (document.pointerLockElement === videoEl) {
+      console.log("[Pointer Lock] 滑鼠指標已鎖定");
+      if (tooltip) {
+        tooltip.style.display = "block";
+        tooltip.style.opacity = "1";
+        // 3 秒後漸隱
+        setTimeout(() => {
+          if (document.pointerLockElement === videoEl) {
+            tooltip.style.opacity = "0";
+            setTimeout(() => {
+              if (document.pointerLockElement === videoEl && tooltip.style.opacity === "0") {
+                tooltip.style.display = "none";
+              }
+            }, 300);
+          }
+        }, 3000);
+      }
+      
+      // 啟用 Keyboard Lock (系統快捷鍵攔截)
+      if ((navigator as any).keyboard && typeof (navigator as any).keyboard.lock === "function") {
+        (navigator as any).keyboard.lock(["Escape", "Tab", "MetaLeft", "MetaRight", "AltLeft", "AltRight"])
+          .then(() => console.log("[Keyboard Lock] 鍵盤鎖定成功"))
+          .catch((err: any) => console.warn("[Keyboard Lock] 鍵盤鎖定失敗:", err));
+      }
+    } else {
+      console.log("[Pointer Lock] 滑鼠指標已解鎖");
+      if (tooltip) {
+        tooltip.style.display = "none";
+        tooltip.style.opacity = "0";
+      }
+      
+      // 解除 Keyboard Lock
+      if ((navigator as any).keyboard && typeof (navigator as any).keyboard.unlock === "function") {
+        (navigator as any).keyboard.unlock();
+        console.log("[Keyboard Lock] 鍵盤鎖定解除");
+      }
+      
+      // 重置邊緣平移座標
+      currentCursorPercentX = 0.5;
+      currentCursorPercentY = 0.5;
+    }
+  });
+
+  // 快速鍵下拉選單切換與複合按鍵發送
+  const btnSendKeys = document.getElementById("btn-send-keys");
+  const shortcutsDropdown = document.getElementById("shortcuts-dropdown");
+  if (btnSendKeys && shortcutsDropdown) {
+    btnSendKeys.onclick = (e) => {
+      e.stopPropagation();
+      const isVisible = shortcutsDropdown.style.display === "flex";
+      shortcutsDropdown.style.display = isVisible ? "none" : "flex";
+    };
+
+    // 點擊選單外部時，隱藏選單
+    document.addEventListener("click", () => {
+      if (shortcutsDropdown.style.display === "flex") {
+        shortcutsDropdown.style.display = "none";
+      }
+    });
+
+    // 阻止選單內部點擊冒泡
+    shortcutsDropdown.onclick = (e) => {
+      e.stopPropagation();
+    };
+
+    // 下拉選單項目的 hover 效果與點擊事件
+    const shortcutItems = shortcutsDropdown.querySelectorAll(".shortcut-item");
+    shortcutItems.forEach((item) => {
+      const btnItem = item as HTMLButtonElement;
+      
+      btnItem.onmouseenter = () => {
+        btnItem.style.background = "rgba(255, 255, 255, 0.15)";
+      };
+      btnItem.onmouseleave = () => {
+        btnItem.style.background = "none";
+      };
+
+      btnItem.onclick = () => {
+        const keys = btnItem.getAttribute("data-keys");
+        if (keys) {
+          sendShortcut(keys);
+        }
+        shortcutsDropdown.style.display = "none";
+      };
+    });
+  }
+
+  // 輔助函數：發送複合快捷鍵
+  function sendShortcut(keys: string) {
+    const ctrlCode = 17;
+    const altCode = 18;
+    const delCode = 46;
+    const winCode = 91;
+    const tabCode = 9;
+    const escCode = 27;
+
+    const pressKey = (code: number, mods: number = 0) => {
+      const payload = new Uint8Array(3);
+      const view = new DataView(payload.buffer);
+      view.setUint16(0, code, false);
+      payload[2] = mods;
+      sendInputPacket(buildInputPacket(0x05, payload));
+    };
+
+    const releaseKey = (code: number, mods: number = 0) => {
+      const payload = new Uint8Array(3);
+      const view = new DataView(payload.buffer);
+      view.setUint16(0, code, false);
+      payload[2] = mods;
+      sendInputPacket(buildInputPacket(0x06, payload));
+    };
+
+    if (keys === "ctrl-alt-del") {
+      // 複合鍵順序：Ctrl Down -> Alt Down -> Del Down -> Del Up -> Alt Up -> Ctrl Up
+      pressKey(ctrlCode, 2);
+      pressKey(altCode, 6);
+      pressKey(delCode, 6);
+      setTimeout(() => {
+        releaseKey(delCode, 6);
+        releaseKey(altCode, 2);
+        releaseKey(ctrlCode, 0);
+      }, 50);
+    } else if (keys === "win") {
+      pressKey(winCode, 8);
+      setTimeout(() => {
+        releaseKey(winCode, 0);
+      }, 50);
+    } else if (keys === "alt-tab") {
+      pressKey(altCode, 4);
+      pressKey(tabCode, 4);
+      setTimeout(() => {
+        releaseKey(tabCode, 4);
+        releaseKey(altCode, 0);
+      }, 50);
+    } else if (keys === "ctrl-esc") {
+      pressKey(ctrlCode, 2);
+      pressKey(escCode, 2);
+      setTimeout(() => {
+        releaseKey(escCode, 2);
+        releaseKey(ctrlCode, 0);
+      }, 50);
+    }
+  }
 
   videoEl.addEventListener("pointerup", (e) => {
     if (e.pointerType === "touch" || e.pointerType === "pen") return;

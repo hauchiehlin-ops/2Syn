@@ -18,14 +18,27 @@
   <!-- Remote Video Container (Hidden until connected) -->
   <div id="remote-video-container" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden; z-index: 100; background: #000; touch-action: none;">
     <video id="remote-video" autoplay playsinline style="display: block; width: 100%; height: 100%; object-fit: contain; transform-origin: top left; touch-action: none;"></video>
+    <!-- Pointer Lock 提示框 -->
+    <div id="pointer-lock-tooltip" style="display: none; position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 110; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); color: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; pointer-events: none; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: opacity 0.3s ease;">
+      滑鼠已鎖定，按 ESC 鍵即可退出
+    </div>
   </div>
   
   <!-- 顯示模式切換按鈕 (遠端畫面開啟時顯示) -->
   <button id="btn-display-mode" style="display: none; position: fixed; top: 20px; right: 20px; z-index: 110; background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.4); border-radius: 8px; padding: 8px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 14px;">🔍 Original Size</button>
   
   <!-- 左上方懸浮控制選單 (遠端畫面開啟時顯示) -->
-  <div id="left-floating-menu" style="display: none; position: fixed; top: 20px; left: 20px; z-index: 110; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 6px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); align-items: center; gap: 8px;">
+  <div id="left-floating-menu" style="display: none; position: fixed; top: 20px; left: 20px; z-index: 110; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 6px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); align-items: center; gap: 8px; display: flex;">
     <button id="btn-touch-mode" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px;">🖱️ Trackpad Mode</button>
+    <div class="dropdown-wrapper" style="position: relative; display: inline-block;">
+      <button id="btn-send-keys" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px;">⌨️ Shortcuts</button>
+      <div id="shortcuts-dropdown" style="display: none; position: absolute; top: calc(100% + 6px); left: 0; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 6px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); flex-direction: column; gap: 4px; min-width: 140px; z-index: 120;">
+        <button class="shortcut-item" data-keys="ctrl-alt-del" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Ctrl + Alt + Del</button>
+        <button class="shortcut-item" data-keys="win" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Win / Super Key</button>
+        <button class="shortcut-item" data-keys="alt-tab" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Alt + Tab</button>
+        <button class="shortcut-item" data-keys="ctrl-esc" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Ctrl + Esc</button>
+      </div>
+    </div>
   </div>
   
   <!-- 虛擬滑鼠游標 (給觸控或隱藏游標時對位用) -->
