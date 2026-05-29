@@ -223,5 +223,9 @@
   "log_sig_rust_connected": "[Rust] Connected and logged in to signaling server.",
   "log_sig_rust_disconnected": "[Rust] Connection lost, preparing to reconnect...",
   "log_sig_rust_start_success": "Rust signaling client successfully initialized.",
-  "log_sig_rust_start_failed": "Failed to start Rust signaling: {0}"
+  "log_sig_rust_start_failed": "Failed to start Rust signaling: {0}",
+  "btn_diagnose_host": "Diagnose Host",
+  "remote_logs_title": "Remote Host Diagnostic Logs",
+  "remote_logs_help": "These are the real-time debug logs from the controlled host. If you see \"Screen capture failed\", it means the Mac host has Screen Recording permission checked but still rejected by OS. Please uncheck and recheck the permission, then restart the App.",
+  "loading_remote_logs": "Loading remote logs..."
 }

@@ -223,5 +223,9 @@
   "log_sig_rust_connected": "[Rust] 已成功連線並登入信令伺服器。",
   "log_sig_rust_disconnected": "[Rust] 與信令伺服器連線已斷開，準備重新嘗試連線...",
   "log_sig_rust_start_success": "已成功委託 Rust 後端啟動信令客戶端。",
-  "log_sig_rust_start_failed": "啟動 Rust 信令失敗: {0}"
+  "log_sig_rust_start_failed": "啟動 Rust 信令失敗: {0}",
+  "btn_diagnose_host": "診斷遠端主機",
+  "remote_logs_title": "遠端主機診斷日誌",
+  "remote_logs_help": "以上為被控端主機的即時除錯日誌。若包含 \"Screen capture failed\"，表示 Mac 主機雖勾選了權限，但仍被系統拒絕，請嘗試將該 App 權限取消勾選後重新勾選，並重啟 App。",
+  "loading_remote_logs": "載入遠端日誌中..."
 }

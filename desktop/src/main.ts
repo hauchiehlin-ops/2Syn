@@ -402,7 +402,11 @@ const fallbackTranslations: Record<string, string> = {
   "log_video_send_timeout": "[Video] Frame transmission timed out (network congestion)",
   "log_input_simulate_failed": "[input-control] simulate failed: {0}",
   "log_input_rejected": "[security input-control] packet rejected: {0}",
-  "log_input_unreliable_failed": "[input-unreliable] simulate failed: {0}"
+  "log_input_unreliable_failed": "[input-unreliable] simulate failed: {0}",
+  "btn_diagnose_host": "Diagnose Host",
+  "remote_logs_title": "Remote Host Diagnostic Logs",
+  "remote_logs_help": "These are the real-time debug logs from the controlled host. If you see \"Screen capture failed\", it means the Mac host has Screen Recording permission checked but still rejected by OS. Please uncheck and recheck the permission, then restart the App.",
+  "loading_remote_logs": "Loading remote logs..."
 };
 
 // 統一翻譯取值函數
@@ -634,6 +638,11 @@ function updateDomTranslations() {
 
   // 系統日誌標題翻譯
   setTextContent("txt-system-logs-title", t("log_title_system_logs"));
+
+  // 遠端主機診斷與日誌翻譯更新
+  setTextContent("btn-video-diagnose", t("btn_diagnose_host"));
+  setTextContent("txt-remote-logs-title", t("remote_logs_title"));
+  setTextContent("txt-remote-logs-help", t("remote_logs_help"));
 }
 
 function setTextContent(id: string, text: string) {
@@ -874,6 +883,51 @@ function initSignalingClient() {
               } catch (e) {
                 console.warn("[WebRTC] 無法將 ICE Candidate 傳遞給 Rust:", e);
               }
+            }
+          }
+        }
+        break;
+      case "custom_request_logs":
+        {
+          const logOverlay = document.getElementById("debug-overlay");
+          const logsList: string[] = [];
+          if (logOverlay) {
+            Array.from(logOverlay.children).forEach((child) => {
+              logsList.push(child.textContent || "");
+            });
+          }
+          if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
+            signalingWs.send(JSON.stringify({
+              type: "custom_response_logs",
+              target: msg.source,
+              source: myId,
+              logs: logsList.slice(-35) // 回傳最近 35 條日誌，避免數據過大
+            }));
+          }
+        }
+        break;
+      case "custom_response_logs":
+        {
+          const remoteLogs = msg.logs || [];
+          const container = document.getElementById("remote-logs-container");
+          if (container) {
+            if (remoteLogs.length === 0) {
+              container.textContent = "No log records received from remote host.";
+            } else {
+              container.innerHTML = "";
+              remoteLogs.forEach((log: string) => {
+                const div = document.createElement("div");
+                if (log.includes("失敗") || log.includes("failed") || log.includes("Error") || log.includes("錯誤") || log.includes("err_")) {
+                  div.style.color = "#f87171"; // 紅色
+                } else if (log.includes("警告") || log.includes("warn") || log.includes("Warning") || log.includes("timeout")) {
+                  div.style.color = "#fbbf24"; // 黃色
+                } else {
+                  div.style.color = "#34d399"; // 綠色
+                }
+                div.textContent = log;
+                container.appendChild(div);
+              });
+              container.scrollTop = container.scrollHeight;
             }
           }
         }
@@ -3009,6 +3063,52 @@ function initPanelToggle() {
 }
 
 // =========================================================================
+// 遠端主機除錯日誌診斷 Modal 與事件綁定
+// =========================================================================
+function initRemoteLogsDiagnostics() {
+  const btnDiagnose = document.getElementById("btn-video-diagnose");
+  const btnCloseLogs = document.getElementById("btn-close-remote-logs");
+  const modal = document.getElementById("remote-logs-modal");
+  const container = document.getElementById("remote-logs-container");
+
+  if (btnDiagnose) {
+    btnDiagnose.addEventListener("click", () => {
+      if (signalingWs && signalingWs.readyState === WebSocket.OPEN && currentRemoteId) {
+        console.log(`[Diagnostic] 發送遠端主機除錯日誌索取請求給 ${currentRemoteId}`);
+        signalingWs.send(JSON.stringify({
+          type: "custom_request_logs",
+          target: currentRemoteId,
+          source: myId
+        }));
+        
+        if (container) {
+          container.textContent = t("loading_remote_logs") || "Loading remote logs...";
+        }
+        if (modal) {
+          modal.style.display = "flex";
+        }
+      } else {
+        showToast("Signaling channel not available or remote ID not found.");
+      }
+    });
+  }
+
+  if (btnCloseLogs && modal) {
+    btnCloseLogs.addEventListener("click", () => {
+      modal.style.display = "none";
+    });
+  }
+
+  if (modal) {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) {
+        modal.style.display = "none";
+      }
+    });
+  }
+}
+
+// =========================================================================
 // 應用程式初始化入口點
 // =========================================================================
 window.addEventListener("DOMContentLoaded", async () => {
@@ -3088,6 +3188,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initClipboardCopy();
   initSmartAutoMode();
   initFileTransfer();
+  initRemoteLogsDiagnostics();
   initVisualViewportListener();
   
   // 啟動狀態輪詢
