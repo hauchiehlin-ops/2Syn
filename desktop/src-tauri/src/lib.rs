@@ -271,7 +271,14 @@ async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: St
         if let Some(candidate) = c {
             if let Ok(json) = candidate.to_json() {
                 let app_inner = app.clone();
-                let json_candidate = json.candidate.clone();
+                // 序列化完整的 RTCIceCandidateInit 物件（含 candidate, sdpMid, sdpMLineIndex）
+                // JS 端接收後會執行 JSON.parse(msg.candidate)，因此這裡必須傳入完整 JSON 字串
+                let candidate_init_json = serde_json::json!({
+                    "candidate": json.candidate,
+                    "sdpMid": json.sdp_mid,
+                    "sdpMLineIndex": json.sdp_mline_index
+                }).to_string();
+                let json_for_event = json.clone();
                 tokio::spawn(async move {
                     let state = app_inner.state::<AppState>();
                     let remote_id = state.current_remote_id.read().await.clone();
@@ -281,7 +288,7 @@ async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: St
                             let ice_msg = serde_json::json!({
                                 "type": "ice",
                                 "target": remote_id,
-                                "candidate": json_candidate
+                                "candidate": candidate_init_json
                             });
                             if tx.send(ice_msg.to_string()).await.is_ok() {
                                 println!("Rust 信令已發送本機 ICE Candidate 至 {}", remote_id);
@@ -289,7 +296,7 @@ async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: St
                             }
                         }
                     }
-                    let _ = app_inner.emit("rust-ice-candidate", json);
+                    let _ = app_inner.emit("rust-ice-candidate", json_for_event);
                 });
             }
         }
