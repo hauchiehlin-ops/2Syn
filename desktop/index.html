@@ -17,7 +17,7 @@
 <body>
   <!-- Remote Video Container (Hidden until connected) -->
   <div id="remote-video-container" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden; z-index: 100; background: #000; touch-action: none;">
-    <video id="remote-video" autoplay playsinline muted style="display: block; width: 100%; height: 100%; object-fit: contain; transform-origin: top left; touch-action: none;"></video>
+    <video id="remote-video" autoplay playsinline muted style="display: block; width: 100%; height: 100%; object-fit: contain; transform-origin: center center; touch-action: none;"></video>
     <div id="pointer-lock-tooltip" style="display: none; position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 110; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); color: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; pointer-events: none; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: opacity 0.3s ease;">
       Pointer locked. Press ESC to exit.
     </div>
@@ -58,7 +58,7 @@
   </div>
 
   <button id="btn-mobile-keyboard" style="display: none; position: fixed; bottom: 20px; right: 20px; z-index: 110; background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.4); border-radius: 50%; width: 50px; height: 50px; font-size: 24px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;">⌨️</button>
-  <textarea id="hidden-keyboard-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="position: fixed; top: 0; left: 0; opacity: 0.01; width: 1px; height: 1px; border: none; padding: 0; margin: 0; pointer-events: auto; z-index: -1;"></textarea>
+  <textarea id="hidden-keyboard-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="position: fixed; top: -100px; left: 0; opacity: 0.01; width: 1px; height: 1px; border: none; padding: 0; margin: 0; pointer-events: auto; z-index: 1000;"></textarea>
 
   <!-- 景深霓虹背景光暈球 -->
   <div class="orb orb-1"></div>

@@ -2292,6 +2292,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let isKeyboardActive = false;
   let lastBackspaceTime = 0;
   let isComposing = false;
+  let lastValue = ""; // 用於追蹤鍵盤增量輸入框內容
 
   if (btnDisplayMode) {
     btnDisplayMode.onclick = () => {
@@ -2347,9 +2348,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           videoContainer.scrollTop += dy;
         } else if (videoScale > 1.0) {
           // 模式二：Scale 放大模式，平移 CSS transform
-          const rect = videoEl.getBoundingClientRect();
-          const maxTx = ((videoScale - 1) * rect.width) / 2;
-          const maxTy = ((videoScale - 1) * rect.height) / 2;
+          const containerWidth = videoContainer.clientWidth;
+          const containerHeight = videoContainer.clientHeight;
+          const maxTx = ((videoScale - 1) * containerWidth) / 2;
+          const maxTy = ((videoScale - 1) * containerHeight) / 2;
           
           // 畫面往反方向帶：dx > 0 (游標在右側) -> 視訊向左移 (videoTranslateX 減少)
           videoTranslateX -= dx;
@@ -2915,6 +2917,13 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         if (videoScale === 1.0) {
           videoTranslateX = 0;
           videoTranslateY = 0;
+        } else if (videoScale > 1.0 && videoContainer) {
+          const containerWidth = videoContainer.clientWidth;
+          const containerHeight = videoContainer.clientHeight;
+          const maxTx = ((videoScale - 1) * containerWidth) / 2;
+          const maxTy = ((videoScale - 1) * containerHeight) / 2;
+          videoTranslateX = Math.max(-maxTx, Math.min(maxTx, videoTranslateX));
+          videoTranslateY = Math.max(-maxTy, Math.min(maxTy, videoTranslateY));
         }
         
         videoEl.style.transform = `translate(${videoTranslateX}px, ${videoTranslateY}px) scale(${videoScale})`;
@@ -3206,6 +3215,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (hiddenInput) {
       hiddenInput.value = "";
     }
+    lastValue = ""; // 重設增量文字追蹤
   };
 
   const handleEnter = () => {
@@ -3213,6 +3223,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (hiddenInput) {
       hiddenInput.value = "";
     }
+    lastValue = ""; // 重設增量文字追蹤
   };
 
   if (btnKeyboard && hiddenInput) {
@@ -3232,22 +3243,30 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
     hiddenInput.addEventListener("compositionend", () => {
       isComposing = false;
-      const val = hiddenInput.value;
-      if (val.length > 0) {
-        const encoder = new TextEncoder();
-        const payload = encoder.encode(val);
-        sendInputPacket(buildInputPacket(0x08, payload));
+      // 延遲以確保某些行動端瀏覽器在 compositionend 觸發時 value 已完全寫入
+      setTimeout(() => {
+        const val = hiddenInput.value;
+        if (val.length > 0) {
+          const encoder = new TextEncoder();
+          const payload = encoder.encode(val);
+          sendInputPacket(buildInputPacket(0x08, payload));
+        }
         hiddenInput.value = "";
-      }
+        lastValue = "";
+      }, 10);
     });
 
     hiddenInput.addEventListener("keydown", (e) => {
       if (e.key === "Backspace" || e.keyCode === 8) {
-        e.preventDefault();
-        handleBackspace();
+        if (!isComposing) {
+          e.preventDefault();
+          handleBackspace();
+        }
       } else if (e.key === "Enter" || e.keyCode === 13) {
-        e.preventDefault();
-        handleEnter();
+        if (!isComposing) {
+          e.preventDefault();
+          handleEnter();
+        }
       }
     });
 
@@ -3266,12 +3285,65 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         return;
       }
 
-      const val = hiddenInput.value;
-      if (val.length > 0) {
-        const encoder = new TextEncoder();
-        const payload = encoder.encode(val);
-        sendInputPacket(buildInputPacket(0x08, payload));
-        hiddenInput.value = "";
+      const currentValue = hiddenInput.value;
+
+      // 當偵測到含有換行符時，直接作為 Enter 鍵處理
+      if (currentValue.includes("\n") || currentValue.includes("\r")) {
+        handleEnter();
+        return;
+      }
+
+      // 增量文字比對演算法
+      if (currentValue.length < lastValue.length) {
+        // 刪除動作：計算少掉的字元數並發送 Backspace
+        const deleteCount = lastValue.length - currentValue.length;
+        for (let i = 0; i < deleteCount; i++) {
+          sendKeyStroke(8);
+        }
+        lastValue = currentValue;
+      } else if (currentValue.length > lastValue.length) {
+        // 新增動作
+        if (currentValue.startsWith(lastValue)) {
+          const added = currentValue.slice(lastValue.length);
+          if (added.length > 0) {
+            const encoder = new TextEncoder();
+            const payload = encoder.encode(added);
+            sendInputPacket(buildInputPacket(0x08, payload));
+          }
+          lastValue = currentValue;
+        } else {
+          // 自動糾錯或聯想詞替換：先刪除舊長度文字，再輸入新整句
+          for (let i = 0; i < lastValue.length; i++) {
+            sendKeyStroke(8);
+          }
+          if (currentValue.length > 0) {
+            const encoder = new TextEncoder();
+            const payload = encoder.encode(currentValue);
+            sendInputPacket(buildInputPacket(0x08, payload));
+          }
+          lastValue = currentValue;
+        }
+      } else if (currentValue !== lastValue) {
+        // 長度相同但內容不同：字元替換，先刪除再輸入
+        for (let i = 0; i < lastValue.length; i++) {
+          sendKeyStroke(8);
+        }
+        if (currentValue.length > 0) {
+          const encoder = new TextEncoder();
+          const payload = encoder.encode(currentValue);
+          sendInputPacket(buildInputPacket(0x08, payload));
+        }
+        lastValue = currentValue;
+      }
+
+      // 安全重置機制：當單字過長，或輸入了空格、標點符號，在下一影格安全清空，以防系統 Autocorrect 卡死
+      if (currentValue.length > 20 || currentValue.endsWith(" ") || currentValue.endsWith("，") || currentValue.endsWith("。")) {
+        setTimeout(() => {
+          if (!isComposing && hiddenInput) {
+            hiddenInput.value = "";
+            lastValue = "";
+          }
+        }, 50);
       }
     });
   }
