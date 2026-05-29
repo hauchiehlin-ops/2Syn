@@ -2645,6 +2645,58 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // 啟動信令 WebSocket 連線（信令伺服器必須先啟動）
-  initSignalingClient();
+  // 網頁控制端（Client）聚焦與可見度狀態檢測重連
+  if (!isTauri()) {
+    window.addEventListener("focus", () => {
+      const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
+      if (videoEl && videoEl.style.display === "none") {
+        if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
+          console.log("[Signaling] 網頁控制端獲得焦點，且信令未連線，立即重建連線...");
+          initSignalingClient();
+        } else {
+          console.log("[Signaling] 網頁控制端獲得焦點，發送 ping 驗證連線...");
+          signalingWs.send(JSON.stringify({ type: "ping" }));
+        }
+      }
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
+      if (!document.hidden && videoEl && videoEl.style.display === "none") {
+        if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
+          console.log("[Signaling] 網頁控制端頁面恢復可見，且信令未連線，立即重建連線...");
+          initSignalingClient();
+        }
+      }
+    });
+  }
+
+  // 啟動信令連線分流：Tauri 桌面端 Host 走 Rust 後端，Web 控制端走 JS 前端
+  if (isTauri()) {
+    console.log("[Signaling] 偵測為 Tauri 桌面環境，註冊 Rust 後端信令維護...");
+    
+    // 監聽來自 Rust 的信令連線狀態更新，並同步顯示到 logs 區塊
+    listen<string>("rust-signaling-status", (event) => {
+      const status = event.payload;
+      if (status === "connecting") {
+        console.log("[Signaling] [Rust] 嘗試連線至信令伺服器...");
+      } else if (status === "online") {
+        console.log("[Signaling] [Rust] 已成功連線並登入信令伺服器。");
+      } else if (status === "offline") {
+        console.warn("[Signaling] [Rust] 與信令伺服器連線已斷開，準備重新嘗試連線...");
+      }
+    });
+
+    // 呼叫後端指令，傳入本機 ID 與當前 PIN 碼
+    invoke("start_rust_signaling", { myId: myId, pin: myPin })
+      .then(() => {
+        console.log("[Signaling] 已成功委託 Rust 後端啟動信令客戶端。");
+      })
+      .catch((err) => {
+        console.error("[Signaling] 啟動 Rust 信令失敗:", err);
+      });
+  } else {
+    // 網頁瀏覽器控制端（Client）
+    initSignalingClient();
+  }
 });

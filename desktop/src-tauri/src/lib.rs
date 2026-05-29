@@ -9,8 +9,11 @@ use syn_core::file_transfer::FileTransferEngine;
 use std::sync::Arc;
 #[cfg(not(target_os = "ios"))]
 use tauri::{State, Manager, Emitter};
-#[cfg(target_os = "ios")]
-use tauri::State;
+
+#[cfg(not(target_os = "ios"))]
+use futures_util::{StreamExt, SinkExt};
+#[cfg(not(target_os = "ios"))]
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
 struct AppState {
     #[cfg(not(target_os = "ios"))]
@@ -19,6 +22,12 @@ struct AppState {
     file_transfer_engine: Arc<FileTransferEngine>,
     #[cfg(not(target_os = "ios"))]
     active_pc: tokio::sync::Mutex<Option<Arc<webrtc::peer_connection::RTCPeerConnection>>>,
+    #[cfg(not(target_os = "ios"))]
+    signaling_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
+    #[cfg(not(target_os = "ios"))]
+    current_pin: Arc<tokio::sync::RwLock<String>>,
+    #[cfg(not(target_os = "ios"))]
+    current_remote_id: Arc<tokio::sync::RwLock<String>>,
 }
 
 /// 獲取本機硬體特徵碼（HWID）的 Tauri Command
@@ -251,12 +260,33 @@ async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: St
 
     let pc = session.get_peer_connection();
     
-    // 監聽本機產生的 ICE Candidate 並透過 Tauri Event 拋給前端
+    // 監聽本機產生的 ICE Candidate。優先透過 Rust 後端信令直接發送，若未啟動則透過 Tauri Event 拋給前端。
     let app_clone = app_handle.clone();
     pc.on_ice_candidate(Box::new(move |c: Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>| {
+        let app = app_clone.clone();
         if let Some(candidate) = c {
             if let Ok(json) = candidate.to_json() {
-                let _ = app_clone.emit("rust-ice-candidate", json);
+                let app_inner = app.clone();
+                let json_candidate = json.candidate.clone();
+                tokio::spawn(async move {
+                    let state = app_inner.state::<AppState>();
+                    let remote_id = state.current_remote_id.read().await.clone();
+                    let tx_opt = state.signaling_tx.lock().await.clone();
+                    if !remote_id.is_empty() {
+                        if let Some(tx) = tx_opt {
+                            let ice_msg = serde_json::json!({
+                                "type": "ice",
+                                "target": remote_id,
+                                "candidate": json_candidate
+                            });
+                            if tx.send(ice_msg.to_string()).await.is_ok() {
+                                println!("Rust 信令已發送本機 ICE Candidate 至 {}", remote_id);
+                                return;
+                            }
+                        }
+                    }
+                    let _ = app_inner.emit("rust-ice-candidate", json);
+                });
             }
         }
         Box::pin(async {})
@@ -350,15 +380,24 @@ async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: St
     Ok(answer.sdp)
 }
 
-/// 接收來自遠端的 ICE Candidate 並套用至 Rust PeerConnection
 #[cfg(not(target_os = "ios"))]
-#[tauri::command]
-async fn add_ice_candidate_to_rust(state: State<'_, AppState>, candidate_str: String) -> Result<(), String> {
+#[derive(serde::Deserialize, Debug)]
+#[serde(tag = "type")]
+enum IncomingMessage {
+    #[serde(rename = "offer")]
+    Offer { source: String, pin: String, sdp: String },
+    #[serde(rename = "ice")]
+    Ice { source: String, candidate: String },
+    #[serde(rename = "error")]
+    Error { message: String },
+}
+
+#[cfg(not(target_os = "ios"))]
+async fn apply_ice_candidate(state: &AppState, candidate_str: &str) -> Result<(), String> {
     use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
-    
     let pc_opt = state.active_pc.lock().await.clone();
     if let Some(pc) = pc_opt {
-        match serde_json::from_str::<RTCIceCandidateInit>(&candidate_str) {
+        match serde_json::from_str::<RTCIceCandidateInit>(candidate_str) {
             Ok(candidate) => {
                 pc.add_ice_candidate(candidate).await.map_err(|e| e.to_string())?;
                 println!("已成功加入遠端 ICE Candidate");
@@ -369,6 +408,204 @@ async fn add_ice_candidate_to_rust(state: State<'_, AppState>, candidate_str: St
         return Err("PeerConnection 尚未建立".to_string());
     }
     Ok(())
+}
+
+#[cfg(not(target_os = "ios"))]
+async fn start_rust_signaling_task(
+    app_handle: tauri::AppHandle,
+    my_id: String,
+    mut ws_rx: tokio::sync::mpsc::Receiver<String>,
+) {
+    let ws_url = "wss://twosyn-signaling.onrender.com/ws";
+    
+    // 共享當前活躍之 WebSocket 傳送端
+    let active_ws_sender = Arc::new(tokio::sync::Mutex::new(None));
+    
+    // 轉發任務在 loop 外僅 spawn 一次，防止 Receiver 擁有權移入 loop 內部
+    let active_ws_sender_clone = Arc::clone(&active_ws_sender);
+    let mut _forward_task = tokio::spawn(async move {
+        while let Some(msg_str) = ws_rx.recv().await {
+            let tx_opt: Option<tokio::sync::mpsc::Sender<WsMessage>> = active_ws_sender_clone.lock().await.clone();
+            if let Some(tx) = tx_opt {
+                let _ = tx.send(WsMessage::Text(msg_str)).await;
+            }
+        }
+    });
+    
+    loop {
+        println!("[Rust Signaling] 嘗試連線到信令伺服器: {}", ws_url);
+        let _ = app_handle.emit("rust-signaling-status", "connecting");
+        
+        let url_parsed = match url::Url::parse(ws_url) {
+            Ok(u) => u,
+            Err(e) => {
+                eprintln!("[Rust Signaling] URL 解析錯誤: {}", e);
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+
+        let conn_res = connect_async(url_parsed).await;
+        let (ws_stream, _) = match conn_res {
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!("[Rust Signaling] 連線信令伺服器失敗: {}, 5 秒後重試", e);
+                let _ = app_handle.emit("rust-signaling-status", "offline");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+
+        println!("[Rust Signaling] 已成功建立 WebSocket 連線，正在登入...");
+        let (mut ws_write, mut ws_read) = ws_stream.split();
+        
+        let login_msg = serde_json::json!({
+            "type": "login",
+            "id": my_id
+        });
+        if let Err(e) = ws_write.send(WsMessage::Text(login_msg.to_string())).await {
+            eprintln!("[Rust Signaling] 發送登入封包失敗: {}", e);
+            let _ = app_handle.emit("rust-signaling-status", "offline");
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            continue;
+        }
+        
+        let _ = app_handle.emit("rust-signaling-status", "online");
+        println!("[Rust Signaling] 登入成功，ID: {}", my_id);
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<WsMessage>(100);
+        
+        // 更新當前活躍的 WebSocket 傳送端
+        *active_ws_sender.lock().await = Some(tx.clone());
+        
+        let mut ws_write_task = tokio::spawn(async move {
+            let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
+            loop {
+                tokio::select! {
+                    _ = heartbeat.tick() => {
+                        let ping_msg = serde_json::json!({ "type": "ping" });
+                        if ws_write.send(WsMessage::Text(ping_msg.to_string())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(msg) = rx.recv() => {
+                        if ws_write.send(msg).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        let app_handle_clone = app_handle.clone();
+        let tx_clone = tx.clone();
+        
+        let mut ws_read_task = tokio::spawn(async move {
+            while let Some(Ok(WsMessage::Text(text))) = ws_read.next().await {
+                if let Ok(incoming) = serde_json::from_str::<IncomingMessage>(&text) {
+                    match incoming {
+                        IncomingMessage::Offer { source, pin, sdp } => {
+                            println!("[Rust Signaling] 收到來自 {} 的 Offer，進行驗證...", source);
+                            let state = app_handle_clone.state::<AppState>();
+                            
+                            let current_pin_val = state.current_pin.read().await.clone();
+                            let is_static_valid = match SecureStorage::load_secret(STATIC_PWD_KEY) {
+                                Ok(saved_pwd) => saved_pwd == pin,
+                                Err(_) => false,
+                            };
+                            
+                            if pin != current_pin_val && !is_static_valid {
+                                println!("[Rust Signaling] 拒絕來自 {} 的連線：PIN 碼或固定密碼不符", source);
+                                let reject_msg = serde_json::json!({
+                                    "type": "error",
+                                    "target": source,
+                                    "message": "Connection rejected: Invalid PIN or Password"
+                                });
+                                let _ = tx_clone.send(WsMessage::Text(reject_msg.to_string())).await;
+                                continue;
+                            }
+                            
+                            *state.current_remote_id.write().await = source.clone();
+                            
+                            match handle_remote_offer_as_host(app_handle_clone.clone(), sdp).await {
+                                Ok(answer_sdp) => {
+                                    println!("[Rust Signaling] 成功處理 Offer，正在回傳 Answer 至 {}...", source);
+                                    let answer_msg = serde_json::json!({
+                                        "type": "answer",
+                                        "target": source,
+                                        "sdp": answer_sdp
+                                    });
+                                    let _ = tx_clone.send(WsMessage::Text(answer_msg.to_string())).await;
+                                }
+                                Err(e) => {
+                                    eprintln!("[Rust Signaling] 處理 Offer 失敗: {}", e);
+                                    let reject_msg = serde_json::json!({
+                                        "type": "error",
+                                        "target": source,
+                                        "message": format!("Connection rejected: {}", e)
+                                    });
+                                    let _ = tx_clone.send(WsMessage::Text(reject_msg.to_string())).await;
+                                }
+                            }
+                        }
+                        IncomingMessage::Ice { source, candidate } => {
+                            let state = app_handle_clone.state::<AppState>();
+                            println!("[Rust Signaling] 收到來自 {} 的 ICE Candidate，套用中...", source);
+                            if let Err(e) = apply_ice_candidate(&state, &candidate).await {
+                                eprintln!("[Rust Signaling] 套用 ICE Candidate 失敗: {}", e);
+                            }
+                        }
+                        IncomingMessage::Error { message } => {
+                            eprintln!("[Rust Signaling] 收到伺服器錯誤: {}", message);
+                        }
+                    }
+                }
+            }
+        });
+
+        tokio::select! {
+            _ = &mut ws_write_task => {
+                ws_read_task.abort();
+            }
+            _ = &mut ws_read_task => {
+                ws_write_task.abort();
+            }
+        }
+
+        // 斷線後，清除當前活躍之 WebSocket 發送端
+        *active_ws_sender.lock().await = None;
+
+        println!("[Rust Signaling] 信令連線已斷開，5 秒後重新連線...");
+        let _ = app_handle.emit("rust-signaling-status", "offline");
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+async fn start_rust_signaling(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    my_id: String,
+    pin: String,
+) -> Result<(), String> {
+    *state.current_pin.write().await = pin;
+    
+    let (tx, rx) = tokio::sync::mpsc::channel::<String>(100);
+    *state.signaling_tx.lock().await = Some(tx);
+    
+    tokio::spawn(async move {
+        start_rust_signaling_task(app_handle, my_id, rx).await;
+    });
+    
+    Ok(())
+}
+
+/// 接收來自遠端的 ICE Candidate 並套用至 Rust PeerConnection
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+async fn add_ice_candidate_to_rust(state: State<'_, AppState>, candidate_str: String) -> Result<(), String> {
+    apply_ice_candidate(&state, &candidate_str).await
 }
 
 /// 獲取當前連線品質狀態，供前端即時面板顯示
@@ -574,6 +811,12 @@ pub fn run() {
             file_transfer_engine,
             #[cfg(not(target_os = "ios"))]
             active_pc: tokio::sync::Mutex::new(None),
+            #[cfg(not(target_os = "ios"))]
+            signaling_tx: tokio::sync::Mutex::new(None),
+            #[cfg(not(target_os = "ios"))]
+            current_pin: Arc::new(tokio::sync::RwLock::new(String::new())),
+            #[cfg(not(target_os = "ios"))]
+            current_remote_id: Arc::new(tokio::sync::RwLock::new(String::new())),
         })
         .setup(|app| {
             #[cfg(not(target_os = "ios"))]
@@ -603,6 +846,8 @@ pub fn run() {
             handle_remote_offer_as_host,
             #[cfg(not(target_os = "ios"))]
             add_ice_candidate_to_rust,
+            #[cfg(not(target_os = "ios"))]
+            start_rust_signaling,
             #[cfg(not(target_os = "ios"))]
             get_connection_status,
             check_network_health,
