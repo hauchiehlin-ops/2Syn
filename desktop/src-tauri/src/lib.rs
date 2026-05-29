@@ -390,6 +390,8 @@ enum IncomingMessage {
     Ice { source: String, candidate: String },
     #[serde(rename = "error")]
     Error { message: String },
+    #[serde(rename = "pong")]
+    Pong,
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -494,24 +496,30 @@ async fn start_rust_signaling_task(
         // 建立最後讀取時間指標以防範半關閉假死
         let last_read_time = Arc::new(tokio::sync::RwLock::new(std::time::Instant::now()));
         let last_read_time_write = Arc::clone(&last_read_time);
-        let last_read_time_read = Arc::clone(&last_read_time);
         
-        let app_handle_write = app_handle.clone();
+        // 1. 獨立的看門狗任務 (Watchdog) 用於偵測心跳接收超時，即使發送端卡死也絕不受影響
+        let app_handle_timeout = app_handle.clone();
+        let last_read_time_timeout = Arc::clone(&last_read_time);
+        let mut timeout_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                let elapsed = last_read_time_timeout.read().await.elapsed();
+                if elapsed > std::time::Duration::from_secs(35) {
+                    let err_msg = format!("心跳接收超時 ({} 秒未收到伺服器訊息)，主動判定斷線", elapsed.as_secs());
+                    eprintln!("[Rust Signaling] {}", err_msg);
+                    let _ = app_handle_timeout.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
+                    break;
+                }
+            }
+        });
+
+        // 2. 寫入任務，只負責發送心跳及轉發，防止與超時檢測相互干擾卡死
         let mut ws_write_task = tokio::spawn(async move {
             let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
             loop {
                 tokio::select! {
                     _ = heartbeat.tick() => {
-                        // 1. 檢查心跳超時 (防範 TCP 半關閉)
-                        let elapsed = last_read_time_read.read().await.elapsed();
-                        if elapsed > std::time::Duration::from_secs(35) {
-                            let err_msg = format!("心跳接收超時 ({} 秒未收到伺服器訊息)，主動判定斷線", elapsed.as_secs());
-                            eprintln!("[Rust Signaling] {}", err_msg);
-                            let _ = app_handle_write.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
-                            break;
-                        }
-                        
-                        // 2. 發送心跳 Ping
                         let ping_msg = serde_json::json!({ "type": "ping" });
                         if ws_write.send(WsMessage::Text(ping_msg.to_string())).await.is_err() {
                             break;
@@ -526,9 +534,9 @@ async fn start_rust_signaling_task(
             }
         });
 
+        // 3. 讀取任務
         let app_handle_clone = app_handle.clone();
         let tx_clone = tx.clone();
-        
         let mut ws_read_task = tokio::spawn(async move {
             while let Some(Ok(WsMessage::Text(text))) = ws_read.next().await {
                 // 更新最後讀取時間
@@ -604,17 +612,27 @@ async fn start_rust_signaling_task(
                             eprintln!("[Rust Signaling] {}", err_msg);
                             let _ = app_handle_clone.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
                         }
+                        IncomingMessage::Pong => {
+                            // 收到心跳回覆，只為更新最後讀取時間，無須額外動作
+                        }
                     }
                 }
             }
         });
 
+        // 監聽三個子任務，任何一方結束或拋錯即觸發其餘任務的中斷與斷線重連
         tokio::select! {
             _ = &mut ws_write_task => {
                 ws_read_task.abort();
+                timeout_task.abort();
             }
             _ = &mut ws_read_task => {
                 ws_write_task.abort();
+                timeout_task.abort();
+            }
+            _ = &mut timeout_task => {
+                ws_write_task.abort();
+                ws_read_task.abort();
             }
         }
 

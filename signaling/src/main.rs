@@ -62,6 +62,8 @@ enum ServerMessage {
     Ice { source: String, candidate: String },
     #[serde(rename = "error")]
     Error { message: String },
+    #[serde(rename = "pong")]
+    Pong,
 }
 
 #[derive(Deserialize)]
@@ -215,7 +217,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                 }
                             }
                             SignalingMessage::Ping => {
-                                // 忽略 Ping，只為保持連線活躍
+                                // 回覆 Pong 訊息以維持客戶端心跳接收
+                                let pong = ServerMessage::Pong;
+                                let _ = tx.send(Message::Text(serde_json::to_string(&pong).unwrap())).await;
                             }
                         }
                     } else {
