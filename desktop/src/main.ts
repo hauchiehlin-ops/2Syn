@@ -3095,18 +3095,22 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
     const now = Date.now();
 
-    // 雙指輕觸判定優化：只要在 250ms 內偵測到 maxTouches === 2，且未發生大範圍縮放，在第一根手指抬起時即刻觸發右鍵
+    // 雙指輕觸判定優化：只要在 350ms 內偵測到 maxTouches === 2，且未發生大範圍縮放，在第一根手指抬起時即刻觸發右鍵
     if (maxTouches === 2) {
-      if (touchStartTime > 0 && now - touchStartTime < 250 && !isLocalPinching) {
-        // 雙指輕觸 -> 右鍵點擊
+      if (touchStartTime > 0 && now - touchStartTime < 350 && !isLocalPinching) {
+        // 雙指輕觸 -> 右鍵點擊 (發送 Down 與 Up 之間加入 15ms 延遲，以防 macOS 忽略同網路包連續點擊)
         const payloadDown = new Uint8Array(1);
         payloadDown[0] = 2; // Right click down
         sendInputPacket(buildInputPacket(0x02, payloadDown));
-        const payloadUp = new Uint8Array(1);
-        payloadUp[0] = 2; // Right click up
-        sendInputPacket(buildInputPacket(0x03, payloadUp));
         
-        console.log("[Gesture] 雙指輕點，極速觸發右鍵點擊");
+        setTimeout(() => {
+          const payloadUp = new Uint8Array(1);
+          payloadUp[0] = 2; // Right click up
+          sendInputPacket(buildInputPacket(0x03, payloadUp));
+          console.log("[Gesture] 雙指輕點，15ms 延遲發送右鍵釋送完成");
+        }, 15);
+        
+        console.log("[Gesture] 雙指輕點，觸發右鍵按下");
         
         if (typeof navigator.vibrate === "function") {
           navigator.vibrate(30);
@@ -3153,20 +3157,24 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           sendInputPacket(buildInputPacket(0x03, payload));
           isDragging = false;
         } else {
-          // 單指輕觸 -> 左鍵點擊 (小於 250ms，且移動距離極小)
-          if (touchStartTime > 0 && now - touchStartTime < 250 && maxTouches === 1) {
+          // 單指輕觸 -> 左鍵點擊 (時間放寬至 350ms，且移動距離放寬至 20 像素以適應胖手指滑動)
+          if (touchStartTime > 0 && now - touchStartTime < 350 && maxTouches === 1) {
             const endX = e.changedTouches.length > 0 ? e.changedTouches[0].clientX : touchStartPos.x;
             const endY = e.changedTouches.length > 0 ? e.changedTouches[0].clientY : touchStartPos.y;
             const dist = Math.sqrt(Math.pow(endX - touchStartPos.x, 2) + Math.pow(endY - touchStartPos.y, 2));
-            if (dist < 10) {
+            if (dist < 20) {
               const payloadDown = new Uint8Array(1);
               payloadDown[0] = 1; // Left click down
               sendInputPacket(buildInputPacket(0x02, payloadDown));
-              const payloadUp = new Uint8Array(1);
-              payloadUp[0] = 1; // Left click up
-              sendInputPacket(buildInputPacket(0x03, payloadUp));
               
-              console.log("[Gesture] 單指輕點，觸發左鍵點擊");
+              setTimeout(() => {
+                const payloadUp = new Uint8Array(1);
+                payloadUp[0] = 1; // Left click up
+                sendInputPacket(buildInputPacket(0x03, payloadUp));
+                console.log("[Gesture] 單指輕點，15ms 延遲發送左鍵釋送完成");
+              }, 15);
+              
+              console.log("[Gesture] 單指輕點，觸發左鍵按下");
             }
           }
         }
@@ -3188,7 +3196,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       lastTouchY = e.touches[0].clientY;
     }
   }, { passive: false });
-
   // 增加觸控防護：當遭遇衝突時，強制發送 MouseUp 並重置狀態，防止滑鼠死鎖
   videoEl.addEventListener("touchcancel", (e) => {
     e.preventDefault();
