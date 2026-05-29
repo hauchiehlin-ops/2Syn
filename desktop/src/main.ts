@@ -46,6 +46,109 @@ function showToast(message: string, duration: number = 3000) {
     return typeof a === 'object' ? JSON.stringify(a) : String(a);
   }
 
+  function translateLogMessage(msg: string, tFunc: (key: string) => string): string {
+    const translateStatus = (status: string) => {
+      const clean = status.trim().toLowerCase();
+      const map: Record<string, string> = {
+        "connected": tFunc("log_status_connected"),
+        "disconnected": tFunc("log_status_disconnected"),
+        "checking": tFunc("log_status_checking"),
+        "completed": tFunc("log_status_completed"),
+        "completed.": tFunc("log_status_completed"),
+        "stable": tFunc("log_status_stable"),
+        "failed": tFunc("log_status_failed"),
+        "failed.": tFunc("log_status_failed"),
+        "connecting": tFunc("log_status_connecting"),
+        "gathering": tFunc("log_status_gathering"),
+        "checking.": tFunc("log_status_checking"),
+        "closed": tFunc("log_status_closed"),
+        "closed.": tFunc("log_status_closed"),
+        "new": tFunc("log_status_new"),
+        "video": tFunc("log_status_video"),
+        "audio": tFunc("log_status_audio")
+      };
+      return map[clean] || status;
+    };
+
+    // 1. WebRTC Track Event
+    if (msg.includes("[WebRTC] 收到遠端視訊軌道:") || msg.includes("[WebRTC] Received remote track:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return tFunc("log_webrtc_received_track").replace("{0}", translateStatus(val));
+    }
+    // 2. WebRTC ICE Connection State
+    if (msg.includes("[WebRTC] ICE Connection State:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return tFunc("log_webrtc_ice_state").replace("{0}", translateStatus(val));
+    }
+    // 3. WebRTC Connection State
+    if (msg.includes("[WebRTC] Connection State:") || msg.includes("[WebRTC] 連線狀態:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return tFunc("log_webrtc_conn_state").replace("{0}", translateStatus(val));
+    }
+    // 4. WebRTC ICE Gathering State
+    if (msg.includes("[WebRTC] ICE Gathering State:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return tFunc("log_webrtc_gather_state").replace("{0}", translateStatus(val));
+    }
+    // 5. WebRTC Signaling State
+    if (msg.includes("[WebRTC] Signaling State:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return tFunc("log_webrtc_sig_state").replace("{0}", translateStatus(val));
+    }
+    // 6. WebRTC Negotiation Needed
+    if (msg.includes("[WebRTC] Negotiation Needed") || msg.includes("[WebRTC] 需要協商")) {
+      return tFunc("log_webrtc_negotiation");
+    }
+    // 7. Video Playback Error
+    if (msg.includes("[WebRTC] 視訊播放失敗:") || msg.includes("[WebRTC] Video Playback Failed:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return tFunc("log_webrtc_play_failed").replace("{0}", val);
+    }
+    // 8. Rust Signaling State
+    if (msg.includes("[WebRTC-Rust] 狀態變更:") || msg.includes("[WebRTC-Rust] State Changed:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return tFunc("log_webrtc_rust_state").replace("{0}", val);
+    }
+    // 9. Host Video Capture Status
+    if (msg.includes("[WebRTC-Video] 影像處理發生問題:") || msg.includes("[WebRTC-Video] Video capture/encode error:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return tFunc("log_webrtc_video_error").replace("{0}", val);
+    }
+    // 10. Video Encoding Size
+    if (msg.includes("[Video] Encoded frame size:")) {
+      const match = msg.match(/Encoded frame size:\s*(\d+)/i);
+      if (match) {
+        return tFunc("log_video_encoded_frame").replace("{0}", match[1]);
+      }
+    }
+    // 11. Video Send Failed
+    if (msg.includes("[Video] 傳送視訊幀失敗:") || msg.includes("[Video] Failed to send frame:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return tFunc("log_video_send_failed").replace("{0}", val);
+    }
+    // 12. Video Send Timeout
+    if (msg.includes("[Video] 傳送視訊幀逾時 (網路擁塞)") || msg.includes("[Video] Frame transmission timed out")) {
+      return tFunc("log_video_send_timeout");
+    }
+    // 13. Input Simulation Error
+    if (msg.includes("[input-control] simulate failed:")) {
+      const val = msg.split("failed:").slice(1).join("failed:").trim();
+      return tFunc("log_input_simulate_failed").replace("{0}", val);
+    }
+    // 14. Input Security Packet Rejected
+    if (msg.includes("[security input-control] packet rejected:")) {
+      const val = msg.split("rejected:").slice(1).join("rejected:").trim();
+      return tFunc("log_input_rejected").replace("{0}", val);
+    }
+    // 15. Unreliable Input Simulation Error
+    if (msg.includes("[input-unreliable] simulate failed:")) {
+      const val = msg.split("failed:").slice(1).join("failed:").trim();
+      return tFunc("log_input_unreliable_failed").replace("{0}", val);
+    }
+
+    return msg;
+  }
+
   function appendLog(color: string, args: any[], isError = false) {
     if (isError) originalError.apply(console, args);
     else originalLog.apply(console, args);
@@ -53,7 +156,16 @@ function showToast(message: string, duration: number = 3000) {
     if (typeof document !== 'undefined') {
       const overlay = document.getElementById('debug-overlay');
       if (!overlay) return;
-      const msg = args.map(formatArg).join(' ');
+      let msg = args.map(formatArg).join(' ');
+      
+      // 動態翻譯顯示在系統日誌面板上的訊息
+      try {
+        const tFunc = (window as any).t || ((key: string) => fallbackTranslations[key] || key);
+        msg = translateLogMessage(msg, tFunc);
+      } catch (err) {
+        // 忽略翻譯過程中的任何意外錯誤，以原樣輸出日誌
+      }
+
       const line = document.createElement('div');
       line.style.color = color;
       line.textContent = `[${new Date().toISOString().split('T')[1].slice(0,-1)}] ${msg}`;
@@ -262,7 +374,35 @@ const fallbackTranslations: Record<string, string> = {
   "alert_web_diag_unsupported": "Connectivity diagnostics are not supported in Web Client mode.",
   "btn_scale_to_fit": "Scale to Fit",
   "btn_original_size": "Original Size",
-  "desc_web_client_info": "Web Client controller. The connection pipeline will be automatically evaluated. If P2P fails due to symmetric NAT or strict firewalls, please click \"🚀 Enable Relay Mode\"."
+  "desc_web_client_info": "Web Client controller. The connection pipeline will be automatically evaluated. If P2P fails due to symmetric NAT or strict firewalls, please click \"🚀 Enable Relay Mode\".",
+  "log_title_system_logs": "System Logs",
+  "log_status_connected": "Connected",
+  "log_status_disconnected": "Disconnected",
+  "log_status_checking": "Checking",
+  "log_status_completed": "Completed",
+  "log_status_stable": "Stable",
+  "log_status_failed": "Failed",
+  "log_status_connecting": "Connecting",
+  "log_status_gathering": "Gathering",
+  "log_status_closed": "Closed",
+  "log_status_new": "New",
+  "log_status_video": "Video",
+  "log_status_audio": "Audio",
+  "log_webrtc_received_track": "[WebRTC] Received remote track: {0}",
+  "log_webrtc_ice_state": "[WebRTC] ICE Connection State: {0}",
+  "log_webrtc_conn_state": "[WebRTC] Connection State: {0}",
+  "log_webrtc_gather_state": "[WebRTC] ICE Gathering State: {0}",
+  "log_webrtc_sig_state": "[WebRTC] Signaling State: {0}",
+  "log_webrtc_negotiation": "[WebRTC] Negotiation Needed",
+  "log_webrtc_play_failed": "[WebRTC] Video Playback Failed: {0}",
+  "log_webrtc_rust_state": "[WebRTC-Rust] State Changed: {0}",
+  "log_webrtc_video_error": "[WebRTC-Video] Video capture/encode error: {0}",
+  "log_video_encoded_frame": "[Video] Encoded frame size: {0} bytes",
+  "log_video_send_failed": "[Video] Failed to send frame: {0}",
+  "log_video_send_timeout": "[Video] Frame transmission timed out (network congestion)",
+  "log_input_simulate_failed": "[input-control] simulate failed: {0}",
+  "log_input_rejected": "[security input-control] packet rejected: {0}",
+  "log_input_unreliable_failed": "[input-unreliable] simulate failed: {0}"
 };
 
 // 統一翻譯取值函數
@@ -491,6 +631,9 @@ function updateDomTranslations() {
   setTextContent("txt-video-error-desc", t("video_error_desc"));
   setTextContent("btn-video-retry-play", t("btn_force_play"));
   setTextContent("btn-video-error-close", t("btn_dismiss"));
+
+  // 系統日誌標題翻譯
+  setTextContent("txt-system-logs-title", t("log_title_system_logs"));
 }
 
 function setTextContent(id: string, text: string) {
