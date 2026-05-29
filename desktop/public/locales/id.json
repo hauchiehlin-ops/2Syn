@@ -125,5 +125,19 @@
   "alert_web_diag_unsupported": "Connectivity diagnostics are not supported in Web Client mode.",
   "btn_scale_to_fit": "Scale to Fit",
   "btn_original_size": "Original Size",
-  "desc_web_client_info": "Web Client controller. The connection pipeline will be automatically evaluated. If P2P fails due to symmetric NAT or strict firewalls, please click \"🚀 Enable Relay Mode\"."
+  "desc_web_client_info": "Web Client controller. The connection pipeline will be automatically evaluated. If P2P fails due to symmetric NAT or strict firewalls, please click \"🚀 Enable Relay Mode\".",
+  "err_macos_permissions_missing": "⚠️ macOS permissions (Screen Recording / Accessibility) are missing!",
+  "btn_how_to_fix": "How to Fix",
+  "perm_modal_title": "macOS System Permissions Guide",
+  "perm_modal_desc": "Due to macOS security policies, 2syn requires \"Screen Recording\" and \"Accessibility\" permissions to stream screens and inject input events. Please follow these steps:",
+  "perm_modal_step_1": "Open your Mac's \"System Settings\".",
+  "perm_modal_step_2": "Navigate to \"Privacy & Security\".",
+  "perm_modal_step_3": "Under \"Screen & System Audio Recording\", enable 2syn.",
+  "perm_modal_step_4": "Under \"Accessibility\", enable 2syn.",
+  "perm_modal_step_5": "Once completed, please restart 2syn application to apply changes.",
+  "btn_reprompt_perm": "Re-request System Permission Prompt",
+  "video_error_title": "⚠️ Connection Established but No Video Stream (Black Screen)",
+  "video_error_desc": "If the remote host is macOS, ensure \"Screen Recording\" and \"Accessibility\" permissions are granted in System Settings. If blocked by browser autoplay policies, click Force Play below.",
+  "btn_force_play": "Force Play",
+  "btn_dismiss": "Dismiss"
 }

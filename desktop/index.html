@@ -21,6 +21,15 @@
     <div id="pointer-lock-tooltip" style="display: none; position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 110; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); color: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; pointer-events: none; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: opacity 0.3s ease;">
       Pointer locked. Press ESC to exit.
     </div>
+    <!-- Video Stream Failure Overlay (Autoplay blocked or Permission missing warning) -->
+    <div id="video-error-overlay" style="display: none; position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 120; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(239, 68, 68, 0.4); color: white; padding: 14px 20px; border-radius: 12px; font-size: 13px; max-width: 90%; box-shadow: 0 10px 25px rgba(0,0,0,0.5); flex-direction: column; gap: 8px; align-items: center;">
+      <span style="font-weight: 600; color: #fca5a5; text-align: center;" id="txt-video-error-title">⚠️ No Video Stream Detected</span>
+      <span style="font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.4; display: block;" id="txt-video-error-desc">If the remote device is macOS, please ensure "Screen Recording" and "Accessibility" permissions are granted in System Settings.</span>
+      <div style="display: flex; gap: 10px; margin-top: 6px;">
+        <button id="btn-video-retry-play" style="background: var(--accent-color, #3b82f6); border: none; color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Force Play</button>
+        <button id="btn-video-error-close" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Dismiss</button>
+      </div>
+    </div>
   </div>
   
   <!-- 顯示模式切換按鈕 (遠端畫面開啟時顯示) -->
@@ -139,6 +148,12 @@
 
         <!-- 本機身分與授權 -->
         <div class="host-info" id="local-host-info-section">
+          <!-- macOS Permission Warning Banner -->
+          <div id="permission-warning-banner" class="alert-banner-mac" style="display: none;">
+            <span class="warning-icon">⚠️</span>
+            <span id="txt-permission-warning" style="flex: 1;">macOS 系統權限不足，將導致遠端控制黑屏！</span>
+            <button id="btn-fix-permissions" class="btn-fix-perm" type="button">如何解決</button>
+          </div>
           <h3 id="txt-host-info-title">Host Information</h3>
           <div class="info-row">
             <span id="lbl-signaling-status">Signaling Status:</span>
@@ -404,6 +419,27 @@
         <p id="txt-help-priv-desc" style="margin-top: 0; margin-bottom: 0;">
           Your privacy is our priority. 2syn utilizes peer-to-peer WebRTC technology with end-to-end encryption. Your screen data and inputs are transmitted directly between your devices and are never stored or inspected by our servers. We do not collect or sell your personal data.
         </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- macOS Permission Modal -->
+  <div id="permission-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 200; background: rgba(0,0,0,0.5); backdrop-filter: blur(5px); justify-content: center; align-items: center; padding: 20px;">
+    <div style="background: var(--glass-bg, rgba(255,255,255,0.95)); border: 1px solid var(--panel-border, rgba(0,0,0,0.1)); border-radius: var(--border-radius-lg, 16px); padding: 24px; max-width: 500px; width: 100%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 style="margin: 0; font-size: 18px; font-weight: 600;" id="txt-perm-modal-title">macOS 系統權限授權指引</h2>
+        <button id="btn-close-perm" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-main);">&times;</button>
+      </div>
+      <div style="font-size: 13px; line-height: 1.6; color: var(--text-main);">
+        <p id="txt-perm-modal-desc" style="margin-top: 0; margin-bottom: 12px;">由於 macOS 的安全性機制，2syn 需要「螢幕錄製」與「輔助使用」權限才能進行遠端畫面串流與模擬輸入操作。請依循以下步驟進行設定：</p>
+        <ol style="padding-left: 20px; margin-bottom: 20px; margin-top: 0; display: flex; flex-direction: column; gap: 6px;">
+          <li id="txt-perm-modal-step-1">打開您的 Mac **「系統設定」**。</li>
+          <li id="txt-perm-modal-step-2">前往 **「隱私權與安全性」**。</li>
+          <li id="txt-perm-modal-step-3">在 **「螢幕與系統音訊錄製」** 項目中，勾選並啟用 **2syn**。</li>
+          <li id="txt-perm-modal-step-4">在 **「輔助使用」** 項目中，勾選並啟用 **2syn**。</li>
+          <li id="txt-perm-modal-step-5">設定完成後，**請重新啟動 2syn 應用程式**以套用變更。</li>
+        </ol>
+        <button id="btn-perm-modal-trigger" style="width: 100%; background: var(--accent-color, #3b82f6); border: none; color: white; border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; box-shadow: 0 4px 10px rgba(59, 130, 246, 0.3);">重新發起系統授權提示</button>
       </div>
     </div>
   </div>

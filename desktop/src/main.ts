@@ -168,7 +168,21 @@ const fallbackTranslations: Record<string, string> = {
   "diag_dns_failed": "Failed (No Connection)",
   "diag_initial_desc": "Click the button above to run diagnostics on secure storage and network pipes.",
   "copy_tooltip": "Copy",
-  
+  "err_macos_permissions_missing": "⚠️ macOS permissions (Screen Recording / Accessibility) are missing!",
+  "btn_how_to_fix": "How to Fix",
+  "perm_modal_title": "macOS System Permissions Guide",
+  "perm_modal_desc": "Due to macOS security policies, 2syn requires \"Screen Recording\" and \"Accessibility\" permissions to stream screens and inject input events. Please follow these steps:",
+  "perm_modal_step_1": "Open your Mac's \"System Settings\".",
+  "perm_modal_step_2": "Navigate to \"Privacy & Security\".",
+  "perm_modal_step_3": "Under \"Screen & System Audio Recording\", enable 2syn.",
+  "perm_modal_step_4": "Under \"Accessibility\", enable 2syn.",
+  "perm_modal_step_5": "Once completed, please restart 2syn application to apply changes.",
+  "btn_reprompt_perm": "Re-request System Permission Prompt",
+  "video_error_title": "⚠️ No Video Stream Detected",
+  "video_error_desc": "If the remote device is macOS, please ensure \"Screen Recording\" and \"Accessibility\" permissions are granted in System Settings. If blocked by browser autoplay policies, click Force Play below.",
+  "btn_force_play": "Force Play",
+  "btn_dismiss": "Dismiss",
+
   // 頁面靜態文字
   "connect_title": "Establish Connection",
   "remote_id_placeholder": "Enter 9-digit Device ID",
@@ -459,6 +473,24 @@ function updateDomTranslations() {
   // 新增：Pointer Lock Tooltip 與穿透模式按鈕
   setTextContent("pointer-lock-tooltip", t("pointer_lock_tooltip"));
   setTextContent("btn-fix-network", t("btn_fix_network"));
+
+  // macOS 權限橫幅與 Modal 翻譯
+  setTextContent("txt-permission-warning", t("err_macos_permissions_missing"));
+  setTextContent("btn-fix-permissions", t("btn_how_to_fix"));
+  setTextContent("txt-perm-modal-title", t("perm_modal_title"));
+  setTextContent("txt-perm-modal-desc", t("perm_modal_desc"));
+  setTextContent("txt-perm-modal-step-1", t("perm_modal_step_1"));
+  setTextContent("txt-perm-modal-step-2", t("perm_modal_step_2"));
+  setTextContent("txt-perm-modal-step-3", t("perm_modal_step_3"));
+  setTextContent("txt-perm-modal-step-4", t("perm_modal_step_4"));
+  setTextContent("txt-perm-modal-step-5", t("perm_modal_step_5"));
+  setTextContent("btn-perm-modal-trigger", t("btn_reprompt_perm"));
+
+  // 視訊黑屏錯誤 Overlay 翻譯
+  setTextContent("txt-video-error-title", t("video_error_title"));
+  setTextContent("txt-video-error-desc", t("video_error_desc"));
+  setTextContent("btn-video-retry-play", t("btn_force_play"));
+  setTextContent("btn-video-error-close", t("btn_dismiss"));
 }
 
 function setTextContent(id: string, text: string) {
@@ -864,11 +896,51 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
           videoEl.muted = true; // 雙重保障：iOS 自動播放安全策略必須為靜音
           videoEl.disablePictureInPicture = true;
           
+          // 註冊黑屏偵測與強制播放處理
+          const videoErrorOverlay = document.getElementById("video-error-overlay");
+          const btnVideoRetryPlay = document.getElementById("btn-video-retry-play");
+          const btnVideoErrorClose = document.getElementById("btn-video-error-close");
+          
+          let hasPlayed = false;
+          
+          videoEl.onplaying = () => {
+            hasPlayed = true;
+            if (videoErrorOverlay) videoErrorOverlay.style.display = "none";
+          };
+          
+          if (btnVideoRetryPlay) {
+            btnVideoRetryPlay.onclick = () => {
+              videoEl.play().then(() => {
+                hasPlayed = true;
+                if (videoErrorOverlay) videoErrorOverlay.style.display = "none";
+              }).catch(err => {
+                console.error("[WebRTC] 強制手動播放失敗:", err);
+                alert("Autoplay blocked. Please click the screen to allow video playback.");
+              });
+            };
+          }
+          
+          if (btnVideoErrorClose) {
+            btnVideoErrorClose.onclick = () => {
+              if (videoErrorOverlay) videoErrorOverlay.style.display = "none";
+            };
+          }
+          
+          // 4 秒後偵測是否仍在黑屏狀態
+          setTimeout(() => {
+            if (!hasPlayed || videoEl.paused || videoEl.currentTime === 0) {
+              console.warn("[WebRTC] 連線已建立但偵測不到視訊播放 (黑屏)。可能是自動播放受限，或遠端 macOS 未授權螢幕錄製。");
+              if (videoErrorOverlay) videoErrorOverlay.style.display = "flex";
+            }
+          }, 4000);
+
           try {
-            videoEl.play();
+            videoEl.play().catch(err => {
+              console.warn("[WebRTC] 視訊自動播放受阻，等待手動啟動或黑屏提示:", err);
+            });
             setupInputControl(videoEl); // 綁定輸入控制
           } catch (err) {
-            console.error("[WebRTC] 視訊播放失敗:", err);
+            console.error("[WebRTC] 視訊播放調用失敗:", err);
           }
         }
     }
@@ -2800,13 +2872,56 @@ window.addEventListener("DOMContentLoaded", async () => {
   await initI18n();
 
   // 啟動時檢查並請求 macOS 權限 (螢幕錄影、輔助使用)
-  try {
-    const permissionsGranted = await invoke<boolean>("check_macos_permissions");
-    if (!permissionsGranted) {
-      console.warn("macOS permissions are missing. Native prompt should have appeared.");
+  if (isDesktopTauri()) {
+    try {
+      const permissionsGranted = await invoke<boolean>("check_macos_permissions");
+      const warningBanner = document.getElementById("permission-warning-banner");
+      const permModal = document.getElementById("permission-modal");
+      const btnFixPerm = document.getElementById("btn-fix-permissions");
+      const btnClosePerm = document.getElementById("btn-close-perm");
+      const btnRepromptPerm = document.getElementById("btn-perm-modal-trigger");
+
+      if (!permissionsGranted) {
+        console.warn("macOS permissions are missing. Native prompt should have appeared.");
+        if (warningBanner) warningBanner.style.display = "flex";
+      }
+
+      if (btnFixPerm && permModal) {
+        btnFixPerm.addEventListener("click", () => {
+          permModal.style.display = "flex";
+        });
+      }
+      if (btnClosePerm && permModal) {
+        btnClosePerm.addEventListener("click", () => {
+          permModal.style.display = "none";
+        });
+      }
+      if (permModal) {
+        permModal.addEventListener("click", (e) => {
+          if (e.target === permModal) {
+            permModal.style.display = "none";
+          }
+        });
+      }
+      if (btnRepromptPerm) {
+        btnRepromptPerm.addEventListener("click", async () => {
+          try {
+            const recheck = await invoke<boolean>("check_macos_permissions");
+            if (recheck) {
+              if (warningBanner) warningBanner.style.display = "none";
+              if (permModal) permModal.style.display = "none";
+              alert("Permissions granted successfully! Application is ready.");
+            } else {
+              alert("Permissions still missing. Please ensure they are checked in macOS System Settings.");
+            }
+          } catch (err) {
+            console.error("Failed to recheck macOS permissions:", err);
+          }
+        });
+      }
+    } catch (err) {
+      console.error("Failed to check macOS permissions:", err);
     }
-  } catch (err) {
-    console.error("Failed to check macOS permissions:", err);
   }
 
   const generatedId = generateMockMyId();

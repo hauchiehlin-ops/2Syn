@@ -135,5 +135,19 @@
   "alert_web_diag_unsupported": "Web 模式下不支援連線診斷功能",
   "btn_scale_to_fit": "適應視窗 (Scale to Fit)",
   "btn_original_size": "原始大小 (Original Size)",
-  "desc_web_client_info": "純網頁控制端。連線建立時將會自動評估最佳傳輸管線。若因雙方處於嚴格 NAT 或防火牆後導致連線失敗，請點擊【🚀 啟用穿透模式】。"
+  "desc_web_client_info": "純網頁控制端。連線建立時將會自動評估最佳傳輸管線。若因雙方處於嚴格 NAT 或防火牆後導致連線失敗，請點擊【🚀 啟用穿透模式】。",
+  "err_macos_permissions_missing": "⚠️ macOS 系統權限不足，將導致遠端控制黑屏！",
+  "btn_how_to_fix": "如何解決",
+  "perm_modal_title": "macOS 系統權限授權指引",
+  "perm_modal_desc": "由於 macOS 的安全性機制，2syn 需要「螢幕錄製」與「輔助使用」權限才能進行遠端畫面串流與模擬輸入操作。請依循以下步驟進行設定：",
+  "perm_modal_step_1": "打開您的 Mac 「系統設定」。",
+  "perm_modal_step_2": "前往 「隱私權與安全性」。",
+  "perm_modal_step_3": "在 「螢幕與系統音訊錄製」項目中，勾選並啟用 2syn。",
+  "perm_modal_step_4": "在 「輔助使用」項目中，勾選並啟用 2syn。",
+  "perm_modal_step_5": "設定完成後，請重新啟動 2syn 應用程式以套用變更。",
+  "btn_reprompt_perm": "重新發起系統授權提示",
+  "video_error_title": "⚠️ 偵測到連線成功但無視訊畫面 (黑屏)",
+  "video_error_desc": "若遠端主機為 macOS 系統，請確保其已在「系統設定」中開啟「螢幕錄製」與「輔助使用」權限。若是瀏覽器自動播放策略攔截，請嘗試手動點擊下方按鈕強制播放。",
+  "btn_force_play": "強制播放",
+  "btn_dismiss": "關閉"
 }
