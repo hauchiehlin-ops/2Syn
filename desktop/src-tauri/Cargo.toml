@@ -2,6 +2,7 @@
 name = "syn-desktop"
 version = "2.1.0"
 edition = "2021"
+default-run = "syn-desktop"
 
 [lib]
 name = "syn_desktop"
