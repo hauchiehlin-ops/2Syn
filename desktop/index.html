@@ -107,30 +107,32 @@
         <div id="client-connection-section">
           <h2 id="txt-connect-title">Establish Connection</h2>
           
-          <div class="input-group">
-            <label for="remote-id-input">
-              <span id="lbl-remote-id">Remote Device ID</span>
-              <button class="btn-info" data-help="remote-id" type="button">ⓘ</button>
-            </label>
-            <div id="help-remote-id" class="help-block"></div>
-            <input type="text" id="remote-id-input" placeholder="Enter 9-digit Device ID" maxlength="11">
-          </div>
-
-          <div class="input-group">
-            <label for="access-pin-input">
-              <span id="lbl-access-pin">Access PIN</span>
-              <button class="btn-info" data-help="access-pin" type="button">ⓘ</button>
-            </label>
-            <div id="help-access-pin" class="help-block"></div>
-            <div style="position: relative; display: flex; align-items: center; width: 100%;">
-              <input type="text" id="access-pin-input" placeholder="Enter access PIN" autocomplete="one-time-code" style="-webkit-text-security: disc; text-security: disc; padding-right: 60px; width: 100%;">
-              <button id="btn-toggle-pin" type="button" style="position: absolute; right: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer; color: var(--text-main); min-width: 44px; text-align: center;">Show</button>
+          <form id="connect-form" action="#" onsubmit="return false;">
+            <div class="input-group">
+              <label for="remote-id-input">
+                <span id="lbl-remote-id">Remote Device ID</span>
+                <button class="btn-info" data-help="remote-id" type="button">ⓘ</button>
+              </label>
+              <div id="help-remote-id" class="help-block"></div>
+              <input type="text" id="remote-id-input" name="remote-id" placeholder="Enter 9-digit Device ID" autocomplete="username" maxlength="11">
             </div>
-          </div>
 
-          <button id="btn-connect" class="btn-primary">
-            <span id="txt-btn-connect">Connect</span>
-          </button>
+            <div class="input-group">
+              <label for="access-pin-input">
+                <span id="lbl-access-pin">Access PIN</span>
+                <button class="btn-info" data-help="access-pin" type="button">ⓘ</button>
+              </label>
+              <div id="help-access-pin" class="help-block"></div>
+              <div style="position: relative; display: flex; align-items: center; width: 100%;">
+                <input type="password" id="access-pin-input" name="access-pin" placeholder="Enter access PIN" autocomplete="current-password" style="padding-right: 60px; width: 100%;">
+                <button id="btn-toggle-pin" type="button" style="position: absolute; right: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer; color: var(--text-main); min-width: 44px; text-align: center;">Show</button>
+              </div>
+            </div>
+
+            <button id="btn-connect" type="submit" class="btn-primary">
+              <span id="txt-btn-connect">Connect</span>
+            </button>
+          </form>
 
           <!-- 去中心化離線手動 SDP 連線 -->
           <div class="offline-sdp-section">
