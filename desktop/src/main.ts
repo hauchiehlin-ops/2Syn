@@ -565,13 +565,23 @@ function initSignalingClient() {
     console.log("[Signaling] 已連線，正在登入...");
     signalingWs!.send(JSON.stringify({ type: "login", id: myId }));
     
-    // 建立 30 秒心跳，防止 Render 負載平衡器因為閒置超過 15 分鐘而強制斷線
+    let lastHeartbeatTime = Date.now();
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = setInterval(() => {
+      const now = Date.now();
+      // 若兩次心跳的實際時間間隔大於 25 秒，代表計時器曾被系統掛起（例如 macOS App Nap 或行動端背景休眠）
+      if (now - lastHeartbeatTime > 25000) {
+        console.warn("[Signaling] 偵測到計時器延遲（可能是系統 App Nap 凍結），主動關閉並重建連線...");
+        if (signalingWs) {
+          signalingWs.close();
+        }
+        return;
+      }
+      lastHeartbeatTime = now;
       if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
         signalingWs.send(JSON.stringify({ type: "ping" }));
       }
-    }, 15000); // 縮短至 15 秒，避免 macOS App Nap 導致計時器延遲而超過 Render 的 55 秒閒置限制
+    }, 15000);
   };
 
   signalingWs.onmessage = async (event) => {
