@@ -295,7 +295,9 @@ function showToast(message: string, duration: number = 3000) {
     if (typeof document !== 'undefined') {
       const overlay = document.getElementById('debug-overlay');
       if (!overlay) return;
-      let msg = args.map(formatArg).join(' ');
+
+      const rawMsg = args.map(formatArg).join(' ');
+      let msg = rawMsg;
       
       // 動態翻譯顯示在系統日誌面板上的訊息
       try {
@@ -307,8 +309,16 @@ function showToast(message: string, duration: number = 3000) {
 
       const line = document.createElement('div');
       line.style.color = color;
-      line.textContent = `[${new Date().toISOString().split('T')[1].slice(0,-1)}] ${msg}`;
+      const timestamp = new Date().toISOString().split('T')[1].slice(0,-1);
+      line.textContent = `[${timestamp}] ${msg}`;
+      
+      // 在 DOM 上快取原始訊息、時間戳與顏色，供多國語言切換時即時重譯重繪
+      line.dataset.originalMsg = rawMsg;
+      line.dataset.timestamp = timestamp;
+      line.dataset.color = color;
+      
       overlay.appendChild(line);
+
       while (overlay.children.length > 100) {
         overlay.removeChild(overlay.firstChild!);
       }
@@ -434,6 +444,87 @@ const fallbackTranslations: Record<string, string> = {
   "video_error_desc": "If the remote device is macOS, please ensure \"Screen Recording\" and \"Accessibility\" permissions are granted in System Settings. If blocked by browser autoplay policies, click Force Play below.",
   "btn_force_play": "Force Play",
   "btn_dismiss": "Dismiss",
+
+  // 系統日誌與連線狀態 Fallback 翻譯
+  "status_connecting": "Connecting...",
+  "status_online": "Online",
+  "status_offline": "Offline",
+  "log_status_connected": "Connected",
+  "log_status_disconnected": "Disconnected",
+  "log_status_checking": "Checking",
+  "log_status_completed": "Completed",
+  "log_status_stable": "Stable",
+  "log_status_failed": "Failed",
+  "log_status_gathering": "Gathering",
+  "log_status_closed": "Closed",
+  "log_status_new": "New",
+  "log_status_video": "Video",
+  "log_status_audio": "Audio",
+  "log_webrtc_received_track": "[WebRTC] Received remote track: {0}",
+  "log_webrtc_ice_state": "[WebRTC] ICE Connection State: {0}",
+  "log_webrtc_conn_state": "[WebRTC] Connection State: {0}",
+  "log_webrtc_gather_state": "[WebRTC] ICE Gathering State: {0}",
+  "log_webrtc_sig_state": "[WebRTC] Signaling State: {0}",
+  "log_webrtc_negotiation": "[WebRTC] Negotiation Needed",
+  "log_webrtc_play_failed": "[WebRTC] Video Playback Failed: {0}",
+  "log_webrtc_rust_state": "[WebRTC-Rust] State Changed: {0}",
+  "log_webrtc_video_error": "[WebRTC-Video] Video capture/encode error: {0}",
+  "log_video_encoded_frame": "[Video] Encoded frame size: {0} bytes",
+  "log_video_send_failed": "[Video] Failed to send frame: {0}",
+  "log_video_send_timeout": "[Video] Frame transmission timed out (network congestion)",
+  "log_input_simulate_failed": "[input-control] simulate failed: {0}",
+  "log_input_rejected": "[security input-control] packet rejected: {0}",
+  "log_input_unreliable_failed": "[input-unreliable] simulate failed: {0}",
+  "log_hwid_failed": "Failed to get HWID: {0}",
+  "log_sig_manual_reconnect": "User manually triggered signaling reconnection...",
+  "log_sig_reconnect_failed": "Reconnection failed: {0}",
+  "log_sig_connected_logging_in": "Connected to signaling server, logging in...",
+  "log_webrtc_answer_applied": "Remote Answer applied, ICE negotiating...",
+  "log_webrtc_apply_answer_failed": "Failed to apply Answer: {0}",
+  "log_webrtc_add_ice_failed": "Failed to add ICE Candidate: {0}",
+  "log_webrtc_add_ice_queue_failed": "Failed to add ICE Candidate from queue: {0}",
+  "log_webrtc_send_ice_rust_failed": "Failed to forward ICE Candidate to Rust: {0}",
+  "log_sig_server_error": "Signaling server error: {0}",
+  "log_sig_disconnected_retry": "WebSocket disconnected. Retrying in 5 seconds...",
+  "log_sig_connection_error": "Signaling connection error: {0}",
+  "log_webrtc_rust_handling_offer": "Delegating remote Offer to Rust backend...",
+  "log_webrtc_rust_answer_sent": "Rust Answer returned to {0}",
+  "log_webrtc_send_ice_rust_queue_failed": "Failed to forward ICE Candidate queue to Rust: {0}",
+  "log_webrtc_host_serious_error": "Critical error in handle_remote_offer_as_host: {0}",
+  "log_datachannel_control_open": "DataChannel [input-control] opened",
+  "log_datachannel_control_close": "DataChannel [input-control] closed",
+  "log_control_execute_failed": "Failed to execute remote input: {0}",
+  "log_datachannel_unreliable_open": "DataChannel [input-unreliable] opened",
+  "log_datachannel_unreliable_close": "DataChannel [input-unreliable] closed",
+  "log_unreliable_execute_failed": "Failed to execute remote unreliable input: {0}",
+  "log_datachannel_file_open": "DataChannel [file-transfer] opened",
+  "log_datachannel_file_close": "DataChannel [file-transfer] closed",
+  "log_file_write_failed": "Failed to write file chunk: {0}",
+  "log_webrtc_intercept_rust_candidate": "Intercepted Rust ICE candidate, forwarding via WebSocket",
+  "log_webrtc_init_call": "Initiating WebRTC connection to {0} (PIN: {1})",
+  "log_license_web_skip": "Web Client environment, skipping local license check",
+  "log_license_active_restored": "Valid license detected at startup. Activation state restored.",
+  "log_license_trial_days": "Trial active, days left: {0}",
+  "log_license_expired": "Trial period has expired",
+  "log_license_check_failed": "License validation failed at startup: {0}",
+  "log_privacy_toggle_failed": "Failed to toggle Privacy Mode: {0}",
+  "log_polling_error": "Status polling error: {0}",
+  "log_gesture_long_press": "Long press detected. Simulating right click & vibrating",
+  "log_gesture_cancelled": "Touch gesture cancelled, resetting states & releasing mouse buttons",
+  "log_input_focus_lost": "Focus lost or tab hidden. Resetting key states via ResetState (0xFF)",
+  "log_sig_web_focus_reconnect": "Web Client focused and offline, reconnecting signaling...",
+  "log_sig_web_focus_ping": "Web Client focused, sending ping to verify connectivity...",
+  "log_sig_web_visible_reconnect": "Web Client visible and offline, reconnecting signaling...",
+  "log_sig_tauri_rust_delegation": "Tauri desktop environment detected, initializing Rust signaling worker...",
+  "log_sig_rust_connecting": "[Rust] Connecting to signaling server...",
+  "log_sig_rust_connected": "[Rust] Connected and logged in to signaling server.",
+  "log_sig_rust_disconnected": "[Rust] Connection lost, preparing to reconnect...",
+  "log_sig_rust_start_success": "Rust signaling client successfully initialized.",
+  "log_sig_rust_start_failed": "Failed to start Rust signaling: {0}",
+  "log_sig_rust_offer_received": "[Rust] Received offer from {0}, verifying...",
+  "log_sig_rust_offer_success": "[Rust] Offer verified, Answer sent to {0}",
+  "log_sig_rust_offer_rejected": "[Rust] Rejected offer from {0}: {1}",
+  "log_sig_rust_ice_received": "[Rust] Received ICE Candidate from {0}, applying...",,
 
   // 頁面靜態文字
   "connect_title": "Establish Connection",
@@ -816,6 +907,39 @@ function updateDomTranslations() {
   const btnTogglePin = document.getElementById("btn-toggle-pin");
   if (btnTogglePin) {
     btnTogglePin.textContent = isPinVisible ? t("btn_hide") : t("btn_show");
+  }
+
+  // 1. 連線狀態徽章（Signaling Status）徽章即時重新翻譯
+  const statusEl = document.getElementById("val-signaling-status");
+  if (statusEl) {
+    if (statusEl.classList.contains("status-active")) {
+      statusEl.textContent = t("status_online") || "Online";
+    } else if (statusEl.classList.contains("status-trial")) {
+      statusEl.textContent = t("status_connecting") || "Connecting...";
+    } else {
+      statusEl.textContent = t("status_offline") || "Offline";
+    }
+  }
+
+  // 2. 歷史日誌動態重譯與重繪
+  const overlay = document.getElementById('debug-overlay');
+  if (overlay) {
+    Array.from(overlay.children).forEach((child) => {
+      const line = child as HTMLDivElement;
+      const originalMsg = line.dataset.originalMsg;
+      const timestamp = line.dataset.timestamp;
+      const color = line.dataset.color;
+      if (originalMsg && timestamp) {
+        let msg = originalMsg;
+        try {
+          msg = translateLogMessage(originalMsg, t);
+        } catch (err) {
+          // 忽略錯誤
+        }
+        line.textContent = `[${timestamp}] ${msg}`;
+        if (color) line.style.color = color;
+      }
+    });
   }
 }
 
