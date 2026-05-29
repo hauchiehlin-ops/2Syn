@@ -2797,10 +2797,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     const localHostInfo = document.getElementById("local-host-info-section");
     if (localHostInfo) {
       localHostInfo.style.display = "none";
-      // 隱藏其上方的 separator (若有)
-      if (localHostInfo.previousElementSibling) {
-        (localHostInfo.previousElementSibling as HTMLElement).style.display = "none";
-      }
     }
 
     // 優化主控端的網路體質診斷顯示，並常態開啟穿透提示按鈕
