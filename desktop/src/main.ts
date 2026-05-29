@@ -1773,6 +1773,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   const hiddenInput = document.getElementById("hidden-keyboard-input") as HTMLTextAreaElement;
   let isKeyboardActive = false;
   let lastBackspaceTime = 0;
+  let isComposing = false;
 
   if (btnDisplayMode) {
     btnDisplayMode.onclick = () => {
@@ -2267,9 +2268,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     
     if (e.touches.length === 0) {
       if (isKeyboardActive && hiddenInput && document.activeElement !== hiddenInput) {
-        setTimeout(() => {
-          hiddenInput.focus();
-        }, 50);
+        hiddenInput.focus();
       }
       // 抬起手指時，立刻重置邊緣平移
       currentCursorPercentX = 0.5;
@@ -2460,6 +2459,21 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       isKeyboardActive = false;
     });
 
+    hiddenInput.addEventListener("compositionstart", () => {
+      isComposing = true;
+    });
+
+    hiddenInput.addEventListener("compositionend", () => {
+      isComposing = false;
+      const val = hiddenInput.value;
+      if (val.length > 0) {
+        const encoder = new TextEncoder();
+        const payload = encoder.encode(val);
+        sendInputPacket(buildInputPacket(0x08, payload));
+        hiddenInput.value = "";
+      }
+    });
+
     hiddenInput.addEventListener("keydown", (e) => {
       if (e.key === "Backspace" || e.keyCode === 8) {
         e.preventDefault();
@@ -2471,6 +2485,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     });
 
     hiddenInput.addEventListener("input", (e: Event) => {
+      if (isComposing) return;
+
       const inputType = (e as any).inputType;
 
       if (inputType === "deleteContentBackward") {
@@ -2485,7 +2501,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
       const val = hiddenInput.value;
       if (val.length > 0) {
-        // 使用 TextEncoder 轉為 UTF-8 位元組，並以 TextInput (0x08) 封包傳送
         const encoder = new TextEncoder();
         const payload = encoder.encode(val);
         sendInputPacket(buildInputPacket(0x08, payload));
@@ -2497,9 +2512,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   // 點擊視訊畫面時的防失焦重新 Focus 處理
   videoEl.addEventListener("click", () => {
     if (isKeyboardActive && hiddenInput && document.activeElement !== hiddenInput) {
-      setTimeout(() => {
-        hiddenInput.focus();
-      }, 50);
+      hiddenInput.focus();
     }
   });
 
