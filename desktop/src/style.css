@@ -1047,3 +1047,120 @@ input:checked + .slider:before {
   background: rgba(239, 68, 68, 0.35);
   border-color: rgba(239, 68, 68, 0.6);
 }
+
+/* =========================================================================
+   仿 iOS AssistiveTouch 智能圓形懸浮控制轉盤樣式
+   ========================================================================= */
+.floating-dial-container {
+  position: fixed;
+  width: 50px;
+  height: 50px;
+  z-index: 2000;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.dial-trigger {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25),
+              inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  pointer-events: auto;
+  user-select: none;
+  opacity: 0.65; /* 預設半透明防干擾 */
+}
+
+.dial-trigger:hover, .dial-trigger.active {
+  opacity: 1;
+  transform: scale(1.05);
+  background: rgba(15, 23, 42, 0.75);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.dial-trigger-inner {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+  transition: all 0.3s ease;
+}
+
+/* 呼吸脈衝動畫 */
+@keyframes dial-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.3); }
+  70% { box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+}
+
+.dial-trigger.pulse {
+  animation: dial-pulse 2s infinite;
+}
+
+/* 子選單項 */
+.dial-item {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px) saturate(120%);
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0);
+  top: 50%;
+  left: 50%;
+  pointer-events: none;
+  z-index: 1999;
+}
+
+.dial-item:hover {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(0, 110, 255, 0.45);
+  transform: translate(var(--tx), var(--ty)) scale(1.1) !important;
+}
+
+.dial-item:active {
+  transform: translate(var(--tx), var(--ty)) scale(0.95) !important;
+}
+
+.dial-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.dial-label {
+  font-size: 8px;
+  font-weight: 600;
+  margin-top: 2px;
+  opacity: 0.8;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+/* 展開狀態 */
+.floating-dial-container.expanded .dial-item {
+  opacity: 1;
+  transform: translate(var(--tx), var(--ty)) scale(1);
+  pointer-events: auto;
+}

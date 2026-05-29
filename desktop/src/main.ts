@@ -625,6 +625,7 @@ const fallbackTranslations: Record<string, string> = {
   "alert_web_diag_unsupported": "Connectivity diagnostics are not supported in Web Client mode.",
   "btn_scale_to_fit": "Scale to Fit",
   "btn_original_size": "Original Size",
+  "btn_aspect_fill": "Aspect Fill",
   "desc_web_client_info": "Web Client controller. The connection pipeline will be automatically evaluated. If P2P fails due to symmetric NAT or strict firewalls, please click \"🚀 Enable Relay Mode\".",
   "log_title_system_logs": "System Logs",
   "log_status_connecting": "Connecting",
@@ -1368,6 +1369,9 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         const mobileControlOrb = document.getElementById("mobile-control-orb");
         if (mobileControlOrb) mobileControlOrb.style.display = "flex";
         
+        const mobileDial = document.getElementById("mobile-floating-dial");
+        if (mobileDial) mobileDial.style.display = "block";
+        
         // 如果是在手機/觸控環境上，顯示鍵盤呼叫按鈕
         if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
           btnKeyboard.style.display = "flex";
@@ -1660,6 +1664,13 @@ function resetConnectionUI() {
   const mobileControlOrb = document.getElementById("mobile-control-orb");
   if (mobileControlOrb) {
     mobileControlOrb.style.display = "none";
+  }
+
+  // 重置顯示模式狀態與隱藏懸浮手勢工具輪
+  resetDisplayMode();
+  const mobileDial = document.getElementById("mobile-floating-dial");
+  if (mobileDial) {
+    mobileDial.style.display = "none";
   }
 }
 
@@ -2356,6 +2367,7 @@ function startTransferPolling(taskId: string) {
 let controlSeqNumber = 0;
 let unreliableSeqNumber = 0;
 let inputBound = false;
+let resetDisplayMode: () => void = () => {};
 
 function buildInputPacket(eventType: number, payload: Uint8Array): Uint8Array {
   const isUnreliable = (eventType === 0x01 || eventType === 0x07);
@@ -2398,7 +2410,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   inputBound = true;
 
   // --- 邊緣平移與顯示模式狀態 ---
-  let isOriginalSize = false;
+  let displayMode: "fit" | "original" | "fill" = "fit";
   let panRafId: number | null = null;
   currentCursorPercentX = 0.5;
   currentCursorPercentY = 0.5;
@@ -2411,28 +2423,99 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let isComposing = false;
   let lastValue = ""; // 用於追蹤鍵盤增量輸入框內容
 
-  if (btnDisplayMode) {
-    btnDisplayMode.onclick = () => {
-      isOriginalSize = !isOriginalSize;
-      if (isOriginalSize) {
-        btnDisplayMode.textContent = "🔍 " + t("btn_scale_to_fit");
-        videoEl.style.objectFit = "none";
-        // 將視訊大小強制設定為真實解析度
-        videoEl.style.width = videoEl.videoWidth + "px";
-        videoEl.style.height = videoEl.videoHeight + "px";
-        videoContainer.style.overflow = "hidden";
-      } else {
-        btnDisplayMode.textContent = "🔍 " + t("btn_original_size");
-        videoEl.style.objectFit = "contain";
-        videoEl.style.width = "100%";
-        videoEl.style.height = "100%";
-        // 重置 Pinch 放大相關的 transform 狀態，回歸適應視窗
-        videoScale = 1.0;
-        videoTranslateX = 0;
-        videoTranslateY = 0;
-        keyboardOffsetUpdateY = 0;
-        applyVideoTransform();
+  // 智慧型滑鼠磁吸吸附定位演算法
+  function applySmartSnapping(x: number, y: number, speed: number): { x: number, y: number } {
+    if (speed > 0.008) {
+      return { x, y };
+    }
+    let snappedX = x;
+    let snappedY = y;
+    
+    // 1. macOS 頂部選單列磁吸 (Y = 0% 至 3.5%)
+    if (y > 0 && y < 0.035) {
+      snappedY = 0.016; // 鎖定在選單列垂直中線
+      
+      // 2. 蘋果選單  (X = 0% 至 3%)
+      if (x > 0 && x < 0.03) {
+        snappedX = 0.015;
       }
+    }
+    
+    // 3. macOS 底部 Dock 欄磁吸 (Y = 96% 至 100%)
+    if (y > 0.96 && y <= 1.0) {
+      snappedY = 0.978; // 鎖定在 Dock 欄垂直中線
+    }
+    
+    return { x: snappedX, y: snappedY };
+  }
+
+  // 顯示模式切換處理
+  function applyDisplayMode() {
+    if (!videoEl || !videoContainer) return;
+    
+    if (displayMode === "fit") {
+      if (btnDisplayMode) btnDisplayMode.textContent = "🔍 " + t("btn_original_size");
+      videoEl.style.objectFit = "contain";
+      videoEl.style.width = "100%";
+      videoEl.style.height = "100%";
+      // 重置 Pinch 放大相關的 transform 狀態，回歸適應視窗
+      videoScale = 1.0;
+      videoTranslateX = 0;
+      videoTranslateY = 0;
+      keyboardOffsetUpdateY = 0;
+      applyVideoTransform();
+    } else if (displayMode === "original") {
+      if (btnDisplayMode) btnDisplayMode.textContent = "🔍 " + t("btn_aspect_fill");
+      videoEl.style.objectFit = "none";
+      videoEl.style.width = videoEl.videoWidth + "px";
+      videoEl.style.height = videoEl.videoHeight + "px";
+      videoContainer.style.overflow = "hidden";
+      videoScale = 1.0;
+      videoTranslateX = 0;
+      videoTranslateY = 0;
+      keyboardOffsetUpdateY = 0;
+      applyVideoTransform();
+    } else if (displayMode === "fill") {
+      if (btnDisplayMode) btnDisplayMode.textContent = "🔍 " + t("btn_scale_to_fit");
+      videoEl.style.objectFit = "contain";
+      videoEl.style.width = "100%";
+      videoEl.style.height = "100%";
+      videoContainer.style.overflow = "hidden";
+      
+      const containerWidth = videoContainer.clientWidth || window.innerWidth;
+      const containerHeight = videoContainer.clientHeight || window.innerHeight;
+      const videoWidth = videoEl.videoWidth || 1920;
+      const videoHeight = videoEl.videoHeight || 1080;
+      
+      const containerRatio = containerWidth / containerHeight;
+      const videoRatio = videoWidth / videoHeight;
+      
+      let baseFillScale = 1.0;
+      if (containerRatio > videoRatio) {
+        baseFillScale = containerRatio / videoRatio;
+      } else {
+        baseFillScale = videoRatio / containerRatio;
+      }
+      
+      videoScale = baseFillScale;
+      videoTranslateX = 0;
+      videoTranslateY = 0;
+      keyboardOffsetUpdateY = 0;
+      applyVideoTransform();
+    }
+  }
+
+  if (btnDisplayMode) {
+    btnDisplayMode.textContent = "🔍 " + t("btn_original_size");
+    btnDisplayMode.onclick = () => {
+      if (displayMode === "fit") {
+        displayMode = "original";
+      } else if (displayMode === "original") {
+        displayMode = "fill";
+      } else {
+        displayMode = "fit";
+      }
+      applyDisplayMode();
     };
   }
 
@@ -2460,7 +2543,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       }
       
       if (dx !== 0 || dy !== 0) {
-        if (isOriginalSize) {
+        if (displayMode === "original") {
           // 模式一：物理大小模式，平移 container 滾動條
           videoContainer.scrollLeft += dx;
           videoContainer.scrollTop += dy;
@@ -2782,9 +2865,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       triggerMoveRaf();
       currentCursorPercentX = 0.5;
       currentCursorPercentY = 0.5;
-    } else {
       let x = 0, y = 0;
-      if (isOriginalSize && videoContainer) {
+      if (displayMode === "original" && videoContainer) {
         x = (e.clientX + videoContainer.scrollLeft) / videoEl.videoWidth;
         y = (e.clientY + videoContainer.scrollTop) / videoEl.videoHeight;
       } else {
@@ -2809,6 +2891,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
       x = Math.max(0, Math.min(1, x));
       y = Math.max(0, Math.min(1, y));
+      
+      const mouseSpeed = Math.sqrt(e.movementX * e.movementX + e.movementY * e.movementY) / (videoContainer.clientWidth || 1);
+      const snapped = applySmartSnapping(x, y, mouseSpeed);
+      x = snapped.x;
+      y = snapped.y;
       
       pendingMouseMoveX = x;
       pendingMouseMoveY = y;
@@ -3201,6 +3288,14 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         x = Math.max(0, Math.min(1, x));
         y = Math.max(0, Math.min(1, y));
         
+        // 計算速度以決定是否磁吸
+        const touchSpeed = lastTouchX !== 0 && lastTouchY !== 0 
+          ? Math.sqrt(Math.pow(currentX - lastTouchX, 2) + Math.pow(currentY - lastTouchY, 2)) / renderedWidth
+          : 0;
+        const snapped = applySmartSnapping(x, y, touchSpeed);
+        x = snapped.x;
+        y = snapped.y;
+        
         // Tremor Suppression (防手震) & Lazy Drag (延遲拖曳激活)
         if (!isDragging) {
           const startDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
@@ -3247,11 +3342,15 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           trackpadCursorX = Math.max(0, Math.min(1, trackpadCursorX));
           trackpadCursorY = Math.max(0, Math.min(1, trackpadCursorY));
           
-          pendingMouseMoveX = trackpadCursorX;
-          pendingMouseMoveY = trackpadCursorY;
+          // 計算速度以決定是否磁吸
+          const touchSpeed = Math.sqrt(accDx * accDx + accDy * accDy) / renderedWidth;
+          const snapped = applySmartSnapping(trackpadCursorX, trackpadCursorY, touchSpeed);
+          
+          pendingMouseMoveX = snapped.x;
+          pendingMouseMoveY = snapped.y;
           triggerMoveRaf();
 
-          updateCursorOverlay(trackpadCursorX, trackpadCursorY);
+          updateCursorOverlay(snapped.x, snapped.y);
 
           const now = performance.now();
           const dt = now - lastMoveTimestamp;
@@ -3261,8 +3360,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           }
           lastMoveTimestamp = now;
 
-          currentCursorPercentX = trackpadCursorX;
-          currentCursorPercentY = trackpadCursorY;
+          currentCursorPercentX = snapped.x;
+          currentCursorPercentY = snapped.y;
         }
       }
       
@@ -3664,6 +3763,216 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       onResetTrigger();
     }
   });
+
+  // =========================================================================
+  // 仿 iOS AssistiveTouch 智能圓形懸浮控制轉盤 JS 實作
+  // =========================================================================
+  const dialContainer = document.getElementById("mobile-floating-dial") as HTMLElement;
+  const dialTrigger = document.getElementById("mobile-floating-dial-trigger") as HTMLElement;
+  let isDialExpanded = false;
+  let isDraggingDial = false;
+  let dialStartX = 0;
+  let dialStartY = 0;
+  let dialLeft = 12; // 初始靠左
+  let dialTop = window.innerHeight / 2 - 25; // 垂直置中
+
+  const expandDial = (side: "left" | "right") => {
+    isDialExpanded = true;
+    if (dialContainer && dialTrigger) {
+      dialContainer.classList.add("expanded");
+      dialTrigger.classList.add("active");
+      dialTrigger.classList.remove("pulse");
+    }
+    
+    // 子按鈕角度定義
+    const leftOffsets = [
+      { x: 42, y: -72 },  // Keyboard
+      { x: 74, y: -40 },  // Mode
+      { x: 84, y: 0 },    // Display
+      { x: 74, y: 40 },   // Shortcuts
+      { x: 42, y: 72 }    // Logs
+    ];
+    
+    const rightOffsets = [
+      { x: -42, y: -72 },
+      { x: -74, y: -40 },
+      { x: -84, y: 0 },
+      { x: -74, y: 40 },
+      { x: -42, y: 72 }
+    ];
+    
+    const offsets = side === "left" ? leftOffsets : rightOffsets;
+    const items = dialContainer.querySelectorAll(".dial-item");
+    items.forEach((item, index) => {
+      const htmlItem = item as HTMLElement;
+      htmlItem.style.setProperty("--tx", `${offsets[index].x}px`);
+      htmlItem.style.setProperty("--ty", `${offsets[index].y}px`);
+    });
+  };
+
+  const collapseDial = () => {
+    isDialExpanded = false;
+    if (dialContainer && dialTrigger) {
+      dialContainer.classList.remove("expanded");
+      dialTrigger.classList.remove("active");
+      dialTrigger.classList.add("pulse");
+    }
+  };
+
+  // 曝露給全域以供連線重置時調用
+  resetDisplayMode = () => {
+    displayMode = "fit";
+    applyDisplayMode();
+    collapseDial();
+  };
+
+  if (dialContainer && dialTrigger) {
+    // 設定初始位置
+    dialContainer.style.left = `${dialLeft}px`;
+    dialContainer.style.top = `${dialTop}px`;
+    
+    dialTrigger.addEventListener("touchstart", (e) => {
+      e.stopPropagation();
+      isDraggingDial = false;
+      const touch = e.touches[0];
+      dialStartX = touch.clientX - dialLeft;
+      dialStartY = touch.clientY - dialTop;
+      
+      if (isDialExpanded) {
+        collapseDial();
+      }
+    }, { passive: true });
+    
+    dialTrigger.addEventListener("touchmove", (e) => {
+      e.stopPropagation();
+      isDraggingDial = true;
+      const touch = e.touches[0];
+      let newLeft = touch.clientX - dialStartX;
+      let newTop = touch.clientY - dialStartY;
+      
+      // 限制在螢幕可見範圍內 (保留 12px 邊緣安全區)
+      newLeft = Math.max(12, Math.min(window.innerWidth - 50 - 12, newLeft));
+      newTop = Math.max(12, Math.min(window.innerHeight - 50 - 12, newTop));
+      
+      dialLeft = newLeft;
+      dialTop = newTop;
+      dialContainer.style.left = `${dialLeft}px`;
+      dialContainer.style.top = `${dialTop}px`;
+    }, { passive: true });
+    
+    dialTrigger.addEventListener("touchend", (e) => {
+      e.stopPropagation();
+      if (!isDraggingDial) {
+        // 單擊展開/收合
+        if (isDialExpanded) {
+          collapseDial();
+        } else {
+          const centerPoint = window.innerWidth / 2;
+          const side = (dialLeft + 25 < centerPoint) ? "left" : "right";
+          expandDial(side);
+        }
+      } else {
+        // 貼邊磁吸
+        const centerPoint = window.innerWidth / 2;
+        let targetLeft = 12;
+        let side: "left" | "right" = "left";
+        if (dialLeft + 25 >= centerPoint) {
+          targetLeft = window.innerWidth - 50 - 12;
+          side = "right";
+        }
+        
+        dialContainer.style.transition = "left 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)";
+        dialLeft = targetLeft;
+        dialContainer.style.left = `${dialLeft}px`;
+        
+        setTimeout(() => {
+          if (dialContainer) {
+            dialContainer.style.transition = "none";
+          }
+        }, 300);
+      }
+    }, { passive: true });
+
+    // 點擊選單以外區域收合
+    window.addEventListener("touchstart", () => {
+      if (isDialExpanded) {
+        collapseDial();
+      }
+    }, { passive: true });
+
+    // 視窗尺寸重置調整
+    window.addEventListener("resize", () => {
+      const centerPoint = window.innerWidth / 2;
+      let targetLeft = 12;
+      if (dialLeft + 25 >= centerPoint) {
+        targetLeft = window.innerWidth - 50 - 12;
+      }
+      dialLeft = targetLeft;
+      dialTop = Math.max(12, Math.min(window.innerHeight - 50 - 12, dialTop));
+      dialContainer.style.left = `${dialLeft}px`;
+      dialContainer.style.top = `${dialTop}px`;
+    }, { passive: true });
+
+    // 子按鈕事件對接
+    const itemKeyboard = document.getElementById("dial-item-keyboard");
+    if (itemKeyboard) {
+      itemKeyboard.onclick = (e) => {
+        e.stopPropagation();
+        collapseDial();
+        isKeyboardActive = true;
+        if (hiddenInput) {
+          hiddenInput.value = "   ";
+          lastValue = "   ";
+          hiddenInput.focus();
+        }
+      };
+    }
+
+    const itemMode = document.getElementById("dial-item-mode");
+    if (itemMode) {
+      itemMode.onclick = (e) => {
+        e.stopPropagation();
+        collapseDial();
+        if (btnTouchMode) {
+          btnTouchMode.click();
+        }
+      };
+    }
+
+    const itemDisplay = document.getElementById("dial-item-display");
+    if (itemDisplay) {
+      itemDisplay.onclick = (e) => {
+        e.stopPropagation();
+        collapseDial();
+        if (btnDisplayMode) {
+          btnDisplayMode.click();
+        }
+      };
+    }
+
+    const itemShortcuts = document.getElementById("dial-item-shortcuts");
+    if (itemShortcuts) {
+      itemShortcuts.onclick = (e) => {
+        e.stopPropagation();
+        collapseDial();
+        if (btnSendKeys) {
+          btnSendKeys.click();
+        }
+      };
+    }
+
+    const itemLogs = document.getElementById("dial-item-logs");
+    if (itemLogs) {
+      itemLogs.onclick = (e) => {
+        e.stopPropagation();
+        collapseDial();
+        const btnDiagnose = document.getElementById("btn-video-diagnose");
+        if (btnDiagnose) {
+          btnDiagnose.click();
+        }
+      };
+    }
+  }
 
   // 舊事件與舊渲染迴圈已被清理，已併入全新的 setupInputControl 實作。
 }

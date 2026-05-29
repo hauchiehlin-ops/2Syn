@@ -70,6 +70,37 @@
   </div>
 
   <button id="btn-mobile-keyboard" style="display: none; position: fixed; bottom: 20px; right: 20px; z-index: 110; background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.4); border-radius: 50%; width: 50px; height: 50px; font-size: 24px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;">⌨️</button>
+
+  <!-- 仿 iOS AssistiveTouch 智能圓形懸浮控制轉盤 -->
+  <div id="mobile-floating-dial" class="floating-dial-container" style="display: none;">
+    <!-- 圓形放射子選單項目 -->
+    <button class="dial-item" id="dial-item-keyboard" title="Keyboard">
+      <span class="dial-icon">⌨️</span>
+      <span class="dial-label">Keyboard</span>
+    </button>
+    <button class="dial-item" id="dial-item-mode" title="Touch Mode">
+      <span class="dial-icon">🎯</span>
+      <span class="dial-label">Mode</span>
+    </button>
+    <button class="dial-item" id="dial-item-display" title="Display Mode">
+      <span class="dial-icon">🔍</span>
+      <span class="dial-label">Display</span>
+    </button>
+    <button class="dial-item" id="dial-item-shortcuts" title="Shortcuts">
+      <span class="dial-icon">⚡</span>
+      <span class="dial-label">Shortcuts</span>
+    </button>
+    <button class="dial-item" id="dial-item-logs" title="Diagnostic Logs">
+      <span class="dial-icon">⚙️</span>
+      <span class="dial-label">Logs</span>
+    </button>
+    
+    <!-- 懸浮球本體 (Trigger) -->
+    <div id="mobile-floating-dial-trigger" class="dial-trigger pulse">
+      <div class="dial-trigger-inner"></div>
+    </div>
+  </div>
+
   <textarea id="hidden-keyboard-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="position: fixed; top: -100px; left: 0; opacity: 0.01; width: 1px; height: 1px; border: none; padding: 0; margin: 0; pointer-events: auto; z-index: 1000;"></textarea>
 
   <!-- 景深霓虹背景光暈球 -->

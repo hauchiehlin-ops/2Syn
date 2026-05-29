@@ -135,6 +135,7 @@
   "alert_web_diag_unsupported": "Connectivity diagnostics are not supported in Web Client mode.",
   "btn_scale_to_fit": "Scale to Fit",
   "btn_original_size": "Original Size",
+  "btn_aspect_fill": "Aspect Fill",
   "desc_web_client_info": "Web Client controller. The connection pipeline will be automatically evaluated. If P2P fails due to symmetric NAT or strict firewalls, please click \"🚀 Enable Relay Mode\".",
   "err_macos_permissions_missing": "⚠️ macOS permissions (Screen Recording / Accessibility) are missing!",
   "btn_how_to_fix": "How to Fix",
