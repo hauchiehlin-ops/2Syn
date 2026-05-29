@@ -461,6 +461,43 @@
     </div>
   </div>
 
+  <!-- Tailscale Setup Guide Modal -->
+  <div id="tailscale-guide-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 200; background: rgba(0,0,0,0.5); backdrop-filter: blur(5px); justify-content: center; align-items: center; padding: 20px;">
+    <div style="background: var(--glass-bg, rgba(255,255,255,0.95)); border: 1px solid var(--panel-border, rgba(0,0,0,0.1)); border-radius: var(--border-radius-lg, 16px); padding: 24px; max-width: 550px; width: 100%; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.2); display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0; font-size: 18px; font-weight: 600; color: var(--text-main);" id="txt-ts-guide-title">Tailscale 零基礎穿透設定指南</h2>
+        <button id="btn-close-ts-guide" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-main);">&times;</button>
+      </div>
+      <div style="font-size: 13px; line-height: 1.6; color: var(--text-main); display: flex; flex-direction: column; gap: 12px;">
+        <p id="txt-ts-guide-desc">由於 WebRTC 受到電信商對稱型 NAT 限制，建議在雙端安裝免費的安全虛擬局域網工具 Tailscale，以 100% 實現 P2P 超低延遲直連。</p>
+        
+        <div style="border-left: 3px solid var(--accent-color, #3b82f6); padding-left: 10px; margin-bottom: 8px;">
+          <h4 id="txt-ts-step-1-title" style="margin: 0 0 4px 0; font-size: 14px; font-weight: 600;">步驟一：下載與安裝</h4>
+          <p id="txt-ts-step-1-desc" style="margin: 0;">被控端與主控端設備均需下載安裝。</p>
+          <div style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap;">
+            <a href="https://tailscale.com/download" target="_blank" class="btn-secondary" style="padding: 4px 8px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; color: var(--text-main);" id="lnk-ts-download-mac">Mac / Windows 下載</a>
+            <a href="https://apps.apple.com/app/tailscale/id1475387142" target="_blank" class="btn-secondary" style="padding: 4px 8px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; color: var(--text-main);" id="lnk-ts-download-ios">iOS 下載 (App Store)</a>
+            <a href="https://play.google.com/store/apps/details?id=com.tailscale.ipn" target="_blank" class="btn-secondary" style="padding: 4px 8px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; color: var(--text-main);" id="lnk-ts-download-android">Android 下載</a>
+          </div>
+        </div>
+
+        <div style="border-left: 3px solid var(--accent-color, #3b82f6); padding-left: 10px; margin-bottom: 8px;">
+          <h4 id="txt-ts-step-2-title" style="margin: 0 0 4px 0; font-size: 14px; font-weight: 600;">步驟二：帳號登入與註冊</h4>
+          <p id="txt-ts-step-2-desc" style="margin: 0;">啟動 Tailscale，雙端**必須登入同一個帳號**（如相同 Google 帳號），這樣兩台裝置才會自動加入同一個虛擬網域。</p>
+        </div>
+
+        <div style="border-left: 3px solid var(--accent-color, #3b82f6); padding-left: 10px;">
+          <h4 id="txt-ts-step-3-title" style="margin: 0 0 4px 0; font-size: 14px; font-weight: 600;">步驟三：開啟 VPN 連線</h4>
+          <p id="txt-ts-step-3-desc" style="margin: 0;">在手機端 App 切換開關為 「Connected」（若提示 VPN 授權請允許並輸入密碼）。Mac 端確認選單列圖示狀態為 「Connected」。</p>
+        </div>
+        
+        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 10px; font-size: 12px; color: #10b981; line-height: 1.4;" id="txt-ts-step-4-desc">
+          💡 完成後，Mac 端的 2syn 燈號會自動變為綠色，手機端即可透過 2syn 順利發起超低延遲直連，不再有連線失敗與黑屏問題。
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

@@ -217,5 +217,17 @@
   "btn_diagnose_host": "Diagnose Host",
   "remote_logs_title": "Remote Host Diagnostic Logs",
   "remote_logs_help": "These are the real-time debug logs from the controlled host. If you see \"Screen capture failed\", it means the Mac host has Screen Recording permission checked but still rejected by OS. Please uncheck and recheck the permission, then restart the App.",
-  "loading_remote_logs": "Loading remote logs..."
+  "loading_remote_logs": "Loading remote logs...",
+  "ts_guide_title": "Tailscale Zero-Configuration Guide",
+  "ts_guide_desc": "Due to ISP Symmetric NAT and firewall limitations on WebRTC, it is highly recommended to install Tailscale, a free and secure virtual private network tool, on both devices to ensure a 100% P2P ultra-low latency connection.",
+  "ts_step_1_title": "Step 1: Download & Install",
+  "ts_step_1_desc": "Download and install Tailscale on both your controlled host and controller devices.",
+  "ts_download_mac": "Download for Mac / Windows",
+  "ts_download_ios": "Download for iOS (App Store)",
+  "ts_download_android": "Download for Android",
+  "ts_step_2_title": "Step 2: Log In & Register",
+  "ts_step_2_desc": "Launch Tailscale. Both devices **must log in to the same account** (e.g., the same Google account) so they automatically join the same secure virtual private network.",
+  "ts_step_3_title": "Step 3: Enable VPN Connection",
+  "ts_step_3_desc": "Toggle the switch to 'Connected' in the mobile App (accept VPN configuration prompts if requested). Confirm that the Tailscale menu bar icon on your Mac displays 'Connected'.",
+  "ts_step_4_desc": "💡 Once completed, the connection indicator on the Mac host will automatically turn green, allowing your controller device to establish a direct connection without failed or black screen issues."
 }

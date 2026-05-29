@@ -217,5 +217,17 @@
   "btn_diagnose_host": "诊断远端主机",
   "remote_logs_title": "远端主机诊断日志",
   "remote_logs_help": "以上为被控端主机的实时除错日志。若包含 \"Screen capture failed\"，表示 Mac 主机虽勾选了权限，但仍被系统拒绝，请尝试将该 App 权限取消勾选后重新勾选，并重启 App。",
-  "loading_remote_logs": "载入远端日志中..."
+  "loading_remote_logs": "载入远端日志中...",
+  "ts_guide_title": "Tailscale 零基础穿透设置指南",
+  "ts_guide_desc": "由于 WebRTC 受到运营商对称型 NAT 限制，建议在双端安装免费的安全虚拟局域网工具 Tailscale，以 100% 实现 P2P 超低延迟直连。",
+  "ts_step_1_title": "步骤一：下载与安装",
+  "ts_step_1_desc": "被控端与主控端设备均需下载安装。",
+  "ts_download_mac": "Mac / Windows 下载",
+  "ts_download_ios": "iOS 下载 (App Store)",
+  "ts_download_android": "Android 下载",
+  "ts_step_2_title": "步骤二：帐号登录与注册",
+  "ts_step_2_desc": "启动 Tailscale，双端**必须登录同一个帐号**（如相同 Google 帐号），这样两台设备才会自动加入同一个虚拟网域。",
+  "ts_step_3_title": "步骤三：开启 VPN 连接",
+  "ts_step_3_desc": "在手机端 App 切换开关为 「Connected」（若提示 VPN 授权请允许并输入密码）。Mac 端确认菜单栏图标状态为 「Connected」。",
+  "ts_step_4_desc": "💡 完成后，Mac 端的 2syn 灯号会自动变为绿色，手机端即可通过 2syn 顺利发起超低延迟直连，不再有连接失败与黑屏问题。"
 }

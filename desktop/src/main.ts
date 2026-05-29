@@ -406,7 +406,19 @@ const fallbackTranslations: Record<string, string> = {
   "btn_diagnose_host": "Diagnose Host",
   "remote_logs_title": "Remote Host Diagnostic Logs",
   "remote_logs_help": "These are the real-time debug logs from the controlled host. If you see \"Screen capture failed\", it means the Mac host has Screen Recording permission checked but still rejected by OS. Please uncheck and recheck the permission, then restart the App.",
-  "loading_remote_logs": "Loading remote logs..."
+  "loading_remote_logs": "Loading remote logs...",
+  "ts_guide_title": "Tailscale Zero-Configuration Guide",
+  "ts_guide_desc": "Due to ISP Symmetric NAT and firewall limitations on WebRTC, it is highly recommended to install Tailscale, a free and secure virtual private network tool, on both devices to ensure a 100% P2P ultra-low latency connection.",
+  "ts_step_1_title": "Step 1: Download & Install",
+  "ts_step_1_desc": "Download and install Tailscale on both your controlled host and controller devices.",
+  "ts_download_mac": "Download for Mac / Windows",
+  "ts_download_ios": "Download for iOS (App Store)",
+  "ts_download_android": "Download for Android",
+  "ts_step_2_title": "Step 2: Log In & Register",
+  "ts_step_2_desc": "Launch Tailscale. Both devices must log in to the same account (e.g., the same Google account) so they automatically join the same secure virtual private network.",
+  "ts_step_3_title": "Step 3: Enable VPN Connection",
+  "ts_step_3_desc": "Toggle the switch to 'Connected' in the mobile App (accept VPN configuration prompts if requested). Confirm that the Tailscale menu bar icon on your Mac displays 'Connected'.",
+  "ts_step_4_desc": "💡 Once completed, the connection indicator on the Mac host will automatically turn green, allowing your controller device to establish a direct connection without failed or black screen issues."
 };
 
 // 統一翻譯取值函數
@@ -643,6 +655,20 @@ function updateDomTranslations() {
   setTextContent("btn-video-diagnose", t("btn_diagnose_host"));
   setTextContent("txt-remote-logs-title", t("remote_logs_title"));
   setTextContent("txt-remote-logs-help", t("remote_logs_help"));
+
+  // Tailscale 零基礎穿透說明書 DOM 翻譯更新
+  setTextContent("txt-ts-guide-title", t("ts_guide_title"));
+  setTextContent("txt-ts-guide-desc", t("ts_guide_desc"));
+  setTextContent("txt-ts-step-1-title", t("ts_step_1_title"));
+  setTextContent("txt-ts-step-1-desc", t("ts_step_1_desc"));
+  setTextContent("lnk-ts-download-mac", t("ts_download_mac"));
+  setTextContent("lnk-ts-download-ios", t("ts_download_ios"));
+  setTextContent("lnk-ts-download-android", t("ts_download_android"));
+  setTextContent("txt-ts-step-2-title", t("ts_step_2_title"));
+  setTextContent("txt-ts-step-2-desc", t("ts_step_2_desc"));
+  setTextContent("txt-ts-step-3-title", t("ts_step_3_title"));
+  setTextContent("txt-ts-step-3-desc", t("ts_step_3_desc"));
+  setTextContent("txt-ts-step-4-desc", t("ts_step_4_desc"));
 }
 
 function setTextContent(id: string, text: string) {
@@ -1418,8 +1444,10 @@ function initConnectButton() {
 
   if (btnFixNetwork) {
     btnFixNetwork.addEventListener('click', () => {
-      window.open('https://tailscale.com/download', '_blank');
-      alert(t("txt_tailscale_alert"));
+      const guideModal = document.getElementById("tailscale-guide-modal");
+      if (guideModal) {
+        guideModal.style.display = "flex";
+      }
     });
   }
 
@@ -3109,6 +3137,28 @@ function initRemoteLogsDiagnostics() {
 }
 
 // =========================================================================
+// Tailscale 零基礎穿透說明書 Modal 事件綁定
+// =========================================================================
+function initTailscaleGuide() {
+  const modal = document.getElementById("tailscale-guide-modal");
+  const btnClose = document.getElementById("btn-close-ts-guide");
+
+  if (btnClose && modal) {
+    btnClose.addEventListener("click", () => {
+      modal.style.display = "none";
+    });
+  }
+
+  if (modal) {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) {
+        modal.style.display = "none";
+      }
+    });
+  }
+}
+
+// =========================================================================
 // 應用程式初始化入口點
 // =========================================================================
 window.addEventListener("DOMContentLoaded", async () => {
@@ -3189,6 +3239,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initSmartAutoMode();
   initFileTransfer();
   initRemoteLogsDiagnostics();
+  initTailscaleGuide();
   initVisualViewportListener();
   
   // 啟動狀態輪詢
