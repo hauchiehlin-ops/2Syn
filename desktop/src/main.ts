@@ -2,6 +2,13 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 
+function isDesktopTauri(): boolean {
+  if (!isTauri()) return false;
+  const ua = navigator.userAgent.toLowerCase();
+  const isMobile = /iphone|ipad|ipod|android|ios/.test(ua);
+  return !isMobile;
+}
+
 // --- Toast Notification System ---
 function showToast(message: string, duration: number = 3000) {
   const container = document.getElementById('toast-container');
@@ -434,7 +441,7 @@ function setPlaceholder(id: string, text: string) {
 
 // 獲取硬體特徵碼 (HWID)
 async function fetchHwid() {
-  if (!isTauri()) {
+  if (!isDesktopTauri()) {
     setTextContent("val-hwid", t("hwid_failed"));
     return;
   }
@@ -513,7 +520,7 @@ function initAccessPin() {
 
 // 初始化固定密碼設定邏輯
 async function initStaticPassword() {
-  if (!isTauri()) return;
+  if (!isDesktopTauri()) return;
   const btnSetPwd = document.getElementById("btn-set-static-pwd") as HTMLButtonElement;
   const inputPwd = document.getElementById("input-static-pwd") as HTMLInputElement;
   const statusSpan = document.getElementById("static-pwd-status");
@@ -869,7 +876,7 @@ async function startCall(remoteId: string, pin: string) {
 async function handleIncomingOffer(sourceId: string, sdpString: string, incomingPin?: string) {
   // 1. 檢查本機授權狀態（作為被控端，必須有有效授權或在試用期內）
   try {
-    const isWebBrowser = !isTauri();
+    const isWebBrowser = !isDesktopTauri();
     if (!isWebBrowser) {
       const licenseState = await invoke<{status: string, trial_days_left: number | null}>("check_license_status");
       if (licenseState.status === "expired" || licenseState.status === "unauthorized") {
@@ -1090,7 +1097,7 @@ function initConnectButton() {
     });
   }
 
-  if (isTauri()) {
+  if (isDesktopTauri()) {
     // 監聽來自 Rust 的影像擷取與編碼狀態 (例如沒有權限、編碼失敗等)
   listen<string>('rust-video-status', (event) => {
     console.error(`[WebRTC-Video] 影像處理發生問題: ${event.payload}`);
@@ -1183,7 +1190,7 @@ async function initLicenseVerification() {
   const statusBadge = document.getElementById("license-status");
 
   // 判斷是否在純網頁環境（例如手機瀏覽器）
-  const isWebBrowser = !isTauri();
+  const isWebBrowser = !isDesktopTauri();
 
   if (isWebBrowser) {
     if (statusBadge) {
@@ -1276,7 +1283,7 @@ function initPrivacyMode() {
   const chkPrivacy = document.getElementById("chk-privacy-mode") as HTMLInputElement;
   if (chkPrivacy) {
     chkPrivacy.addEventListener("change", async () => {
-      if (!isTauri()) {
+      if (!isDesktopTauri()) {
         chkPrivacy.checked = !chkPrivacy.checked;
         return;
       }
@@ -1293,7 +1300,7 @@ function initPrivacyMode() {
 
 // 模擬網路參數異動並傳遞至後端決策樹
 async function updateNetworkSimulation() {
-  if (!isTauri()) return;
+  if (!isDesktopTauri()) return;
   const rttInput = document.getElementById("range-rtt") as HTMLInputElement;
   const lossInput = document.getElementById("range-loss") as HTMLInputElement;
   const chkRelay = document.getElementById("chk-sim-relay") as HTMLInputElement;
@@ -1351,7 +1358,7 @@ function initNetworkSimulator() {
 
 // 週期性輪詢後端，獲取經過智慧連線與降級決策樹計算的即時配置
 function startStatusPolling() {
-  if (!isTauri()) return;
+  if (!isDesktopTauri()) return;
   setInterval(async () => {
     try {
       const status = await invoke<any>("get_connection_status");
@@ -1502,7 +1509,7 @@ function initSystemDiagnostic() {
       if (dnsVal) dnsVal.textContent = t("diag_status_checking");
       if (natVal) natVal.textContent = t("diag_status_checking");
       
-      if (!isTauri()) {
+      if (!isDesktopTauri()) {
         alert("Web 模式下不支援連線診斷功能");
         return;
       }
@@ -1692,7 +1699,7 @@ function startTransferPolling(taskId: string) {
   const progressContainer = document.getElementById("transfer-progress-container");
 
   transferPollingInterval = window.setInterval(async () => {
-    if (!isTauri()) return;
+    if (!isDesktopTauri()) return;
     try {
       const tasks = await invoke<any[]>("get_active_transfers");
       const myTask = tasks.find(t => t.task_id === taskId);
@@ -2771,7 +2778,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   startStatusPolling();
 
   // 若為純網頁環境，優化左側面板顯示，並常態開啟穿透提示按鈕
-  if (!isTauri()) {
+  if (!isDesktopTauri()) {
     const localHostInfo = document.getElementById("local-host-info-section");
     if (localHostInfo) {
       localHostInfo.style.display = "none";
@@ -2799,7 +2806,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   // 網頁控制端（Client）聚焦與可見度狀態檢測重連
-  if (!isTauri()) {
+  if (!isDesktopTauri()) {
     window.addEventListener("focus", () => {
       const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
       if (videoEl && videoEl.style.display === "none") {
@@ -2825,7 +2832,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   // 啟動信令連線分流：Tauri 桌面端 Host 走 Rust 後端，Web 控制端走 JS 前端
-  if (isTauri()) {
+  if (isDesktopTauri()) {
     console.log("[Signaling] 偵測為 Tauri 桌面環境，註冊 Rust 後端信令維護...");
     
     // 監聽來自 Rust 的信令連線狀態更新，並同步顯示到 logs 區塊
