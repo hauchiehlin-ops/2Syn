@@ -34,6 +34,248 @@ function showToast(message: string, duration: number = 3000) {
 }
 
 // --- Debug Console Interceptor ---
+function translateLogMessage(msg: string, tFunc: (key: string) => string): string {
+  const translateStatus = (status: string) => {
+    const clean = status.trim().toLowerCase();
+    const map: Record<string, string> = {
+      "connected": tFunc("log_status_connected"),
+      "disconnected": tFunc("log_status_disconnected"),
+      "checking": tFunc("log_status_checking"),
+      "completed": tFunc("log_status_completed"),
+      "completed.": tFunc("log_status_completed"),
+      "stable": tFunc("log_status_stable"),
+      "failed": tFunc("log_status_failed"),
+      "failed.": tFunc("log_status_failed"),
+      "connecting": tFunc("log_status_connecting"),
+      "gathering": tFunc("log_status_gathering"),
+      "checking.": tFunc("log_status_checking"),
+      "closed": tFunc("log_status_closed"),
+      "closed.": tFunc("log_status_closed"),
+      "new": tFunc("log_status_new"),
+      "video": tFunc("log_status_video"),
+      "audio": tFunc("log_status_audio")
+    };
+    return map[clean] || status;
+  };
+
+  // 1. WebRTC Track Event
+  if (msg.includes("[WebRTC] 收到遠端視訊軌道:") || msg.includes("[WebRTC] Received remote track:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return tFunc("log_webrtc_received_track").replace("{0}", translateStatus(val));
+  }
+  // 2. WebRTC ICE Connection State
+  if (msg.includes("[WebRTC] ICE Connection State:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return tFunc("log_webrtc_ice_state").replace("{0}", translateStatus(val));
+  }
+  // 3. WebRTC Connection State
+  if (msg.includes("[WebRTC] Connection State:") || msg.includes("[WebRTC] 連線狀態:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return tFunc("log_webrtc_conn_state").replace("{0}", translateStatus(val));
+  }
+  // 4. WebRTC ICE Gathering State
+  if (msg.includes("[WebRTC] ICE Gathering State:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return tFunc("log_webrtc_gather_state").replace("{0}", translateStatus(val));
+  }
+  // 5. WebRTC Signaling State
+  if (msg.includes("[WebRTC] Signaling State:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return tFunc("log_webrtc_sig_state").replace("{0}", translateStatus(val));
+  }
+  // 6. WebRTC Negotiation Needed
+  if (msg.includes("[WebRTC] Negotiation Needed") || msg.includes("[WebRTC] 需要協商")) {
+    return tFunc("log_webrtc_negotiation");
+  }
+  // 7. Video Playback Error
+  if (msg.includes("[WebRTC] 視訊播放失敗:") || msg.includes("[WebRTC] Video Playback Failed:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return tFunc("log_webrtc_play_failed").replace("{0}", val);
+  }
+  // 8. Rust Signaling State
+  if (msg.includes("[WebRTC-Rust] 狀態變更:") || msg.includes("[WebRTC-Rust] State Changed:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return tFunc("log_webrtc_rust_state").replace("{0}", val);
+  }
+  // 9. Host Video Capture Status
+  if (msg.includes("[WebRTC-Video] 影像處理發生問題:") || msg.includes("[WebRTC-Video] Video capture/encode error:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return tFunc("log_webrtc_video_error").replace("{0}", val);
+  }
+  // 10. Video Encoding Size
+  if (msg.includes("[Video] Encoded frame size:")) {
+    const match = msg.match(/Encoded frame size:\s*(\d+)/i);
+    if (match) {
+      return tFunc("log_video_encoded_frame").replace("{0}", match[1]);
+    }
+  }
+  // 11. Video Send Failed
+  if (msg.includes("[Video] 傳送視訊幀失敗:") || msg.includes("[Video] Failed to send frame:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return tFunc("log_video_send_failed").replace("{0}", val);
+  }
+  // 12. Video Send Timeout
+  if (msg.includes("[Video] 傳送視訊幀逾時 (網路擁塞)") || msg.includes("[Video] Frame transmission timed out")) {
+    return tFunc("log_video_send_timeout");
+  }
+  // 13. Input Simulation Error
+  if (msg.includes("[input-control] simulate failed:")) {
+    const val = msg.split("failed:").slice(1).join("failed:").trim();
+    return tFunc("log_input_simulate_failed").replace("{0}", val);
+  }
+  // 14. Input Security Packet Rejected
+  if (msg.includes("[security input-control] packet rejected:")) {
+    const val = msg.split("rejected:").slice(1).join("rejected:").trim();
+    return tFunc("log_input_rejected").replace("{0}", val);
+  }
+  // 15. Unreliable Input Simulation Error
+  if (msg.includes("[input-unreliable] simulate failed:")) {
+    const val = msg.split("failed:").slice(1).join("failed:").trim();
+    return tFunc("log_input_unreliable_failed").replace("{0}", val);
+  }
+
+  // 16. Rust 信令：連線請求收到
+  if (msg.includes("收到來自") && msg.includes("的 Offer，進行驗證")) {
+    const match = msg.match(/收到來自 (.+?) 的 Offer/);
+    const id = match ? match[1] : "?";
+    return tFunc("log_sig_rust_offer_received").replace("{0}", id);
+  }
+  // 17. Rust 信令：成功回傳 Answer
+  if (msg.includes("成功處理 Offer，正在回傳 Answer 至")) {
+    const match = msg.match(/回傳 Answer 至 (.+?)\.\.\./);
+    const id = match ? match[1] : "?";
+    return tFunc("log_sig_rust_offer_success").replace("{0}", id);
+  }
+  // 18. Rust 信令：拒絕連線
+  if (msg.includes("拒絕來自") && msg.includes("的連線：")) {
+    const match = msg.match(/拒絕來自 (.+?) 的連線：(.+)/);
+    const id = match ? match[1] : "?";
+    const reason = match ? match[2] : "";
+    return tFunc("log_sig_rust_offer_rejected").replace("{0}", id).replace("{1}", reason);
+  }
+  if (msg.includes("PIN 碼或固定密碼不符")) {
+    const match = msg.match(/來自 (.+?) 的連線/);
+    const id = match ? match[1] : "?";
+    return tFunc("log_sig_rust_offer_rejected").replace("{0}", id).replace("{1}", "PIN mismatch");
+  }
+  // 19. Rust 信令：ICE 候選收到
+  if (msg.includes("收到來自") && msg.includes("的 ICE Candidate，套用中")) {
+    const match = msg.match(/收到來自 (.+?) 的 ICE/);
+    const id = match ? match[1] : "?";
+    return tFunc("log_sig_rust_ice_received").replace("{0}", id);
+  }
+  // 20. Rust 信令：ICE 套用成功
+  if (msg.includes("已成功加入遠端 ICE Candidate")) {
+    return tFunc("log_sig_rust_ice_applied");
+  }
+  // 21. Rust 信令：ICE 套用失敗
+  if (msg.includes("套用 ICE Candidate 失敗:")) {
+    const val = msg.split("失敗:").slice(1).join("失敗:").trim();
+    return tFunc("log_sig_rust_ice_failed").replace("{0}", val);
+  }
+  // 22. Rust 信令：心跳超時
+  if (msg.includes("心跳接收超時") || msg.includes("主動判定斷線")) {
+    return tFunc("log_sig_rust_watchdog");
+  }
+  // 23. Rust 信令：自癒機制
+  if (msg.includes("自動重連自癒以更新路由")) {
+    return tFunc("log_sig_rust_selfheal");
+  }
+  // 24. Rust 信令：ICE 轉發
+  if (msg.includes("Rust 信令已發送本機 ICE Candidate 至")) {
+    const match = msg.match(/至 (.+)/);
+    const id = match ? match[1] : "?";
+    return tFunc("log_sig_rust_forward_candidate").replace("{0}", id);
+  }
+  // 25. Rust 收到 9 個 ICE Candidate（批次）
+  if (msg.includes("個 ICE Candidate，套用中")) {
+    const match = msg.match(/收到 (\d+) 個/);
+    const count = match ? match[1] : "?";
+    return tFunc("log_sig_rust_ice_received").replace("{0}", count + " candidates");
+  }
+  // 26. Gesture：單指長按
+  if (msg.includes("單指長按，觸發右鍵點擊與震動") || msg.includes("[Gesture] Long press")) {
+    return "[Gesture] " + tFunc("log_gesture_long_press");
+  }
+  // 27. Gesture：觸控被取消
+  if (msg.includes("觸控被取消，重置狀態，釋放滑鼠按鍵") || msg.includes("[Gesture] Touch cancelled")) {
+    return "[Gesture] " + tFunc("log_gesture_cancelled");
+  }
+  // 28. Input：失去焦點，發送 ResetState
+  if (msg.includes("失去焦點或切換分頁，發送 ResetState") || msg.includes("[Input] Focus lost")) {
+    return "[Input] " + tFunc("log_input_focus_lost");
+  }
+  // 29. Pointer Lock：鎖定
+  if (msg.includes("滑鼠指標已鎖定") || msg.includes("[Pointer Lock] Locked")) {
+    return "[Pointer Lock] " + tFunc("pointer_lock_tooltip");
+  }
+  // 30. Pointer Lock：解鎖
+  if (msg.includes("滑鼠指標已解鎖") || msg.includes("[Pointer Lock] Unlocked")) {
+    return "[Pointer Lock] " + tFunc("log_status_disconnected");
+  }
+  // 31. Signaling：手動重連
+  if (msg.includes("使用者手動觸發信令重連") || msg.includes("User manually triggered")) {
+    return "[Signaling] " + tFunc("log_sig_manual_reconnect");
+  }
+  // 32. Signaling：已連線，正在登入
+  if (msg.includes("已連線，正在登入") || msg.includes("Connected, logging in")) {
+    return "[Signaling] " + tFunc("log_sig_connected_logging_in");
+  }
+  // 33. Signaling：WebSocket 斷線重試
+  if (msg.includes("WebSocket 已斷線，5 秒後重新嘗試") || msg.includes("WebSocket disconnected, retrying")) {
+    return "[Signaling] " + tFunc("log_sig_disconnected_retry");
+  }
+  // 34. Signaling：連線錯誤
+  if (msg.includes("[Signaling] 連線錯誤:") || msg.includes("[Signaling] Connection error:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return "[Signaling] " + tFunc("log_sig_connection_error").replace("{0}", val);
+  }
+  // 35. Signaling：伺服器錯誤
+  if (msg.includes("[Signaling] 伺服器錯誤:") || msg.includes("[Signaling] Server error:")) {
+    const val = msg.split(":").slice(1).join(":").trim();
+    return "[Signaling] " + tFunc("log_sig_server_error").replace("{0}", val);
+  }
+  // 36. Signaling Rust：嘗試連線
+  if (msg.includes("[Rust] 嘗試連線至信令伺服器")) {
+    return tFunc("log_sig_rust_connecting");
+  }
+  // 37. Signaling Rust：已成功連線
+  if (msg.includes("[Rust] 已成功連線並登入信令伺服器")) {
+    return tFunc("log_sig_rust_connected");
+  }
+  // 38. Signaling Rust：斷線重試
+  if (msg.includes("[Rust] 與信令伺服器連線已斷開")) {
+    return tFunc("log_sig_rust_disconnected");
+  }
+  // 39. Signaling Rust：委託啟動
+  if (msg.includes("已成功委託 Rust 後端啟動信令客戶端")) {
+    return tFunc("log_sig_rust_start_success");
+  }
+  // 40. Signaling Rust：啟動失敗
+  if (msg.includes("啟動 Rust 信令失敗:")) {
+    const val = msg.split("失敗:").slice(1).join("失敗:").trim();
+    return tFunc("log_sig_rust_start_failed").replace("{0}", val);
+  }
+  // 41. Tauri 桌面環境偵測
+  if (msg.includes("偵測為 Tauri 桌面環境，註冊 Rust 後端信令維護")) {
+    return "[Signaling] " + tFunc("log_sig_tauri_rust_delegation");
+  }
+  // 42. 網頁控制端焦點重連
+  if (msg.includes("網頁控制端獲得焦點，且信令未連線，立即重建連線")) {
+    return "[Signaling] " + tFunc("log_sig_web_focus_reconnect");
+  }
+  // 43. 網頁控制端焦點 ping
+  if (msg.includes("網頁控制端獲得焦點，發送 ping 驗證連線")) {
+    return "[Signaling] " + tFunc("log_sig_web_focus_ping");
+  }
+  // 44. 網頁控制端頁面恢復可見
+  if (msg.includes("網頁控制端頁面恢復可見，且信令未連線，立即重建連線")) {
+    return "[Signaling] " + tFunc("log_sig_web_visible_reconnect");
+  }
+
+  return msg;
+}
+
 (function() {
   const originalLog = console.log;
   const originalWarn = console.warn;
@@ -44,248 +286,6 @@ function showToast(message: string, duration: number = 3000) {
       return `${a.name}: ${a.message}\n${a.stack}`;
     }
     return typeof a === 'object' ? JSON.stringify(a) : String(a);
-  }
-
-  function translateLogMessage(msg: string, tFunc: (key: string) => string): string {
-    const translateStatus = (status: string) => {
-      const clean = status.trim().toLowerCase();
-      const map: Record<string, string> = {
-        "connected": tFunc("log_status_connected"),
-        "disconnected": tFunc("log_status_disconnected"),
-        "checking": tFunc("log_status_checking"),
-        "completed": tFunc("log_status_completed"),
-        "completed.": tFunc("log_status_completed"),
-        "stable": tFunc("log_status_stable"),
-        "failed": tFunc("log_status_failed"),
-        "failed.": tFunc("log_status_failed"),
-        "connecting": tFunc("log_status_connecting"),
-        "gathering": tFunc("log_status_gathering"),
-        "checking.": tFunc("log_status_checking"),
-        "closed": tFunc("log_status_closed"),
-        "closed.": tFunc("log_status_closed"),
-        "new": tFunc("log_status_new"),
-        "video": tFunc("log_status_video"),
-        "audio": tFunc("log_status_audio")
-      };
-      return map[clean] || status;
-    };
-
-    // 1. WebRTC Track Event
-    if (msg.includes("[WebRTC] 收到遠端視訊軌道:") || msg.includes("[WebRTC] Received remote track:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return tFunc("log_webrtc_received_track").replace("{0}", translateStatus(val));
-    }
-    // 2. WebRTC ICE Connection State
-    if (msg.includes("[WebRTC] ICE Connection State:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return tFunc("log_webrtc_ice_state").replace("{0}", translateStatus(val));
-    }
-    // 3. WebRTC Connection State
-    if (msg.includes("[WebRTC] Connection State:") || msg.includes("[WebRTC] 連線狀態:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return tFunc("log_webrtc_conn_state").replace("{0}", translateStatus(val));
-    }
-    // 4. WebRTC ICE Gathering State
-    if (msg.includes("[WebRTC] ICE Gathering State:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return tFunc("log_webrtc_gather_state").replace("{0}", translateStatus(val));
-    }
-    // 5. WebRTC Signaling State
-    if (msg.includes("[WebRTC] Signaling State:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return tFunc("log_webrtc_sig_state").replace("{0}", translateStatus(val));
-    }
-    // 6. WebRTC Negotiation Needed
-    if (msg.includes("[WebRTC] Negotiation Needed") || msg.includes("[WebRTC] 需要協商")) {
-      return tFunc("log_webrtc_negotiation");
-    }
-    // 7. Video Playback Error
-    if (msg.includes("[WebRTC] 視訊播放失敗:") || msg.includes("[WebRTC] Video Playback Failed:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return tFunc("log_webrtc_play_failed").replace("{0}", val);
-    }
-    // 8. Rust Signaling State
-    if (msg.includes("[WebRTC-Rust] 狀態變更:") || msg.includes("[WebRTC-Rust] State Changed:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return tFunc("log_webrtc_rust_state").replace("{0}", val);
-    }
-    // 9. Host Video Capture Status
-    if (msg.includes("[WebRTC-Video] 影像處理發生問題:") || msg.includes("[WebRTC-Video] Video capture/encode error:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return tFunc("log_webrtc_video_error").replace("{0}", val);
-    }
-    // 10. Video Encoding Size
-    if (msg.includes("[Video] Encoded frame size:")) {
-      const match = msg.match(/Encoded frame size:\s*(\d+)/i);
-      if (match) {
-        return tFunc("log_video_encoded_frame").replace("{0}", match[1]);
-      }
-    }
-    // 11. Video Send Failed
-    if (msg.includes("[Video] 傳送視訊幀失敗:") || msg.includes("[Video] Failed to send frame:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return tFunc("log_video_send_failed").replace("{0}", val);
-    }
-    // 12. Video Send Timeout
-    if (msg.includes("[Video] 傳送視訊幀逾時 (網路擁塞)") || msg.includes("[Video] Frame transmission timed out")) {
-      return tFunc("log_video_send_timeout");
-    }
-    // 13. Input Simulation Error
-    if (msg.includes("[input-control] simulate failed:")) {
-      const val = msg.split("failed:").slice(1).join("failed:").trim();
-      return tFunc("log_input_simulate_failed").replace("{0}", val);
-    }
-    // 14. Input Security Packet Rejected
-    if (msg.includes("[security input-control] packet rejected:")) {
-      const val = msg.split("rejected:").slice(1).join("rejected:").trim();
-      return tFunc("log_input_rejected").replace("{0}", val);
-    }
-    // 15. Unreliable Input Simulation Error
-    if (msg.includes("[input-unreliable] simulate failed:")) {
-      const val = msg.split("failed:").slice(1).join("failed:").trim();
-      return tFunc("log_input_unreliable_failed").replace("{0}", val);
-    }
-
-    // 16. Rust 信令：連線請求收到
-    if (msg.includes("收到來自") && msg.includes("的 Offer，進行驗證")) {
-      const match = msg.match(/收到來自 (.+?) 的 Offer/);
-      const id = match ? match[1] : "?";
-      return tFunc("log_sig_rust_offer_received").replace("{0}", id);
-    }
-    // 17. Rust 信令：成功回傳 Answer
-    if (msg.includes("成功處理 Offer，正在回傳 Answer 至")) {
-      const match = msg.match(/回傳 Answer 至 (.+?)\.\.\./);
-      const id = match ? match[1] : "?";
-      return tFunc("log_sig_rust_offer_success").replace("{0}", id);
-    }
-    // 18. Rust 信令：拒絕連線
-    if (msg.includes("拒絕來自") && msg.includes("的連線：")) {
-      const match = msg.match(/拒絕來自 (.+?) 的連線：(.+)/);
-      const id = match ? match[1] : "?";
-      const reason = match ? match[2] : "";
-      return tFunc("log_sig_rust_offer_rejected").replace("{0}", id).replace("{1}", reason);
-    }
-    if (msg.includes("PIN 碼或固定密碼不符")) {
-      const match = msg.match(/來自 (.+?) 的連線/);
-      const id = match ? match[1] : "?";
-      return tFunc("log_sig_rust_offer_rejected").replace("{0}", id).replace("{1}", "PIN mismatch");
-    }
-    // 19. Rust 信令：ICE 候選收到
-    if (msg.includes("收到來自") && msg.includes("的 ICE Candidate，套用中")) {
-      const match = msg.match(/收到來自 (.+?) 的 ICE/);
-      const id = match ? match[1] : "?";
-      return tFunc("log_sig_rust_ice_received").replace("{0}", id);
-    }
-    // 20. Rust 信令：ICE 套用成功
-    if (msg.includes("已成功加入遠端 ICE Candidate")) {
-      return tFunc("log_sig_rust_ice_applied");
-    }
-    // 21. Rust 信令：ICE 套用失敗
-    if (msg.includes("套用 ICE Candidate 失敗:")) {
-      const val = msg.split("失敗:").slice(1).join("失敗:").trim();
-      return tFunc("log_sig_rust_ice_failed").replace("{0}", val);
-    }
-    // 22. Rust 信令：心跳超時
-    if (msg.includes("心跳接收超時") || msg.includes("主動判定斷線")) {
-      return tFunc("log_sig_rust_watchdog");
-    }
-    // 23. Rust 信令：自癒機制
-    if (msg.includes("自動重連自癒以更新路由")) {
-      return tFunc("log_sig_rust_selfheal");
-    }
-    // 24. Rust 信令：ICE 轉發
-    if (msg.includes("Rust 信令已發送本機 ICE Candidate 至")) {
-      const match = msg.match(/至 (.+)/);
-      const id = match ? match[1] : "?";
-      return tFunc("log_sig_rust_forward_candidate").replace("{0}", id);
-    }
-    // 25. Rust 收到 9 個 ICE Candidate（批次）
-    if (msg.includes("個 ICE Candidate，套用中")) {
-      const match = msg.match(/收到 (\d+) 個/);
-      const count = match ? match[1] : "?";
-      return tFunc("log_sig_rust_ice_received").replace("{0}", count + " candidates");
-    }
-    // 26. Gesture：單指長按
-    if (msg.includes("單指長按，觸發右鍵點擊與震動") || msg.includes("[Gesture] Long press")) {
-      return "[Gesture] " + tFunc("log_gesture_long_press");
-    }
-    // 27. Gesture：觸控被取消
-    if (msg.includes("觸控被取消，重置狀態，釋放滑鼠按鍵") || msg.includes("[Gesture] Touch cancelled")) {
-      return "[Gesture] " + tFunc("log_gesture_cancelled");
-    }
-    // 28. Input：失去焦點，發送 ResetState
-    if (msg.includes("失去焦點或切換分頁，發送 ResetState") || msg.includes("[Input] Focus lost")) {
-      return "[Input] " + tFunc("log_input_focus_lost");
-    }
-    // 29. Pointer Lock：鎖定
-    if (msg.includes("滑鼠指標已鎖定") || msg.includes("[Pointer Lock] Locked")) {
-      return "[Pointer Lock] " + tFunc("pointer_lock_tooltip");
-    }
-    // 30. Pointer Lock：解鎖
-    if (msg.includes("滑鼠指標已解鎖") || msg.includes("[Pointer Lock] Unlocked")) {
-      return "[Pointer Lock] " + tFunc("log_status_disconnected");
-    }
-    // 31. Signaling：手動重連
-    if (msg.includes("使用者手動觸發信令重連") || msg.includes("User manually triggered")) {
-      return "[Signaling] " + tFunc("log_sig_manual_reconnect");
-    }
-    // 32. Signaling：已連線，正在登入
-    if (msg.includes("已連線，正在登入") || msg.includes("Connected, logging in")) {
-      return "[Signaling] " + tFunc("log_sig_connected_logging_in");
-    }
-    // 33. Signaling：WebSocket 斷線重試
-    if (msg.includes("WebSocket 已斷線，5 秒後重新嘗試") || msg.includes("WebSocket disconnected, retrying")) {
-      return "[Signaling] " + tFunc("log_sig_disconnected_retry");
-    }
-    // 34. Signaling：連線錯誤
-    if (msg.includes("[Signaling] 連線錯誤:") || msg.includes("[Signaling] Connection error:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return "[Signaling] " + tFunc("log_sig_connection_error").replace("{0}", val);
-    }
-    // 35. Signaling：伺服器錯誤
-    if (msg.includes("[Signaling] 伺服器錯誤:") || msg.includes("[Signaling] Server error:")) {
-      const val = msg.split(":").slice(1).join(":").trim();
-      return "[Signaling] " + tFunc("log_sig_server_error").replace("{0}", val);
-    }
-    // 36. Signaling Rust：嘗試連線
-    if (msg.includes("[Rust] 嘗試連線至信令伺服器")) {
-      return tFunc("log_sig_rust_connecting");
-    }
-    // 37. Signaling Rust：已成功連線
-    if (msg.includes("[Rust] 已成功連線並登入信令伺服器")) {
-      return tFunc("log_sig_rust_connected");
-    }
-    // 38. Signaling Rust：斷線重試
-    if (msg.includes("[Rust] 與信令伺服器連線已斷開")) {
-      return tFunc("log_sig_rust_disconnected");
-    }
-    // 39. Signaling Rust：委託啟動
-    if (msg.includes("已成功委託 Rust 後端啟動信令客戶端")) {
-      return tFunc("log_sig_rust_start_success");
-    }
-    // 40. Signaling Rust：啟動失敗
-    if (msg.includes("啟動 Rust 信令失敗:")) {
-      const val = msg.split("失敗:").slice(1).join("失敗:").trim();
-      return tFunc("log_sig_rust_start_failed").replace("{0}", val);
-    }
-    // 41. Tauri 桌面環境偵測
-    if (msg.includes("偵測為 Tauri 桌面環境，註冊 Rust 後端信令維護")) {
-      return "[Signaling] " + tFunc("log_sig_tauri_rust_delegation");
-    }
-    // 42. 網頁控制端焦點重連
-    if (msg.includes("網頁控制端獲得焦點，且信令未連線，立即重建連線")) {
-      return "[Signaling] " + tFunc("log_sig_web_focus_reconnect");
-    }
-    // 43. 網頁控制端焦點 ping
-    if (msg.includes("網頁控制端獲得焦點，發送 ping 驗證連線")) {
-      return "[Signaling] " + tFunc("log_sig_web_focus_ping");
-    }
-    // 44. 網頁控制端頁面恢復可見
-    if (msg.includes("網頁控制端頁面恢復可見，且信令未連線，立即重建連線")) {
-      return "[Signaling] " + tFunc("log_sig_web_visible_reconnect");
-    }
-
-    return msg;
   }
 
   function appendLog(color: string, args: any[], isError = false) {
@@ -524,7 +524,7 @@ const fallbackTranslations: Record<string, string> = {
   "log_sig_rust_offer_received": "[Rust] Received offer from {0}, verifying...",
   "log_sig_rust_offer_success": "[Rust] Offer verified, Answer sent to {0}",
   "log_sig_rust_offer_rejected": "[Rust] Rejected offer from {0}: {1}",
-  "log_sig_rust_ice_received": "[Rust] Received ICE Candidate from {0}, applying...",,
+  "log_sig_rust_ice_received": "[Rust] Received ICE Candidate from {0}, applying...",
 
   // 頁面靜態文字
   "connect_title": "Establish Connection",
@@ -607,33 +607,7 @@ const fallbackTranslations: Record<string, string> = {
   "btn_original_size": "Original Size",
   "desc_web_client_info": "Web Client controller. The connection pipeline will be automatically evaluated. If P2P fails due to symmetric NAT or strict firewalls, please click \"🚀 Enable Relay Mode\".",
   "log_title_system_logs": "System Logs",
-  "log_status_connected": "Connected",
-  "log_status_disconnected": "Disconnected",
-  "log_status_checking": "Checking",
-  "log_status_completed": "Completed",
-  "log_status_stable": "Stable",
-  "log_status_failed": "Failed",
   "log_status_connecting": "Connecting",
-  "log_status_gathering": "Gathering",
-  "log_status_closed": "Closed",
-  "log_status_new": "New",
-  "log_status_video": "Video",
-  "log_status_audio": "Audio",
-  "log_webrtc_received_track": "[WebRTC] Received remote track: {0}",
-  "log_webrtc_ice_state": "[WebRTC] ICE Connection State: {0}",
-  "log_webrtc_conn_state": "[WebRTC] Connection State: {0}",
-  "log_webrtc_gather_state": "[WebRTC] ICE Gathering State: {0}",
-  "log_webrtc_sig_state": "[WebRTC] Signaling State: {0}",
-  "log_webrtc_negotiation": "[WebRTC] Negotiation Needed",
-  "log_webrtc_play_failed": "[WebRTC] Video Playback Failed: {0}",
-  "log_webrtc_rust_state": "[WebRTC-Rust] State Changed: {0}",
-  "log_webrtc_video_error": "[WebRTC-Video] Video capture/encode error: {0}",
-  "log_video_encoded_frame": "[Video] Encoded frame size: {0} bytes",
-  "log_video_send_failed": "[Video] Failed to send frame: {0}",
-  "log_video_send_timeout": "[Video] Frame transmission timed out (network congestion)",
-  "log_input_simulate_failed": "[input-control] simulate failed: {0}",
-  "log_input_rejected": "[security input-control] packet rejected: {0}",
-  "log_input_unreliable_failed": "[input-unreliable] simulate failed: {0}",
   "btn_diagnose_host": "Diagnose Host",
   "remote_logs_title": "Remote Host Diagnostic Logs",
   "remote_logs_help": "These are the real-time debug logs from the controlled host. If you see \"Screen capture failed\", it means the Mac host has Screen Recording permission checked but still rejected by OS. Please uncheck and recheck the permission, then restart the App.",
