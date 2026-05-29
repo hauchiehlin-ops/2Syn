@@ -5,8 +5,16 @@ import { listen } from "@tauri-apps/api/event";
 function isDesktopTauri(): boolean {
   if (!isTauri()) return false;
   const ua = navigator.userAgent.toLowerCase();
-  const isMobile = /iphone|ipad|ipod|android|ios/.test(ua);
-  return !isMobile;
+  
+  // 優先排除明確的行動端 UA 關鍵字
+  const isMobileUA = /iphone|ipad|ipod|android|ios/.test(ua);
+  if (isMobileUA) return false;
+  
+  // 防範 iPadOS / iOS 模擬 Mac 桌面網站 (觸控點大於 0 且支援 touch)
+  const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  if (isTouchDevice) return false;
+  
+  return true;
 }
 
 // --- Toast Notification System ---
