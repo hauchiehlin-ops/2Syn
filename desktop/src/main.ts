@@ -818,6 +818,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
             (videoEl as any).playoutDelayHint = 0;
           }
           videoEl.playsInline = true;
+          videoEl.muted = true; // 雙重保障：iOS 自動播放安全策略必須為靜音
           videoEl.disablePictureInPicture = true;
           
           try {
