@@ -29,7 +29,11 @@
         <button id="btn-video-retry-play" style="background: var(--accent-color, #3b82f6); border: none; color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Force Play</button>
         <button id="btn-video-diagnose" style="background: #10b981; border: none; color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Diagnose Host</button>
         <button id="btn-video-error-close" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Dismiss</button>
-      </div>
+    </div>
+    <!-- 行動端虛擬鍵盤本地組字預覽懸浮窗 -->
+    <div id="keyboard-preview-box" style="display: none; position: absolute; pointer-events: none; z-index: 130; padding: 6px 12px; border-radius: 8px; font-size: 14px; font-weight: 600; color: white; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 15px rgba(0,0,0,0.5); white-space: nowrap; transition: opacity 0.15s ease, transform 0.15s ease;">
+      <span style="font-size: 9px; opacity: 0.5; display: block; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Input Preview</span>
+      <span id="keyboard-preview-text"></span>
     </div>
   </div>
   <!-- 行動端磨砂玻璃懸浮控制面板 -->

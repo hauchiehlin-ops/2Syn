@@ -362,6 +362,18 @@ function applyVideoTransform() {
   video.style.transform = `translate(${videoTranslateX}px, ${finalY}px) scale(${videoScale})`;
 }
 
+function triggerHaptic(type: "light" | "medium" | "heavy") {
+  if (typeof navigator.vibrate === "function") {
+    if (type === "light") {
+      navigator.vibrate(15);
+    } else if (type === "medium") {
+      navigator.vibrate([15, 30, 15]);
+    } else if (type === "heavy") {
+      navigator.vibrate(35);
+    }
+  }
+}
+
 let iceCandidateQueue: RTCIceCandidateInit[] = [];
 let rustIceCandidateQueue: string[] = [];
 let isHostMode: boolean = false; // 標記目前是否為被控端
@@ -2543,6 +2555,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let touchStartPos = { x: 0, y: 0 };
 
   const sendDoubleClickSequence = () => {
+    triggerHaptic("medium");
     const payloadDown = new Uint8Array(1);
     payloadDown[0] = 1; // Left click down
     sendInputPacket(buildInputPacket(0x02, payloadDown));
@@ -2622,6 +2635,49 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
     momentumVx = 0;
     momentumVy = 0;
+  }
+
+  let scrollVx = 0;
+  let scrollVy = 0;
+  let lastScrollTimestamp = 0;
+  let scrollMomentumRafId: number | null = null;
+  const SCROLL_DECAY = 0.92;
+  const SCROLL_MIN_VELOCITY = 0.1;
+
+  function startScrollMomentum() {
+    if (scrollMomentumRafId !== null) return;
+    const loop = () => {
+      if (Math.abs(scrollVx) < SCROLL_MIN_VELOCITY && Math.abs(scrollVy) < SCROLL_MIN_VELOCITY) {
+        scrollMomentumRafId = null;
+        return;
+      }
+      
+      const dx = Math.round(scrollVx);
+      const dy = Math.round(scrollVy);
+      
+      if (dx !== 0 || dy !== 0) {
+        const payload = new Uint8Array(4);
+        const view = new DataView(payload.buffer);
+        view.setInt16(0, dx, false);
+        view.setInt16(2, dy, false);
+        sendInputPacket(buildInputPacket(0x04, payload));
+      }
+      
+      scrollVx *= SCROLL_DECAY;
+      scrollVy *= SCROLL_DECAY;
+      
+      scrollMomentumRafId = requestAnimationFrame(loop);
+    };
+    scrollMomentumRafId = requestAnimationFrame(loop);
+  }
+
+  function stopScrollMomentum() {
+    if (scrollMomentumRafId !== null) {
+      cancelAnimationFrame(scrollMomentumRafId);
+      scrollMomentumRafId = null;
+    }
+    scrollVx = 0;
+    scrollVy = 0;
   }
 
   function applyAcceleration(delta: number): number {
@@ -2956,6 +3012,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     e.preventDefault();
     maxTouches = Math.max(maxTouches, e.touches.length);
     stopMomentum();
+    stopScrollMomentum();
     
     if (e.touches.length === 2) {
       if (longPressTimer) {
@@ -3004,9 +3061,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         payloadUp[0] = 2; // Right click up
         sendInputPacket(buildInputPacket(0x03, payloadUp));
         
-        if (typeof navigator.vibrate === "function") {
-          navigator.vibrate(30);
-        }
+        triggerHaptic("heavy");
         console.log("[Gesture] 單指長按，觸發右鍵點擊與震動");
       }, 400);
       
@@ -3092,6 +3147,14 @@ function setupInputControl(videoEl: HTMLVideoElement) {
             view.setInt16(0, dx, false);
             view.setInt16(2, dy, false);
             sendInputPacket(buildInputPacket(0x04, payload));
+            
+            const now = performance.now();
+            const dt = now - lastScrollTimestamp;
+            if (dt > 0 && dt < 100) {
+              scrollVx = dx * (16 / dt);
+              scrollVy = dy * (16 / dt);
+            }
+            lastScrollTimestamp = now;
             
             lastTouchX += (dx / 1.5);
             lastTouchY += (dy / 1.5);
@@ -3234,11 +3297,13 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         
         console.log("[Gesture] 雙指輕點，觸發右鍵按下");
         
-        if (typeof navigator.vibrate === "function") {
-          navigator.vibrate(30);
-        }
+        triggerHaptic("heavy");
       }
       
+      if (!isLocalPinching && (Math.abs(scrollVx) > SCROLL_MIN_VELOCITY || Math.abs(scrollVy) > SCROLL_MIN_VELOCITY)) {
+        startScrollMomentum();
+      }
+
       // 重置雙指狀態，防範後續多重觸發
       maxTouches = 0;
       touchStartTime = 0;
@@ -3312,6 +3377,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
             const payloadDown = new Uint8Array(1);
             payloadDown[0] = 1;
             sendInputPacket(buildInputPacket(0x02, payloadDown));
+            triggerHaptic("light");
             setTimeout(() => {
               const payloadUp = new Uint8Array(1);
               payloadUp[0] = 1;
@@ -3344,6 +3410,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
                 const payloadDown = new Uint8Array(1);
                 payloadDown[0] = 1;
                 sendInputPacket(buildInputPacket(0x02, payloadDown));
+                triggerHaptic("light");
                 setTimeout(() => {
                   const payloadUp = new Uint8Array(1);
                   payloadUp[0] = 1;
@@ -3498,10 +3565,33 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
     hiddenInput.addEventListener("compositionstart", () => {
       isComposing = true;
+      const previewBox = document.getElementById("keyboard-preview-box");
+      if (previewBox) {
+        previewBox.style.display = "block";
+        const previewText = document.getElementById("keyboard-preview-text");
+        if (previewText) previewText.textContent = "";
+      }
+    });
+
+    hiddenInput.addEventListener("compositionupdate", (e: any) => {
+      const previewBox = document.getElementById("keyboard-preview-box");
+      const previewText = document.getElementById("keyboard-preview-text");
+      const container = document.getElementById("remote-video-container");
+      if (previewBox && previewText && container && e.data) {
+        previewText.textContent = e.data;
+        // 定位在全域游標百分比 Y 與 X 上方 55 像素，置中對齊
+        const posX = currentCursorPercentX * container.clientWidth;
+        const posY = currentCursorPercentY * container.clientHeight - 55;
+        previewBox.style.left = `${posX}px`;
+        previewBox.style.top = `${posY}px`;
+        previewBox.style.transform = "translateX(-50%)";
+      }
     });
 
     hiddenInput.addEventListener("compositionend", () => {
       isComposing = false;
+      const previewBox = document.getElementById("keyboard-preview-box");
+      if (previewBox) previewBox.style.display = "none";
       // 延遲以確保某些行動端瀏覽器在 compositionend 觸發時 value 已完全寫入
       setTimeout(() => {
         const val = hiddenInput.value;
