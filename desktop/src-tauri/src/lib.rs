@@ -433,13 +433,17 @@ async fn start_rust_signaling_task(
     });
     
     loop {
-        println!("[Rust Signaling] 嘗試連線到信令伺服器: {}", ws_url);
+        let connect_msg = format!("嘗試連線到信令伺服器: {}", ws_url);
+        println!("[Rust Signaling] {}", connect_msg);
+        let _ = app_handle.emit("rust-signaling-log", format!("[Rust] {}", connect_msg));
         let _ = app_handle.emit("rust-signaling-status", "connecting");
         
         let url_parsed = match url::Url::parse(ws_url) {
             Ok(u) => u,
             Err(e) => {
-                eprintln!("[Rust Signaling] URL 解析錯誤: {}", e);
+                let err_msg = format!("URL 解析錯誤: {}", e);
+                eprintln!("[Rust Signaling] {}", err_msg);
+                let _ = app_handle.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 continue;
             }
@@ -449,14 +453,19 @@ async fn start_rust_signaling_task(
         let (ws_stream, _) = match conn_res {
             Ok(val) => val,
             Err(e) => {
-                eprintln!("[Rust Signaling] 連線信令伺服器失敗: {}, 5 秒後重試", e);
+                let err_msg = format!("連線信令伺服器失敗: {}, 5 秒後重試", e);
+                eprintln!("[Rust Signaling] {}", err_msg);
+                let _ = app_handle.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
                 let _ = app_handle.emit("rust-signaling-status", "offline");
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 continue;
             }
         };
 
-        println!("[Rust Signaling] 已成功建立 WebSocket 連線，正在登入...");
+        let success_msg = "已成功建立 WebSocket 連線，正在登入...";
+        println!("[Rust Signaling] {}", success_msg);
+        let _ = app_handle.emit("rust-signaling-log", format!("[Rust] {}", success_msg));
+        
         let (mut ws_write, mut ws_read) = ws_stream.split();
         
         let login_msg = serde_json::json!({
@@ -464,25 +473,45 @@ async fn start_rust_signaling_task(
             "id": my_id
         });
         if let Err(e) = ws_write.send(WsMessage::Text(login_msg.to_string())).await {
-            eprintln!("[Rust Signaling] 發送登入封包失敗: {}", e);
+            let err_msg = format!("發送登入封包失敗: {}", e);
+            eprintln!("[Rust Signaling] {}", err_msg);
+            let _ = app_handle.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
             let _ = app_handle.emit("rust-signaling-status", "offline");
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             continue;
         }
         
         let _ = app_handle.emit("rust-signaling-status", "online");
-        println!("[Rust Signaling] 登入成功，ID: {}", my_id);
+        let login_ok_msg = format!("登入成功，ID: {}", my_id);
+        println!("[Rust Signaling] {}", login_ok_msg);
+        let _ = app_handle.emit("rust-signaling-log", format!("[Rust] {}", login_ok_msg));
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<WsMessage>(100);
         
         // 更新當前活躍的 WebSocket 傳送端
         *active_ws_sender.lock().await = Some(tx.clone());
+
+        // 建立最後讀取時間指標以防範半關閉假死
+        let last_read_time = Arc::new(tokio::sync::RwLock::new(std::time::Instant::now()));
+        let last_read_time_write = Arc::clone(&last_read_time);
+        let last_read_time_read = Arc::clone(&last_read_time);
         
+        let app_handle_write = app_handle.clone();
         let mut ws_write_task = tokio::spawn(async move {
-            let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
+            let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
             loop {
                 tokio::select! {
                     _ = heartbeat.tick() => {
+                        // 1. 檢查心跳超時 (防範 TCP 半關閉)
+                        let elapsed = last_read_time_read.read().await.elapsed();
+                        if elapsed > std::time::Duration::from_secs(35) {
+                            let err_msg = format!("心跳接收超時 ({} 秒未收到伺服器訊息)，主動判定斷線", elapsed.as_secs());
+                            eprintln!("[Rust Signaling] {}", err_msg);
+                            let _ = app_handle_write.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
+                            break;
+                        }
+                        
+                        // 2. 發送心跳 Ping
                         let ping_msg = serde_json::json!({ "type": "ping" });
                         if ws_write.send(WsMessage::Text(ping_msg.to_string())).await.is_err() {
                             break;
@@ -502,10 +531,15 @@ async fn start_rust_signaling_task(
         
         let mut ws_read_task = tokio::spawn(async move {
             while let Some(Ok(WsMessage::Text(text))) = ws_read.next().await {
+                // 更新最後讀取時間
+                *last_read_time_write.write().await = std::time::Instant::now();
+                
                 if let Ok(incoming) = serde_json::from_str::<IncomingMessage>(&text) {
                     match incoming {
                         IncomingMessage::Offer { source, pin, sdp } => {
-                            println!("[Rust Signaling] 收到來自 {} 的 Offer，進行驗證...", source);
+                            let msg = format!("收到來自 {} 的 Offer，進行驗證...", source);
+                            println!("[Rust Signaling] {}", msg);
+                            let _ = app_handle_clone.emit("rust-signaling-log", format!("[Rust] {}", msg));
                             let state = app_handle_clone.state::<AppState>();
                             
                             let current_pin_val = state.current_pin.read().await.clone();
@@ -515,7 +549,9 @@ async fn start_rust_signaling_task(
                             };
                             
                             if pin != current_pin_val && !is_static_valid {
-                                println!("[Rust Signaling] 拒絕來自 {} 的連線：PIN 碼或固定密碼不符", source);
+                                let reject_info = format!("拒絕來自 {} 的連線：PIN 碼或固定密碼不符", source);
+                                println!("[Rust Signaling] {}", reject_info);
+                                let _ = app_handle_clone.emit("rust-signaling-log", format!("[Rust Error] {}", reject_info));
                                 let reject_msg = serde_json::json!({
                                     "type": "error",
                                     "target": source,
@@ -529,7 +565,9 @@ async fn start_rust_signaling_task(
                             
                             match handle_remote_offer_as_host(app_handle_clone.clone(), sdp).await {
                                 Ok(answer_sdp) => {
-                                    println!("[Rust Signaling] 成功處理 Offer，正在回傳 Answer 至 {}...", source);
+                                    let ok_msg = format!("成功處理 Offer，正在回傳 Answer 至 {}...", source);
+                                    println!("[Rust Signaling] {}", ok_msg);
+                                    let _ = app_handle_clone.emit("rust-signaling-log", format!("[Rust] {}", ok_msg));
                                     let answer_msg = serde_json::json!({
                                         "type": "answer",
                                         "target": source,
@@ -538,7 +576,9 @@ async fn start_rust_signaling_task(
                                     let _ = tx_clone.send(WsMessage::Text(answer_msg.to_string())).await;
                                 }
                                 Err(e) => {
-                                    eprintln!("[Rust Signaling] 處理 Offer 失敗: {}", e);
+                                    let err_msg = format!("處理 Offer 失敗: {}", e);
+                                    eprintln!("[Rust Signaling] {}", err_msg);
+                                    let _ = app_handle_clone.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
                                     let reject_msg = serde_json::json!({
                                         "type": "error",
                                         "target": source,
@@ -550,13 +590,19 @@ async fn start_rust_signaling_task(
                         }
                         IncomingMessage::Ice { source, candidate } => {
                             let state = app_handle_clone.state::<AppState>();
-                            println!("[Rust Signaling] 收到來自 {} 的 ICE Candidate，套用中...", source);
+                            let msg = format!("收到來自 {} 的 ICE Candidate，套用中...", source);
+                            println!("[Rust Signaling] {}", msg);
+                            let _ = app_handle_clone.emit("rust-signaling-log", format!("[Rust] {}", msg));
                             if let Err(e) = apply_ice_candidate(&state, &candidate).await {
-                                eprintln!("[Rust Signaling] 套用 ICE Candidate 失敗: {}", e);
+                                let err_msg = format!("套用 ICE Candidate 失敗: {}", e);
+                                eprintln!("[Rust Signaling] {}", err_msg);
+                                let _ = app_handle_clone.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
                             }
                         }
                         IncomingMessage::Error { message } => {
-                            eprintln!("[Rust Signaling] 收到伺服器錯誤: {}", message);
+                            let err_msg = format!("收到伺服器錯誤: {}", message);
+                            eprintln!("[Rust Signaling] {}", err_msg);
+                            let _ = app_handle_clone.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
                         }
                     }
                 }
@@ -575,7 +621,9 @@ async fn start_rust_signaling_task(
         // 斷線後，清除當前活躍之 WebSocket 發送端
         *active_ws_sender.lock().await = None;
 
-        println!("[Rust Signaling] 信令連線已斷開，5 秒後重新連線...");
+        let disconnect_info = "信令連線已斷開，5 秒後重新連線...";
+        println!("[Rust Signaling] {}", disconnect_info);
+        let _ = app_handle.emit("rust-signaling-log", format!("[Rust Warn] {}", disconnect_info));
         let _ = app_handle.emit("rust-signaling-status", "offline");
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
@@ -598,6 +646,14 @@ async fn start_rust_signaling(
         start_rust_signaling_task(app_handle, my_id, rx).await;
     });
     
+    Ok(())
+}
+
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+async fn update_rust_pin(state: State<'_, AppState>, pin: String) -> Result<(), String> {
+    *state.current_pin.write().await = pin;
+    println!("[Rust] PIN 碼已同步更新");
     Ok(())
 }
 
@@ -864,6 +920,8 @@ pub fn run() {
             get_active_transfers,
             #[cfg(not(target_os = "ios"))]
             cancel_transfer,
+            #[cfg(not(target_os = "ios"))]
+            update_rust_pin,
             check_macos_permissions
         ])
         .run(tauri::generate_context!())

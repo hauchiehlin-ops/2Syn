@@ -326,6 +326,7 @@ function updateDomTranslations() {
   setTextContent("lbl-remote-id", t("remote_id"));
   setTextContent("lbl-access-pin", t("access_pin_label"));
   setTextContent("lbl-my-pin", t("my_pin_label"));
+  setTextContent("lbl-signaling-status", t("lbl_signaling_status"));
   setTextContent("lbl-my-id", t("my_id"));
   setTextContent("lbl-hwid", t("hwid"));
   setTextContent("lbl-license", t("license"));
@@ -510,6 +511,10 @@ function initAccessPin() {
       valPin.textContent = `${newPin.slice(0, 3)}-${newPin.slice(3)}`;
       (window as any).__localAccessPin = newPin;
       myPin = newPin; // 同步更新全域變數，確保連線驗證時使用的是最新 PIN
+      if (isDesktopTauri()) {
+        invoke("update_rust_pin", { pin: newPin })
+          .catch(err => console.error("Failed to update Rust pin:", err));
+      }
       btnRefresh.textContent = "✓";
       setTimeout(() => { btnRefresh.textContent = "🔄"; }, 1000);
     });
@@ -2848,9 +2853,34 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (isDesktopTauri()) {
     console.log("[Signaling] 偵測為 Tauri 桌面環境，註冊 Rust 後端信令維護...");
     
-    // 監聽來自 Rust 的信令連線狀態更新，並同步顯示到 logs 區塊
+    // 監聽來自 Rust 的信令連線日誌，自動透過 interceptor 顯示於系統日誌
+    listen<string>("rust-signaling-log", (event) => {
+      console.log(event.payload);
+    });
+
+    // 監聽來自 Rust 的信令連線狀態更新，並同步更新 UI 狀態燈號
     listen<string>("rust-signaling-status", (event) => {
       const status = event.payload;
+      const statusEl = document.getElementById("val-signaling-status");
+      if (statusEl) {
+        if (status === "connecting") {
+          statusEl.className = "status-badge status-trial";
+          statusEl.style.backgroundColor = "#fbbf24";
+          statusEl.style.color = "#ffffff";
+          statusEl.textContent = t("status_connecting") || "Connecting...";
+        } else if (status === "online") {
+          statusEl.className = "status-badge status-active";
+          statusEl.style.backgroundColor = "";
+          statusEl.style.color = "";
+          statusEl.textContent = t("status_online") || "Online";
+        } else {
+          statusEl.className = "status-badge status-inactive";
+          statusEl.style.backgroundColor = "";
+          statusEl.style.color = "";
+          statusEl.textContent = t("status_offline") || "Offline";
+        }
+      }
+      
       if (status === "connecting") {
         console.log("[Signaling] [Rust] 嘗試連線至信令伺服器...");
       } else if (status === "online") {
