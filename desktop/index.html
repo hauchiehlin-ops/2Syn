@@ -86,54 +86,57 @@
       
       <!-- 左側控制面板 -->
       <section class="control-panel glass-panel">
-        <h2 id="txt-connect-title">Establish Connection</h2>
-        
-        <div class="input-group">
-          <label for="remote-id-input">
-            <span id="lbl-remote-id">Remote Device ID</span>
-            <button class="btn-info" data-help="remote-id" type="button">ⓘ</button>
-          </label>
-          <div id="help-remote-id" class="help-block"></div>
-          <input type="text" id="remote-id-input" placeholder="Enter 9-digit Device ID" maxlength="11">
-        </div>
-
-        <div class="input-group">
-          <label for="access-pin-input">
-            <span id="lbl-access-pin">Access PIN</span>
-            <button class="btn-info" data-help="access-pin" type="button">ⓘ</button>
-          </label>
-          <div id="help-access-pin" class="help-block"></div>
-          <input type="password" id="access-pin-input" placeholder="Enter access PIN" autocomplete="off">
-        </div>
-
-        <button id="btn-connect" class="btn-primary">
-          <span id="txt-btn-connect">Connect</span>
-        </button>
-
-        <!-- 去中心化離線手動 SDP 連線 -->
-        <div class="offline-sdp-section">
-          <div class="toggle-row">
-            <span style="font-weight: 600; font-size: 13px; display: inline-flex; align-items: center;">
-              <span id="lbl-offline-mode">Offline Connection (SDP)</span>
-              <button class="btn-info" data-help="offline-sdp" type="button">ⓘ</button>
-            </span>
-            <label class="switch">
-              <input type="checkbox" id="chk-offline-sdp-mode">
-              <span class="slider round"></span>
+        <!-- 建立遠端連線 (僅主控端 Client 顯示) -->
+        <div id="client-connection-section">
+          <h2 id="txt-connect-title">Establish Connection</h2>
+          
+          <div class="input-group">
+            <label for="remote-id-input">
+              <span id="lbl-remote-id">Remote Device ID</span>
+              <button class="btn-info" data-help="remote-id" type="button">ⓘ</button>
             </label>
+            <div id="help-remote-id" class="help-block"></div>
+            <input type="text" id="remote-id-input" placeholder="Enter 9-digit Device ID" maxlength="11">
           </div>
-          <div id="help-offline-sdp" class="help-block"></div>
-          <div id="offline-sdp-panel" class="offline-panel-hidden" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px;">
-            <button id="btn-gen-local-sdp" class="btn-secondary">Generate & Copy Local SDP Offer</button>
-            <textarea id="txt-local-sdp" readonly placeholder="Local SDP will be generated here" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 6px; border-radius: 6px; height: 70px; resize: none;"></textarea>
-            
-            <label for="txt-remote-sdp" id="lbl-remote-sdp" style="font-size: 11px; color: var(--text-muted);">Enter Remote SDP Answer/Offer</label>
-            <textarea id="txt-remote-sdp" placeholder="Paste Remote SDP here" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 6px; border-radius: 6px; height: 70px; resize: none;"></textarea>
-            <button id="btn-apply-remote-sdp" class="btn-primary" style="padding: 8px;">Establish Connection</button>
-          </div>
-        </div>
 
-        <div class="separator"></div>
+          <div class="input-group">
+            <label for="access-pin-input">
+              <span id="lbl-access-pin">Access PIN</span>
+              <button class="btn-info" data-help="access-pin" type="button">ⓘ</button>
+            </label>
+            <div id="help-access-pin" class="help-block"></div>
+            <input type="password" id="access-pin-input" placeholder="Enter access PIN" autocomplete="off">
+          </div>
+
+          <button id="btn-connect" class="btn-primary">
+            <span id="txt-btn-connect">Connect</span>
+          </button>
+
+          <!-- 去中心化離線手動 SDP 連線 -->
+          <div class="offline-sdp-section">
+            <div class="toggle-row">
+              <span style="font-weight: 600; font-size: 13px; display: inline-flex; align-items: center;">
+                <span id="lbl-offline-mode">Offline Connection (SDP)</span>
+                <button class="btn-info" data-help="offline-sdp" type="button">ⓘ</button>
+              </span>
+              <label class="switch">
+                <input type="checkbox" id="chk-offline-sdp-mode">
+                <span class="slider round"></span>
+              </label>
+            </div>
+            <div id="help-offline-sdp" class="help-block"></div>
+            <div id="offline-sdp-panel" class="offline-panel-hidden" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px;">
+              <button id="btn-gen-local-sdp" class="btn-secondary">Generate & Copy Local SDP Offer</button>
+              <textarea id="txt-local-sdp" readonly placeholder="Local SDP will be generated here" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 6px; border-radius: 6px; height: 70px; resize: none;"></textarea>
+              
+              <label for="txt-remote-sdp" id="lbl-remote-sdp" style="font-size: 11px; color: var(--text-muted);">Enter Remote SDP Answer/Offer</label>
+              <textarea id="txt-remote-sdp" placeholder="Paste Remote SDP here" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 6px; border-radius: 6px; height: 70px; resize: none;"></textarea>
+              <button id="btn-apply-remote-sdp" class="btn-primary" style="padding: 8px;">Establish Connection</button>
+            </div>
+          </div>
+
+          <div class="separator"></div>
+        </div>
 
         <!-- 本機身分與授權 -->
         <div class="host-info" id="local-host-info-section">

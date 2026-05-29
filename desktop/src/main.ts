@@ -2777,16 +2777,25 @@ window.addEventListener("DOMContentLoaded", async () => {
   // 啟動狀態輪詢
   startStatusPolling();
 
-  // 若為純網頁環境，優化左側面板顯示，並常態開啟穿透提示按鈕
-  if (!isDesktopTauri()) {
+  // 依據 Host 與 Client 的產品定位，動態調整左側控制面板顯隱狀態
+  if (isDesktopTauri()) {
+    // Host 被控端 (Windows / macOS)：不需要「建立遠端連線」卡片與離線連線
+    const clientConnSection = document.getElementById("client-connection-section");
+    if (clientConnSection) {
+      clientConnSection.style.display = "none";
+    }
+  } else {
+    // Client 主控端 (iOS / Android / 純網頁)：不需要「本機資訊」、「固定密碼」與「買斷金鑰」
     const localHostInfo = document.getElementById("local-host-info-section");
     if (localHostInfo) {
       localHostInfo.style.display = "none";
+      // 隱藏其上方的 separator (若有)
       if (localHostInfo.previousElementSibling) {
         (localHostInfo.previousElementSibling as HTMLElement).style.display = "none";
       }
     }
 
+    // 優化主控端的網路體質診斷顯示，並常態開啟穿透提示按鈕
     const networkIndicator = document.getElementById("network-health-indicator");
     const networkText = document.getElementById("network-health-text");
     const networkDesc = document.getElementById("network-health-desc");
