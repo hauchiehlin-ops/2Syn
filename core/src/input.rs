@@ -131,7 +131,8 @@ impl InputEvent {
                 Ok(InputEvent::MouseRelativeMove { dx, dy })
             }
             0x08 => {
-                let text = String::from_utf8_lossy(data).into_owned();
+                if data.len() < 2 { return Err(CoreError::NetworkError("TextInput 封包長度不足".to_string())); }
+                let text = String::from_utf8_lossy(&data[1..]).into_owned();
                 Ok(InputEvent::TextInput { text })
             }
             0xFF => {

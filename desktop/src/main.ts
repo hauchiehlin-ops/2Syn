@@ -1769,6 +1769,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let currentCursorPercentY = 0.5;
   const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
   const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
+  const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
+  const hiddenInput = document.getElementById("hidden-keyboard-input") as HTMLTextAreaElement;
+  let isKeyboardActive = false;
+  let lastBackspaceTime = 0;
 
   if (btnDisplayMode) {
     btnDisplayMode.onclick = () => {
@@ -2262,6 +2266,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
     
     if (e.touches.length === 0) {
+      if (isKeyboardActive && hiddenInput && document.activeElement !== hiddenInput) {
+        setTimeout(() => {
+          hiddenInput.focus();
+        }, 50);
+      }
       // 抬起手指時，立刻重置邊緣平移
       currentCursorPercentX = 0.5;
       currentCursorPercentY = 0.5;
@@ -2408,6 +2417,90 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     payload[2] = modifiers;
     
     sendInputPacket(buildInputPacket(0x05, payload)); 
+  });
+
+  // --- 行動端虛擬鍵盤事件監聽與防失焦機制 ---
+  const sendKeyStroke = (keyCode: number) => {
+    const payload = new Uint8Array(3);
+    const view = new DataView(payload.buffer);
+    view.setUint16(0, keyCode, false);
+    payload[2] = 0; // modifiers = 0
+    
+    // 依序發送 KeyDown (0x05) 與 KeyUp (0x06)，防範被控端按鍵卡死
+    sendInputPacket(buildInputPacket(0x05, payload));
+    sendInputPacket(buildInputPacket(0x06, payload));
+  };
+
+  const handleBackspace = () => {
+    const now = Date.now();
+    if (now - lastBackspaceTime > 100) {
+      lastBackspaceTime = now;
+      sendKeyStroke(8);
+    }
+    if (hiddenInput) {
+      hiddenInput.value = "";
+    }
+  };
+
+  const handleEnter = () => {
+    sendKeyStroke(13);
+    if (hiddenInput) {
+      hiddenInput.value = "";
+    }
+  };
+
+  if (btnKeyboard && hiddenInput) {
+    btnKeyboard.addEventListener("click", (e) => {
+      e.stopPropagation();
+      isKeyboardActive = true;
+      hiddenInput.focus();
+    });
+
+    hiddenInput.addEventListener("blur", () => {
+      isKeyboardActive = false;
+    });
+
+    hiddenInput.addEventListener("keydown", (e) => {
+      if (e.key === "Backspace" || e.keyCode === 8) {
+        e.preventDefault();
+        handleBackspace();
+      } else if (e.key === "Enter" || e.keyCode === 13) {
+        e.preventDefault();
+        handleEnter();
+      }
+    });
+
+    hiddenInput.addEventListener("input", (e: Event) => {
+      const inputType = (e as any).inputType;
+
+      if (inputType === "deleteContentBackward") {
+        handleBackspace();
+        return;
+      }
+
+      if (inputType === "insertLineBreak") {
+        handleEnter();
+        return;
+      }
+
+      const val = hiddenInput.value;
+      if (val.length > 0) {
+        // 使用 TextEncoder 轉為 UTF-8 位元組，並以 TextInput (0x08) 封包傳送
+        const encoder = new TextEncoder();
+        const payload = encoder.encode(val);
+        sendInputPacket(buildInputPacket(0x08, payload));
+        hiddenInput.value = "";
+      }
+    });
+  }
+
+  // 點擊視訊畫面時的防失焦重新 Focus 處理
+  videoEl.addEventListener("click", () => {
+    if (isKeyboardActive && hiddenInput && document.activeElement !== hiddenInput) {
+      setTimeout(() => {
+        hiddenInput.focus();
+      }, 50);
+    }
   });
 
   // 監聽失去焦點與頁面隱藏事件，清空 Host 卡死按鍵
