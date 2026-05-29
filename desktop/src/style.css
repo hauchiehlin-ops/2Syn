@@ -1000,3 +1000,10 @@ input:checked + .slider:before {
 #btn-mobile-keyboard {
   animation: keyboard-pulse 2s infinite;
 }
+
+/* WebRTC Video GPU Accelerated Composing Layer */
+#remote-video {
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+}

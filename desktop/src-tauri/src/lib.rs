@@ -30,6 +30,8 @@ struct AppState {
     current_remote_id: Arc<tokio::sync::RwLock<String>>,
     #[cfg(not(target_os = "ios"))]
     signaling_abort: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    #[cfg(not(target_os = "ios"))]
+    has_active_webrtc: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// 獲取本機硬體特徵碼（HWID）的 Tauri Command
@@ -297,7 +299,15 @@ async fn handle_remote_offer_as_host(app_handle: tauri::AppHandle, offer_sdp: St
     let app_clone2 = app_handle.clone();
     pc.on_peer_connection_state_change(Box::new(move |state: webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState| {
         let _ = app_clone2.emit("rust-webrtc-state", state.to_string());
-        Box::pin(async {})
+        let state_val = state;
+        let app = app_clone2.clone();
+        Box::pin(async move {
+            use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
+            let active = matches!(state_val, RTCPeerConnectionState::Connected | RTCPeerConnectionState::Connecting);
+            let app_state = app.state::<AppState>();
+            app_state.has_active_webrtc.store(active, std::sync::atomic::Ordering::SeqCst);
+            println!("WebRTC 狀態變更: {:?}, 是否活躍: {}", state_val, active);
+        })
     }));
 
     // 處理 DataChannel 接收事件，將序列號追蹤分為可靠與不可靠通道
@@ -398,6 +408,9 @@ enum IncomingMessage {
 
 #[cfg(not(target_os = "ios"))]
 async fn apply_ice_candidate(state: &AppState, candidate_str: &str) -> Result<(), String> {
+    if candidate_str.is_empty() || candidate_str == "null" {
+        return Ok(());
+    }
     use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
     let pc_opt = state.active_pc.lock().await.clone();
     if let Some(pc) = pc_opt {
@@ -510,16 +523,32 @@ async fn start_rust_signaling_task(
         // 1. 獨立的看門狗任務 (Watchdog) 用於偵測心跳接收超時，即使發送端卡死也絕不受影響
         let app_handle_timeout = app_handle.clone();
         let last_read_time_timeout = Arc::clone(&last_read_time);
+        let start_time = std::time::Instant::now();
         let mut timeout_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
                 interval.tick().await;
+                
+                // A. 心跳超時檢測
                 let elapsed = last_read_time_timeout.read().await.elapsed();
                 if elapsed > std::time::Duration::from_secs(35) {
                     let err_msg = format!("心跳接收超時 ({} 秒未收到伺服器訊息)，主動判定斷線", elapsed.as_secs());
                     eprintln!("[Rust Signaling] {}", err_msg);
                     let _ = app_handle_timeout.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
                     break;
+                }
+                
+                // B. 每 10 分鐘無活動 WebRTC 連線時，自動斷開重新建立信令以刷新負載均衡路由
+                let conn_duration = start_time.elapsed();
+                if conn_duration > std::time::Duration::from_secs(600) {
+                    let app_state = app_handle_timeout.state::<AppState>();
+                    let has_active = app_state.has_active_webrtc.load(std::sync::atomic::Ordering::SeqCst);
+                    if !has_active {
+                        let self_healing_msg = format!("信令連線已達 {} 秒且無活動控制連線，執行自動重連自癒以更新路由", conn_duration.as_secs());
+                        println!("[Rust Signaling] {}", self_healing_msg);
+                        let _ = app_handle_timeout.emit("rust-signaling-log", format!("[Rust Warn] {}", self_healing_msg));
+                        break;
+                    }
                 }
             }
         });
@@ -621,6 +650,10 @@ async fn start_rust_signaling_task(
                             let err_msg = format!("收到伺服器錯誤: {}", message);
                             eprintln!("[Rust Signaling] {}", err_msg);
                             let _ = app_handle_clone.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
+                            if message.contains("shutting down") {
+                                println!("[Rust Signaling] 偵測到伺服器優雅退出通知，主動斷開以觸發重連");
+                                break;
+                            }
                         }
                         IncomingMessage::Pong => {
                             // 收到心跳回覆，只為更新最後讀取時間，無須額外動作
@@ -921,6 +954,8 @@ pub fn run() {
             current_remote_id: Arc::new(tokio::sync::RwLock::new(String::new())),
             #[cfg(not(target_os = "ios"))]
             signaling_abort: tokio::sync::Mutex::new(None),
+            #[cfg(not(target_os = "ios"))]
+            has_active_webrtc: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
         .setup(|app| {
             #[cfg(not(target_os = "ios"))]

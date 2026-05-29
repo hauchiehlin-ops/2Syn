@@ -103,6 +103,8 @@ let dataChannelFile: RTCDataChannel | null = null;
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
 let myId: string = "";                        // 本機 9 位數 ID
 let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
+let currentCursorPercentX = 0.5;               // 全域游標百分比 X（用於避讓對焦）
+let currentCursorPercentY = 0.5;               // 全域游標百分比 Y（用於避讓對焦）
 
 // 取得信令伺服器 WebSocket URL（優先環境變數，備用本地，支援 LAN 測試）
 // 官方中心化信令伺服器位址 (未來上架部署於雲端的主機)
@@ -225,7 +227,28 @@ const fallbackTranslations: Record<string, string> = {
   "err_rejected": "Connection rejected: PIN verification failed or remote host denied access.",
   "err_signaling_offline": "Failed to connect to the signaling server. Please check your internet connection.",
   "err_invalid_remote_id": "Please enter a valid 9-digit Device ID.",
-  "err_invalid_pin": "Please enter the target access PIN."
+  "err_invalid_pin": "Please enter the target access PIN.",
+  "pointer_lock_tooltip": "Pointer locked. Press ESC to exit.",
+  "btn_fix_network": "🚀 Enable Relay Mode",
+  "alert_input_static_password": "Please enter the static password!",
+  "toast_static_password_success": "Static password set successfully!",
+  "alert_set_static_password_fail": "Failed to set static password: ",
+  "alert_connect_failed": "Failed to establish connection: ",
+  "alert_handle_remote_offer_failed": "Error handling remote connection request: ",
+  "conn_connecting": "Connecting...",
+  "conn_connected": "Connected (P2P)",
+  "conn_disconnected": "Disconnected",
+  "conn_failed": "Connection Failed",
+  "conn_closed": "Closed",
+  "txt_tailscale_alert": "Due to restricted network conditions (no public IP or strict NAT), it is highly recommended to install Tailscale on both machines. Under Tailscale, you can establish direct high-speed P2P connections bypass most firewalls! Once installed, this light will automatically turn green.",
+  "desc_tailscale_detected": "Tailscale interface detected. You now have 100% traversal rate through cellular and CGNAT networks for ultra-stable, high-speed connections.",
+  "desc_ipv6_detected": "IPv6 network detected, allowing successful direct P2P connection in most cases. However, strict IPv4-only mobile connections may fall back to relay. Tailscale is recommended for the best experience.",
+  "desc_nat_warning": "Your network lacks IPv6 and is behind multiple NAT layers. The probability of building a direct P2P connection is very low, which may lead to high latency. We highly recommend installing Tailscale.",
+  "alert_answer_generated": "Answer SDP has been generated and copied to your clipboard. Please send it to the remote party.",
+  "alert_web_diag_unsupported": "Connectivity diagnostics are not supported in Web Client mode.",
+  "btn_scale_to_fit": "Scale to Fit",
+  "btn_original_size": "Original Size",
+  "desc_web_client_info": "Web Client controller. The connection pipeline will be automatically evaluated. If P2P fails due to symmetric NAT or strict firewalls, please click \"🚀 Enable Relay Mode\"."
 };
 
 // 統一翻譯取值函數
@@ -432,6 +455,10 @@ function updateDomTranslations() {
       badge.textContent = t("status_inactive");
     }
   }
+  
+  // 新增：Pointer Lock Tooltip 與穿透模式按鈕
+  setTextContent("pointer-lock-tooltip", t("pointer_lock_tooltip"));
+  setTextContent("btn-fix-network", t("btn_fix_network"));
 }
 
 function setTextContent(id: string, text: string) {
@@ -573,7 +600,7 @@ async function initStaticPassword() {
     btnSetPwd.addEventListener("click", async () => {
       const pwd = inputPwd.value.trim();
       if (!pwd) {
-        alert("請輸入固定密碼！");
+        alert(t("alert_input_static_password"));
         return;
       }
       try {
@@ -583,9 +610,9 @@ async function initStaticPassword() {
           statusSpan.textContent = "Status: Set";
           statusSpan.style.color = "var(--success-color, #2ecc71)";
         }
-        showToast("固定密碼設定成功！");
+        showToast(t("toast_static_password_success"));
       } catch (e) {
-        alert("設定固定密碼失敗：" + e);
+        alert(t("alert_set_static_password_fail") + e);
       }
     });
   }
@@ -648,7 +675,7 @@ function initSignalingClient() {
         break;
       case "ice":
         // 收到遠端 ICE Candidate
-        if (msg.candidate !== undefined) {
+        if (msg.candidate !== undefined && msg.candidate !== null && msg.candidate !== "null" && msg.candidate !== "") {
           if (peerConnection) {
             // 發起端 (Client) JS WebRTC 處理
             if (peerConnection.remoteDescription) {
@@ -664,10 +691,6 @@ function initSignalingClient() {
             }
           } else {
             // 被控端 (Host) Rust WebRTC 處理
-            if (msg.candidate === "null" || msg.candidate === "") {
-              // 忽略 ICE 結束信號，避免 Rust 解析失敗
-              break;
-            }
             if (!rustOfferProcessed) {
               rustIceCandidateQueue.push(msg.candidate);
             } else {
@@ -683,25 +706,25 @@ function initSignalingClient() {
       case "error":
         console.error("[Signaling] 伺服器錯誤:", msg.message);
         if (msg.message === "Target offline") {
-          const offlineMsg = t("err_target_offline") || "對方不在線上，請確認設備 ID 是否正確。";
+          const offlineMsg = t("err_target_offline");
           const btnConnect = document.getElementById("btn-connect");
           if (btnConnect) {
             btnConnect.textContent = offlineMsg;
             btnConnect.style.backgroundColor = "#e74c3c";
             setTimeout(() => {
-              btnConnect.textContent = t("btn_connect") || "開始連線";
+              btnConnect.textContent = t("btn_connect");
               btnConnect.style.backgroundColor = "";
             }, 3000);
           }
           resetConnectionUI();
         } else if (msg.message.includes("Connection rejected")) {
-          const rejectMsg = t("err_rejected") || "連線被拒絕：PIN 碼錯誤或對方拒絕連線。";
+          const rejectMsg = t("err_rejected");
           const btnConnect = document.getElementById("btn-connect");
           if (btnConnect) {
             btnConnect.textContent = rejectMsg;
             btnConnect.style.backgroundColor = "#e74c3c";
             setTimeout(() => {
-              btnConnect.textContent = t("btn_connect") || "開始連線";
+              btnConnect.textContent = t("btn_connect");
               btnConnect.style.backgroundColor = "";
             }, 3000);
           }
@@ -857,7 +880,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
 // 主動端：建立 Data Channels 並發起 Offer
 async function startCall(remoteId: string, pin: string) {
   if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
-    alert(t("err_signaling_offline") || "無法連線到信令伺服器，請確認 2syn 服務正在執行。");
+    alert(t("err_signaling_offline"));
     resetConnectionUI();
     return;
   }
@@ -899,7 +922,7 @@ async function startCall(remoteId: string, pin: string) {
     }));
   } catch (e) {
     console.error("[WebRTC] startCall 嚴重錯誤:", e);
-    alert("建立連線失敗：" + String(e));
+    alert(t("alert_connect_failed") + String(e));
     resetConnectionUI();
   }
 
@@ -986,7 +1009,7 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
     }
   } catch (e) {
     console.error("[WebRTC] handle_remote_offer_as_host 發生嚴重錯誤:", e);
-    alert("處理遠端連線要求時發生錯誤：" + String(e));
+    alert(t("alert_handle_remote_offer_failed") + String(e));
   }
 }
 
@@ -1082,11 +1105,11 @@ function resetConnectionUI() {
 // 依照 WebRTC connectionState 更新 UI 提示
 function updateConnectionStatusUI(state: string) {
   const statusMap: Record<string, string> = {
-    connecting: t("conn_connecting") || "連線中...",
-    connected:  t("conn_connected")  || "已連線 (P2P)",
-    disconnected: t("conn_disconnected") || "已中斷",
-    failed:     t("conn_failed")     || "連線失敗",
-    closed:     t("conn_closed")     || "已關閉",
+    connecting: t("conn_connecting"),
+    connected:  t("conn_connected"),
+    disconnected: t("conn_disconnected"),
+    failed:     t("conn_failed"),
+    closed:     t("conn_closed"),
   };
 
   const label = statusMap[state];
@@ -1103,7 +1126,7 @@ function updateConnectionStatusUI(state: string) {
     }
   }
   if (state === "failed") {
-    alert(t("err_rtc_failed") || "P2P 連線失敗。\n\n若因網路環境受限（例如雙方均無公網 IP、或是行動網路 NAT 過於嚴格），請查看下方的「網路體質與穿透狀態」面板，並點擊【🚀 啟用穿透模式】即可無縫切換為中繼連線。");
+    alert(t("err_rtc_failed"));
     const fixBtn = document.getElementById("btn-fix-network");
     if (fixBtn && fixBtn.style.display !== "none") {
         fixBtn.classList.add("pulse-highlight");
@@ -1127,7 +1150,7 @@ function initConnectButton() {
   if (btnFixNetwork) {
     btnFixNetwork.addEventListener('click', () => {
       window.open('https://tailscale.com/download', '_blank');
-      alert(t("txt-tailscale-alert") || '由於您的網路環境受限（無公網 IP 或嚴格 NAT），建議您與遠端主機雙方皆下載並安裝 Tailscale。\n\n登入後即可獲得無限距的高速穿透能力！安裝完成後，此燈號會自動轉為綠色。');
+      alert(t("txt_tailscale_alert"));
     });
   }
 
@@ -1151,19 +1174,19 @@ function initConnectButton() {
           networkIndicator.style.backgroundColor = 'var(--success-color, #10b981)';
           networkText.textContent = 'Excellent (P2P Ready)';
           networkText.style.color = 'var(--success-color, #10b981)';
-          networkDesc.textContent = '已偵測到 Tailscale 虛擬網卡，您現在擁有 100% 的行動網路與 CGNAT 穿透率，連線將極度穩定且高速。';
+          networkDesc.textContent = t("desc_tailscale_detected");
           btnFixNetwork.style.display = 'none';
         } else if (res.has_ipv6) {
           networkIndicator.style.backgroundColor = '#fbbf24'; // Warning color (yellow)
           networkText.textContent = 'Good (IPv6 Available)';
           networkText.style.color = '#fbbf24';
-          networkDesc.textContent = '已偵測到 IPv6 網路，大部份情況下能成功穿透。但若遇到純 IPv4 的嚴格行動網路，可能會降級為中繼模式。建議安裝 Tailscale 以獲取最佳體驗。';
+          networkDesc.textContent = t("desc_ipv6_detected");
           btnFixNetwork.style.display = 'inline-block';
         } else {
           networkIndicator.style.backgroundColor = '#ef4444'; // Error color (red)
           networkText.textContent = 'Poor (CGNAT / IPv4 Only)';
           networkText.style.color = '#ef4444';
-          networkDesc.textContent = '您的網路環境缺乏 IPv6，且位於多重 NAT 之後。極高機率無法建立 P2P 直連，將導致畫面嚴重延遲。強烈建議立即安裝穿透工具！';
+          networkDesc.textContent = t("desc_nat_warning");
           btnFixNetwork.style.display = 'inline-block';
         }
       } catch (e) {
@@ -1198,17 +1221,17 @@ function initConnectButton() {
     const pin = accessPinInput.value.trim().replace(/-/g, "");
 
     if (!remoteId || remoteId.length !== 9) {
-      alert(t("err_invalid_remote_id") || "請輸入有效的 9 位數設備 ID。");
+      alert(t("err_invalid_remote_id"));
       return;
     }
     if (!pin || pin.length < 4) {
-      alert(t("err_invalid_pin") || "請輸入對方的存取 PIN 碼。");
+      alert(t("err_invalid_pin"));
       return;
     }
 
     btnConnect.setAttribute("disabled", "true");
     const btnText = document.getElementById("txt-btn-connect");
-    if (btnText) btnText.textContent = t("connecting") || "Connecting...";
+    if (btnText) btnText.textContent = t("conn_connecting");
 
     console.log(`[Frontend] 發起 WebRTC 連線至 ${remoteId} (PIN: ${pin})`);
     // 真正的 WebRTC 連線發起
@@ -1269,7 +1292,7 @@ async function initLicenseVerification() {
     btnVerify.addEventListener("click", async () => {
       const key = licenseInput.value.trim();
       if (!key) {
-        alert(t("err_license_empty") || "請輸入授權金鑰");
+        alert(t("err_license_empty"));
         return;
       }
 
@@ -1495,9 +1518,8 @@ function initOfflineSdpMode() {
       }
       try {
         if (peerConnection && peerConnection.localDescription?.type === "offer") {
-          // 主動端：套用遠端 Answer
           await peerConnection.setRemoteDescription({ type: "answer", sdp: remoteSdpText });
-          alert(t("alert_sdp_applied") || "SDP Answer 已套用！ICE 協商中...");
+          alert(t("alert_sdp_applied"));
         } else {
           // 被動端：套用遠端 Offer，自動產生並顯示 Answer
           const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
@@ -1510,7 +1532,7 @@ function initOfflineSdpMode() {
               txtLocal.value = answerSdp;
               txtLocal.select();
               navigator.clipboard.writeText(answerSdp).catch(() => {});
-              alert(t("alert_answer_generated") || "Answer SDP 已產生並複製到剪貼板，請傳送給對方。");
+              alert(t("alert_answer_generated"));
             }
           };
           pc.onconnectionstatechange = () => updateConnectionStatusUI(pc.connectionState);
@@ -1544,7 +1566,7 @@ function initSystemDiagnostic() {
       if (natVal) natVal.textContent = t("diag_status_checking");
       
       if (!isDesktopTauri()) {
-        alert("Web 模式下不支援連線診斷功能");
+        alert(t("alert_web_diag_unsupported"));
         return;
       }
       
@@ -1816,8 +1838,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   // --- 邊緣平移與顯示模式狀態 ---
   let isOriginalSize = false;
   let panRafId: number | null = null;
-  let currentCursorPercentX = 0.5;
-  let currentCursorPercentY = 0.5;
+  currentCursorPercentX = 0.5;
+  currentCursorPercentY = 0.5;
   const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
   const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
   const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
@@ -1830,14 +1852,14 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     btnDisplayMode.onclick = () => {
       isOriginalSize = !isOriginalSize;
       if (isOriginalSize) {
-        btnDisplayMode.textContent = "🔍 適應視窗 (Scale to Fit)";
+        btnDisplayMode.textContent = "🔍 " + t("btn_scale_to_fit");
         videoEl.style.objectFit = "none";
         // 將視訊大小強制設定為真實解析度
         videoEl.style.width = videoEl.videoWidth + "px";
         videoEl.style.height = videoEl.videoHeight + "px";
         videoContainer.style.overflow = "hidden";
       } else {
-        btnDisplayMode.textContent = "🔍 原始大小 (Original Size)";
+        btnDisplayMode.textContent = "🔍 " + t("btn_original_size");
         videoEl.style.objectFit = "contain";
         videoEl.style.width = "100%";
         videoEl.style.height = "100%";
@@ -2808,6 +2830,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initClipboardCopy();
   initSmartAutoMode();
   initFileTransfer();
+  initVisualViewportListener();
   
   // 啟動狀態輪詢
   startStatusPolling();
@@ -2838,7 +2861,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       networkText.style.color = "var(--success-color, #10b981)";
     }
     if (networkDesc) {
-      networkDesc.textContent = "純網頁控制端。連線建立時將會自動評估最佳傳輸管線。若因雙方處於嚴格 NAT 或防火牆後導致連線失敗，請點擊【🚀 啟用穿透模式】。";
+      networkDesc.textContent = t("desc_web_client_info");
     }
     if (btnFixNetwork) {
       btnFixNetwork.style.display = "inline-block";
@@ -2925,3 +2948,39 @@ window.addEventListener("DOMContentLoaded", async () => {
     initSignalingClient();
   }
 });
+
+// 初始化行動端虛擬鍵盤拉起時的 Visual Viewport 避讓與對焦自適應
+function initVisualViewportListener() {
+  const container = document.getElementById("remote-video-container");
+  const video = document.getElementById("remote-video") as HTMLVideoElement;
+  if (!container || !video || !window.visualViewport) return;
+
+  const handleViewportChange = () => {
+    // 只有在連線成功、視訊 container 顯示時才進行自適應避讓
+    if (container.style.display === "none") return;
+
+    const vv = window.visualViewport!;
+    // 1. 動態將 container 大小調整為視覺視埠大小，避開軟體鍵盤
+    container.style.width = `${vv.width}px`;
+    container.style.height = `${vv.height}px`;
+    container.style.top = `${vv.offsetTop}px`;
+    container.style.left = `${vv.offsetLeft}px`;
+
+    // 2. 如果鍵盤彈出 (視覺視埠高度明顯縮小，小於 innerHeight 的 85%)
+    const isKeyboardUp = vv.height < window.innerHeight * 0.85;
+    if (isKeyboardUp) {
+      // 讀取全域游標位置。若游標位於畫面下半部，主動將視訊畫面往上平移，防止輸入框被遮擋
+      if (currentCursorPercentY > 0.45) {
+        const offsetPercent = (currentCursorPercentY - 0.4) * 100; // 計算偏移行程百分比
+        // 套用 CSS transform translate 平移視訊畫面
+        video.style.transform = `translate3d(0px, -${offsetPercent}%, 0px)`;
+      }
+    } else {
+      // 鍵盤收起，恢復預設 transform
+      video.style.transform = "";
+    }
+  };
+
+  window.visualViewport.addEventListener("resize", handleViewportChange);
+  window.visualViewport.addEventListener("scroll", handleViewportChange);
+}

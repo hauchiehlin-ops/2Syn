@@ -91,6 +91,45 @@ struct DeactivateResponse {
     message: String,
 }
 
+async fn shutdown_signal(state: Arc<ServerState>) {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    println!("接收到關機訊號，正在向用戶端發送通知...");
+
+    let clients = state.clients.read().await;
+    let msg = ServerMessage::Error {
+        message: "Server shutting down...".to_string(),
+    };
+    let msg_str = serde_json::to_string(&msg).unwrap();
+    for (_id, tx) in clients.iter() {
+        let _ = tx.send(Message::Text(msg_str.clone())).await;
+    }
+
+    // 等待 2 秒以便消息發送出去
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    println!("優雅關機通知已發送，關閉伺服器。");
+}
+
 #[tokio::main]
 async fn main() {
     // 只顯示 INFO 以上層級，避免 tungstenite TRACE log 淹沒其他訊息
@@ -118,7 +157,7 @@ async fn main() {
         .route("/ws", get(ws_handler))
         .route("/activate", post(activate_handler))
         .route("/deactivate", post(deactivate_handler))
-        .with_state(state);
+        .with_state(Arc::clone(&state));
 
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -135,7 +174,10 @@ async fn main() {
 
     let local_addr = listener.local_addr().unwrap();
     println!("2syn 信令與授權驗證伺服器已啟動: http://{}", local_addr);
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(Arc::clone(&state)))
+        .await
+        .unwrap();
 }
 
 async fn ws_handler(State(state): State<Arc<ServerState>>, ws: WebSocketUpgrade) -> impl IntoResponse {
