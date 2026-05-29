@@ -216,8 +216,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                             SignalingMessage::Offer { target, pin, sdp } => {
                                 // 這裡實務上要驗證目標的 PIN（目前假定為同意或由目標自行驗證）
                                 // 為簡化，直接將 Offer 轉發給目標，包含 PIN 碼
-                                let clients = state.clients.read().await;
-                                if let Some(target_tx) = clients.get(&target) {
+                                let target_tx_opt = {
+                                    let clients = state.clients.read().await;
+                                    clients.get(&target).cloned()
+                                };
+                                if let Some(target_tx) = target_tx_opt {
                                     let out_msg = ServerMessage::Offer {
                                         source: client_id.clone().unwrap_or_default(),
                                         pin,
@@ -230,8 +233,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                 }
                             }
                             SignalingMessage::Answer { target, sdp } => {
-                                let clients = state.clients.read().await;
-                                if let Some(target_tx) = clients.get(&target) {
+                                let target_tx_opt = {
+                                    let clients = state.clients.read().await;
+                                    clients.get(&target).cloned()
+                                };
+                                if let Some(target_tx) = target_tx_opt {
                                     let out_msg = ServerMessage::Answer {
                                         source: client_id.clone().unwrap_or_default(),
                                         sdp,
@@ -240,8 +246,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                 }
                             }
                             SignalingMessage::Ice { target, candidate } => {
-                                let clients = state.clients.read().await;
-                                if let Some(target_tx) = clients.get(&target) {
+                                let target_tx_opt = {
+                                    let clients = state.clients.read().await;
+                                    clients.get(&target).cloned()
+                                };
+                                if let Some(target_tx) = target_tx_opt {
                                     let out_msg = ServerMessage::Ice {
                                         source: client_id.clone().unwrap_or_default(),
                                         candidate,
@@ -250,8 +259,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                 }
                             }
                             SignalingMessage::Error { target, message } => {
-                                let clients = state.clients.read().await;
-                                if let Some(target_tx) = clients.get(&target) {
+                                let target_tx_opt = {
+                                    let clients = state.clients.read().await;
+                                    clients.get(&target).cloned()
+                                };
+                                if let Some(target_tx) = target_tx_opt {
                                     let out_msg = ServerMessage::Error {
                                         message: format!("From {}: {}", client_id.clone().unwrap_or_default(), message),
                                     };
