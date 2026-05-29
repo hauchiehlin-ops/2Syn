@@ -404,6 +404,8 @@ enum IncomingMessage {
     Error { message: String },
     #[serde(rename = "pong")]
     Pong,
+    #[serde(rename = "custom_request_logs")]
+    CustomRequestLogs { source: String, target: String },
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -657,6 +659,16 @@ async fn start_rust_signaling_task(
                         }
                         IncomingMessage::Pong => {
                             // 收到心跳回覆，只為更新最後讀取時間，無須額外動作
+                        }
+                        IncomingMessage::CustomRequestLogs { source, target } => {
+                            let msg = format!("收到來自 {} 的自訂日誌索取請求", source);
+                            println!("[Rust Signaling] {}", msg);
+                            let _ = app_handle_clone.emit("rust-signaling-log", format!("[Rust] {}", msg));
+                            // 將請求轉發給前端 JS
+                            let _ = app_handle_clone.emit("custom-request-logs-event", serde_json::json!({
+                                "source": source,
+                                "target": target
+                            }).to_string());
                         }
                     }
                 }
@@ -930,6 +942,22 @@ async fn cancel_transfer(state: State<'_, AppState>, task_id: String) -> Result<
     Ok(state.file_transfer_engine.cancel_task(&task_id).await)
 }
 
+/// 透過 Rust 信令發送自訂的 WebSocket 訊息 (例如日誌回傳)
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+async fn send_custom_signaling_message(
+    state: State<'_, AppState>,
+    message: String,
+) -> Result<(), String> {
+    let tx_opt = state.signaling_tx.lock().await.clone();
+    if let Some(tx) = tx_opt {
+        tx.send(message).await.map_err(|e| format!("發送信令失敗: {}", e))?;
+        Ok(())
+    } else {
+        Err("信令連線未建立".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(not(target_os = "ios"))]
@@ -1005,7 +1033,9 @@ pub fn run() {
             cancel_transfer,
             #[cfg(not(target_os = "ios"))]
             update_rust_pin,
-            check_macos_permissions
+            check_macos_permissions,
+            #[cfg(not(target_os = "ios"))]
+            send_custom_signaling_message
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 應用程序執行時發生錯誤");

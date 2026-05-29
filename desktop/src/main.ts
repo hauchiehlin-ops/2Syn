@@ -3294,6 +3294,34 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
     });
 
+    // 監聽來自 Rust 的自訂日誌索取請求事件
+    listen<string>("custom-request-logs-event", async (event) => {
+      try {
+        const payload = JSON.parse(event.payload);
+        const source = payload.source;
+        
+        const logOverlay = document.getElementById("debug-overlay");
+        const logsList: string[] = [];
+        if (logOverlay) {
+          Array.from(logOverlay.children).forEach((child) => {
+            logsList.push(child.textContent || "");
+          });
+        }
+        
+        const responseMsg = JSON.stringify({
+          type: "custom_response_logs",
+          target: source,
+          source: myId,
+          logs: logsList.slice(-35)
+        });
+        
+        await invoke("send_custom_signaling_message", { message: responseMsg });
+        console.log(`[Diagnostic] 已成功將被控端除錯日誌透過 Rust 回傳給主控端 ${source}`);
+      } catch (err) {
+        console.error("處理自訂日誌索取請求失敗:", err);
+      }
+    });
+
     // 呼叫後端指令，傳入本機 ID 與當前 PIN 碼
     invoke("start_rust_signaling", { myId: myId, pin: myPin })
       .then(() => {
