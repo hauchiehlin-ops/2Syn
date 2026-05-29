@@ -531,6 +531,26 @@ function initAccessPin() {
   }
 }
 
+// 初始化信令手動重連按鈕邏輯
+function initSignalingReconnect() {
+  const btnReconnect = document.getElementById("btn-reconnect-signaling");
+  if (btnReconnect) {
+    btnReconnect.addEventListener("click", () => {
+      console.log("[Signaling] 使用者手動觸發信令重連...");
+      btnReconnect.textContent = "✓";
+      invoke("start_rust_signaling", { myId: myId, pin: myPin })
+        .then(() => {
+          setTimeout(() => { btnReconnect.textContent = "🔄"; }, 1000);
+        })
+        .catch((err) => {
+          console.error("[Signaling] 重連失敗:", err);
+          btnReconnect.textContent = "❌";
+          setTimeout(() => { btnReconnect.textContent = "🔄"; }, 1500);
+        });
+    });
+  }
+}
+
 // 初始化固定密碼設定邏輯
 async function initStaticPassword() {
   if (!isDesktopTauri()) return;
@@ -2777,6 +2797,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initPrivacyMode();
   initNetworkSimulator();
   initAccessPin();
+  initSignalingReconnect();
   initStaticPassword();
   // 在 initAccessPin 執行後，才能取得正確產生的 PIN 碼
   myPin = (window as any).__localAccessPin || "";

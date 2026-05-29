@@ -28,6 +28,8 @@ struct AppState {
     current_pin: Arc<tokio::sync::RwLock<String>>,
     #[cfg(not(target_os = "ios"))]
     current_remote_id: Arc<tokio::sync::RwLock<String>>,
+    #[cfg(not(target_os = "ios"))]
+    signaling_abort: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 /// 獲取本機硬體特徵碼（HWID）的 Tauri Command
@@ -417,6 +419,7 @@ async fn start_rust_signaling_task(
     app_handle: tauri::AppHandle,
     my_id: String,
     mut ws_rx: tokio::sync::mpsc::Receiver<String>,
+    abort_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     let ws_url = "wss://twosyn-signaling.onrender.com/ws";
     
@@ -434,7 +437,14 @@ async fn start_rust_signaling_task(
         }
     });
     
+    let mut abort_rx = abort_rx;
     loop {
+        // 檢查是否收到中止信號
+        if !matches!(abort_rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)) {
+            println!("[Rust Signaling] 偵測到中止信號或通道已關閉，退出舊信令任務");
+            break;
+        }
+
         let connect_msg = format!("嘗試連線到信令伺服器: {}", ws_url);
         println!("[Rust Signaling] {}", connect_msg);
         let _ = app_handle.emit("rust-signaling-log", format!("[Rust] {}", connect_msg));
@@ -634,6 +644,13 @@ async fn start_rust_signaling_task(
                 ws_write_task.abort();
                 ws_read_task.abort();
             }
+            _ = &mut abort_rx => {
+                ws_write_task.abort();
+                ws_read_task.abort();
+                timeout_task.abort();
+                println!("[Rust Signaling] 收到中止信號，主動結束連線");
+                break;
+            }
         }
 
         // 斷線後，清除當前活躍之 WebSocket 發送端
@@ -657,11 +674,22 @@ async fn start_rust_signaling(
 ) -> Result<(), String> {
     *state.current_pin.write().await = pin;
     
+    // 1. 如果有舊的信令任務在跑，先發送 abort 信號將其終止
+    let mut abort_lock = state.signaling_abort.lock().await;
+    if let Some(abort_tx) = abort_lock.take() {
+        let _ = abort_tx.send(());
+        // 稍微等待舊連線釋放，防範連接埠或信令狀態衝突
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+    
+    let (abort_tx, abort_rx) = tokio::sync::oneshot::channel::<()>();
+    *abort_lock = Some(abort_tx);
+    
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(100);
     *state.signaling_tx.lock().await = Some(tx);
     
     tokio::spawn(async move {
-        start_rust_signaling_task(app_handle, my_id, rx).await;
+        start_rust_signaling_task(app_handle, my_id, rx, abort_rx).await;
     });
     
     Ok(())
@@ -891,6 +919,8 @@ pub fn run() {
             current_pin: Arc::new(tokio::sync::RwLock::new(String::new())),
             #[cfg(not(target_os = "ios"))]
             current_remote_id: Arc::new(tokio::sync::RwLock::new(String::new())),
+            #[cfg(not(target_os = "ios"))]
+            signaling_abort: tokio::sync::Mutex::new(None),
         })
         .setup(|app| {
             #[cfg(not(target_os = "ios"))]
