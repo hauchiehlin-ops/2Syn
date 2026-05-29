@@ -284,7 +284,15 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
             // Cleanup on disconnect
             if let Some(id) = client_id {
                 println!("Client disconnected: {}", id);
-                state.clients.write().await.remove(&id);
+                let mut clients = state.clients.write().await;
+                if let Some(existing_tx) = clients.get(&id) {
+                    if existing_tx.same_channel(&tx) {
+                        clients.remove(&id);
+                        println!("Removed client from registry: {}", id);
+                    } else {
+                        println!("Preserved newer connection for client: {}", id);
+                    }
+                }
             }
         })
     };
