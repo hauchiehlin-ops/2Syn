@@ -104,5 +104,11 @@
   "help_inst_2": "<strong>雙指操作：</strong>雙指滑動為捲動，雙指單擊為右鍵。",
   "help_inst_3": "<strong>鍵盤輸入：</strong>連線後可點擊右下角 ⌨️ 圖示。",
   "help_priv_title": "隱私權政策",
-  "help_priv_desc": "我們極度重視您的隱私。2syn 採用端對端加密的 WebRTC 點對點技術，您的畫面與操作數據僅在設備間直接傳輸，伺服器絕不儲存或側錄任何資料，我們也不收集或販售您的個人資訊。"
+  "help_priv_desc": "我們極度重視您的隱私。2syn 採用端對端加密的 WebRTC 點對點技術，您的畫面與操作數據僅在設備間直接傳輸，伺服器絕不儲存或側錄任何資料，我們也不收集或販售您的個人資訊。",
+  "err_rtc_failed": "P2P 連線建立失敗。本機與遠端可能處於嚴格 symmetric NAT 或防火牆後，無法打洞穿透。請點擊「🚀 啟用穿透模式」使用中繼連線。",
+  "err_target_offline": "對方不在線上，請確認遠端設備 ID 是否輸入正確。",
+  "err_rejected": "連線被拒絕：PIN 碼驗證失敗或遠端拒絕此連線。",
+  "err_signaling_offline": "無法連線至信令伺服器，請確認信令服務與網路連線正常。",
+  "err_invalid_remote_id": "請輸入有效的 9 位數設備 ID。",
+  "err_invalid_pin": "請輸入對方的存取 PIN 碼。"
 }

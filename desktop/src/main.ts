@@ -204,7 +204,13 @@ const fallbackTranslations: Record<string, string> = {
   "file_transfer_title": "File Transfer",
   "drop_zone": "Drag & Drop files here or Click to upload",
   "btn_cancel_transfer": "Cancel Transfer",
-  "log_title": "System Logs"
+  "log_title": "System Logs",
+  "err_rtc_failed": "P2P connection failed. The local and remote devices might be behind a strict symmetric NAT or firewall and cannot punch through. Please click \"🚀 Enable Relay Mode\" to establish connection.",
+  "err_target_offline": "The remote device is offline. Please make sure the device ID is correct.",
+  "err_rejected": "Connection rejected: PIN verification failed or remote host denied access.",
+  "err_signaling_offline": "Failed to connect to the signaling server. Please check your internet connection.",
+  "err_invalid_remote_id": "Please enter a valid 9-digit Device ID.",
+  "err_invalid_pin": "Please enter the target access PIN."
 };
 
 // 統一翻譯取值函數
