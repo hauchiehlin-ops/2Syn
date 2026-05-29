@@ -217,6 +217,13 @@ let myId: string = "";                        // 本機 9 位數 ID
 let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
 let currentCursorPercentX = 0.5;               // 全域游標百分比 X（用於避讓對焦）
 let currentCursorPercentY = 0.5;               // 全域游標百分比 Y（用於避讓對焦）
+// Target offline 自動重試狀態
+let retryCount: number = 0;                    // 目前已重試次數
+let lastRetryRemoteId: string = "";            // 最後一次連線目標 ID
+let lastRetryPin: string = "";                 // 最後一次連線 PIN
+let retryCountdownTimer: ReturnType<typeof setInterval> | null = null; // 倒計時計時器
+const MAX_RETRY_COUNT = 3;                     // 最大重試次數
+const RETRY_INTERVAL_SEC = 15;                 // 每次重試等待秒數
 
 // 取得信令伺服器 WebSocket URL（優先環境變數，備用本地，支援 LAN 測試）
 // 官方中心化信令伺服器位址 (未來上架部署於雲端的主機)
@@ -970,25 +977,90 @@ function initSignalingClient() {
       case "error":
         console.error("[Signaling] 伺服器錯誤:", msg.message);
         if (msg.message === "Target offline") {
-          const offlineMsg = t("err_target_offline");
-          const btnConnect = document.getElementById("btn-connect");
-          if (btnConnect) {
-            btnConnect.textContent = offlineMsg;
-            btnConnect.style.backgroundColor = "#e74c3c";
-            setTimeout(() => {
-              btnConnect.textContent = t("btn_connect");
-              btnConnect.style.backgroundColor = "";
-            }, 3000);
+          // 清除任何殘留的倒計時計時器
+          if (retryCountdownTimer) {
+            clearInterval(retryCountdownTimer);
+            retryCountdownTimer = null;
           }
-          resetConnectionUI();
+
+          if (retryCount < MAX_RETRY_COUNT) {
+            retryCount++;
+            const currentTry = retryCount;
+            let secondsLeft = RETRY_INTERVAL_SEC;
+
+            const btnConnect = document.getElementById("btn-connect");
+            const btnText = document.getElementById("txt-btn-connect");
+
+            const updateBtnText = () => {
+              const wakeupTemplate = t("err_target_wakeup") ||
+                "Remote device may be waking up. Auto-retrying in {0}s ({1}/{2})...";
+              const msg = wakeupTemplate
+                .replace("{0}", String(secondsLeft))
+                .replace("{1}", String(currentTry))
+                .replace("{2}", String(MAX_RETRY_COUNT));
+              if (btnText) btnText.textContent = msg;
+              else if (btnConnect) btnConnect.textContent = msg;
+            };
+
+            if (btnConnect) {
+              btnConnect.setAttribute("disabled", "true");
+              btnConnect.style.backgroundColor = "#b45309"; // 琥珀色，表示等待中
+            }
+            updateBtnText();
+
+            retryCountdownTimer = setInterval(async () => {
+              secondsLeft--;
+              if (secondsLeft > 0) {
+                updateBtnText();
+              } else {
+                clearInterval(retryCountdownTimer!);
+                retryCountdownTimer = null;
+                console.log(`[Signaling] 自動重試連線（第 ${currentTry}/${MAX_RETRY_COUNT} 次）至 ${lastRetryRemoteId}`);
+                if (btnConnect) {
+                  btnConnect.style.backgroundColor = "";
+                }
+                await startCall(lastRetryRemoteId, lastRetryPin);
+              }
+            }, 1000);
+          } else {
+            // 已達最大重試次數，顯示最終失敗訊息
+            retryCount = 0;
+            const finalTemplate = t("err_target_offline_final") ||
+              "Remote device is offline after {0} retries. Please ensure the host is running.";
+            const finalMsg = finalTemplate.replace("{0}", String(MAX_RETRY_COUNT));
+            const btnConnect = document.getElementById("btn-connect");
+            const btnText = document.getElementById("txt-btn-connect");
+            if (btnConnect) {
+              btnConnect.style.backgroundColor = "#e74c3c";
+              if (btnText) btnText.textContent = finalMsg;
+              else btnConnect.textContent = finalMsg;
+              setTimeout(() => {
+                const btnTextReset = document.getElementById("txt-btn-connect");
+                if (btnTextReset) btnTextReset.textContent = t("btn_connect");
+                else btnConnect.textContent = t("btn_connect");
+                btnConnect.style.backgroundColor = "";
+              }, 4000);
+            }
+            resetConnectionUI();
+          }
         } else if (msg.message.includes("Connection rejected")) {
+          // 被拒絕時重置重試計數
+          retryCount = 0;
+          if (retryCountdownTimer) {
+            clearInterval(retryCountdownTimer);
+            retryCountdownTimer = null;
+          }
           const rejectMsg = t("err_rejected");
           const btnConnect = document.getElementById("btn-connect");
+          const btnText = document.getElementById("txt-btn-connect");
           if (btnConnect) {
-            btnConnect.textContent = rejectMsg;
+            if (btnText) btnText.textContent = rejectMsg;
+            else btnConnect.textContent = rejectMsg;
             btnConnect.style.backgroundColor = "#e74c3c";
             setTimeout(() => {
-              btnConnect.textContent = t("btn_connect");
+              const btnTextReset = document.getElementById("txt-btn-connect");
+              if (btnTextReset) btnTextReset.textContent = t("btn_connect");
+              else btnConnect.textContent = t("btn_connect");
               btnConnect.style.backgroundColor = "";
             }, 3000);
           }
@@ -1534,6 +1606,16 @@ function initConnectButton() {
       alert(t("err_invalid_pin"));
       return;
     }
+
+    // 每次手動點擊連線時，重置重試計數與倒計時
+    retryCount = 0;
+    if (retryCountdownTimer) {
+      clearInterval(retryCountdownTimer);
+      retryCountdownTimer = null;
+    }
+    // 記錄此次連線目標，供自動重試使用
+    lastRetryRemoteId = remoteId;
+    lastRetryPin = pin;
 
     btnConnect.setAttribute("disabled", "true");
     const btnText = document.getElementById("txt-btn-connect");

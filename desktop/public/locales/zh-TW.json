@@ -241,5 +241,7 @@
   "ts_step_3_desc": "在手機端 App 切換開關為 「Connected」（若提示 VPN 授權請允許並輸入密碼）。Mac 端確認選單列圖示狀態為 「Connected」。",
   "ts_step_4_desc": "💡 完成後，Mac 端的 2syn 燈號會自動變為綠色，手機端即可透過 2syn 順利發起超低延遲直連，不再有連線失敗與黑屏問題。",
   "btn_show": "顯示",
-  "btn_hide": "隱藏"
+  "btn_hide": "隱藏",
+  "err_target_wakeup": "對方裝置可能正在喚醒中，{0} 秒後自動重試（{1}/{2}）...",
+  "err_target_offline_final": "對方裝置離線，已重試 {0} 次仍無法連線。請確認被控端已開啟且網路正常。"
 }

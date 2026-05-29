@@ -231,5 +231,9 @@
   "ts_step_3_desc": "Toggle the switch to 'Connected' in the mobile App (accept VPN configuration prompts if requested). Confirm that the Tailscale menu bar icon on your Mac displays 'Connected'.",
   "ts_step_4_desc": "💡 Once completed, the connection indicator on the Mac host will automatically turn green, allowing your controller device to establish a direct connection without failed or black screen issues.",
   "btn_show": "Show",
-  "btn_hide": "Hide"
+  "btn_hide": "Hide",
+  "err_target_wakeup": "El dispositivo remoto puede estar despertando. Reintentando en {0} segundos ({1}/{2})...",
+  "err_target_offline_final": "El dispositivo remoto está desconectado después de {0} intentos. Verifique que el host esté en línea.",
+  "status_online": "En línea",
+  "status_connecting": "Conectando..."
 }
