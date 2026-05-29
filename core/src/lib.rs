@@ -5,8 +5,7 @@ pub mod codec;
 pub mod security;
 pub mod input;
 pub mod idd;
-#[cfg(not(target_os = "ios"))]
-pub mod file_transfer;
+
 
 
 /// 系統核心通用錯誤定義

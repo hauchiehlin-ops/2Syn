@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { I18N_HELP_DOCS } from "./help_i18n";
 import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 
@@ -380,7 +381,6 @@ let isHostMode: boolean = false; // 標記目前是否為被控端
 let rustOfferProcessed: boolean = false; // 標記 Rust 是否已經處理完 Offer
 let dataChannelControl: RTCDataChannel | null = null;
 let dataChannelUnreliable: RTCDataChannel | null = null;
-let dataChannelFile: RTCDataChannel | null = null;
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
 let myId: string = "";                        // 本機 9 位數 ID
 let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
@@ -653,7 +653,30 @@ const fallbackTranslations: Record<string, string> = {
 function t(key: string): string {
   return translations[key] || fallbackTranslations[key] || key;
 }
-(window as any).t = t; // Expose to global for console.error interceptor if needed
+(window as any).t = t;
+
+// 全域說明與隱私政策 Tab 狀態與切換函數
+let activeHelpTab: "controls" | "privacy" = "controls";
+
+function switchHelpTab(tab: "controls" | "privacy") {
+  activeHelpTab = tab;
+  
+  const btnControls = document.getElementById("tab-btn-controls");
+  const btnPrivacy = document.getElementById("tab-btn-privacy");
+  
+  if (btnControls) btnControls.classList.toggle("active", tab === "controls");
+  if (btnPrivacy) btnPrivacy.classList.toggle("active", tab === "privacy");
+  
+  const langSelect = document.getElementById("language-select") as HTMLSelectElement;
+  const currentLang = langSelect ? langSelect.value : "zh-TW";
+  const doc = I18N_HELP_DOCS[currentLang] || I18N_HELP_DOCS["en"];
+  
+  const contentArea = document.getElementById("help-modal-content");
+  if (contentArea) {
+    contentArea.innerHTML = tab === "controls" ? doc.controlsHtml : doc.privacyHtml;
+  }
+}
+(window as any).switchHelpTab = switchHelpTab;
 
 let lastDiagnosticResult: {
   license_active: boolean;
@@ -766,25 +789,21 @@ function updateDomTranslations() {
   setTextContent("lbl-sim-loss", t("sim_loss"));
   setTextContent("lbl-sim-relay", t("sim_relay"));
 
-  setTextContent("txt-help-title", t("help_title"));
-  setTextContent("txt-help-inst-title", t("help_inst_title"));
-  setTextContent("txt-help-priv-title", t("help_priv_title"));
-  setTextContent("txt-help-priv-desc", t("help_priv_desc"));
+  const langSelect = document.getElementById("language-select") as HTMLSelectElement;
+  const currentLang = langSelect ? langSelect.value : "zh-TW";
+  const doc = I18N_HELP_DOCS[currentLang] || I18N_HELP_DOCS["en"];
   
-  const helpInstList = document.getElementById("txt-help-inst-list");
-  if (helpInstList) {
-    helpInstList.innerHTML = `
-      <li>${t("help_inst_1")}</li>
-      <li>${t("help_inst_2")}</li>
-      <li>${t("help_inst_3")}</li>
-    `;
+  setTextContent("txt-help-title", t("help_title"));
+  setTextContent("tab-btn-controls", doc.tabControls);
+  setTextContent("tab-btn-privacy", doc.tabPrivacy);
+  
+  const contentArea = document.getElementById("help-modal-content");
+  if (contentArea) {
+    contentArea.innerHTML = activeHelpTab === "controls" ? doc.controlsHtml : doc.privacyHtml;
   }
 
   // 新增右側面板的翻譯綁定
   setTextContent("txt-tools-title", t("tools_title"));
-  setTextContent("txt-file-transfer-title", t("file_transfer_title"));
-  setTextContent("txt-drop-zone", t("drop_zone"));
-  setTextContent("btn-cancel-transfer", t("btn_cancel_transfer"));
   setTextContent("txt-log-title", t("log_title"));
   
   const btnTogglePanel = document.getElementById("btn-toggle-panel");
@@ -1296,7 +1315,6 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
     peerConnection.close();
     peerConnection = null;
     dataChannelControl = null;
-    dataChannelFile = null;
     iceCandidateQueue = [];
   }
 
@@ -1345,9 +1363,6 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
     if (ch.label === "input-control") {
       dataChannelControl = ch;
       bindControlChannel(ch);
-    } else if (ch.label === "file-transfer") {
-      dataChannelFile = ch;
-      bindFileChannel(ch);
     }
   };
 
@@ -1466,10 +1481,7 @@ async function startCall(remoteId: string, pin: string) {
     });
     bindUnreliableChannel(dataChannelUnreliable);
 
-    dataChannelFile = pc.createDataChannel("file-transfer", {
-      ordered: true,    // 可靠傳輸，確保檔案完整
-    });
-    bindFileChannel(dataChannelFile);
+
 
     // 要求接收視訊軌道 (加入 m=video 至 SDP Offer)
     pc.addTransceiver("video", { direction: "recvonly" });
@@ -1612,21 +1624,7 @@ function bindUnreliableChannel(ch: RTCDataChannel) {
   };
 }
 
-// 檔案傳輸通道綁定
-function bindFileChannel(ch: RTCDataChannel) {
-  ch.binaryType = "arraybuffer";
-  ch.onopen = () => console.log("[DataChannel] file-transfer 已開啟");
-  ch.onclose = () => console.log("[DataChannel] file-transfer 已關閉");
-  ch.onmessage = async (event) => {
-    // 接收端收到檔案資料塊 — 交由 Rust 寫入磁碟
-    try {
-      const data = new Uint8Array(event.data as ArrayBuffer);
-      await invoke("receive_file_chunk", { chunk: Array.from(data) });
-    } catch (e) {
-      console.error("[File] 寫入檔案塊失敗:", e);
-    }
-  };
-}
+
 
 // 重置連線相關 UI 狀態
 function resetConnectionUI() {
@@ -2001,11 +1999,7 @@ function startStatusPolling() {
       
       setTextContent("val-metric-bitrate", `${(status.bitrate_limit_kbps / 1000).toFixed(1)} Mbps`);
       
-      const fileText = status.file_transfer_enabled
-        ? t("file_enabled")
-        : t("file_disabled");
-        
-      setTextContent("val-metric-file", fileText);
+
 
       // 動態更新即時連線與加密性能指標
       setTextContent("val-metric-rtt", `${status.rtt_ms} ms`);
@@ -2054,8 +2048,6 @@ function initOfflineSdpMode() {
         
         dataChannelUnreliable = pc.createDataChannel("input-unreliable", { ordered: false, maxRetransmits: 0 });
         bindUnreliableChannel(dataChannelUnreliable);
-        dataChannelFile = pc.createDataChannel("file-transfer", { ordered: true });
-        bindFileChannel(dataChannelFile);
 
         pc.onicecandidate = (event) => {
           if (!event.candidate) {
@@ -2072,7 +2064,6 @@ function initOfflineSdpMode() {
         pc.ondatachannel = (event) => {
           if (event.channel.label === "input-control") bindControlChannel(event.channel);
           if (event.channel.label === "input-unreliable") bindUnreliableChannel(event.channel);
-          if (event.channel.label === "file-transfer") bindFileChannel(event.channel);
         };
 
         const offer = await pc.createOffer();
@@ -2113,7 +2104,6 @@ function initOfflineSdpMode() {
           pc.ondatachannel = (event) => {
             if (event.channel.label === "input-control") bindControlChannel(event.channel);
             if (event.channel.label === "input-unreliable") bindUnreliableChannel(event.channel);
-            if (event.channel.label === "file-transfer") bindFileChannel(event.channel);
           };
 
           await pc.setRemoteDescription({ type: "offer", sdp: remoteSdpText });
@@ -2409,6 +2399,61 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   if (inputBound) return;
   inputBound = true;
 
+  // --- 畫質與自適應調適狀態 ---
+
+  let currentQualityPreset: "fluid" | "retina" | "auto" = "retina";
+  let autoPresetInterval: any = null;
+
+  const collapseQualityPanel = () => {
+    const qualityPanel = document.getElementById("mobile-quality-panel");
+    if (qualityPanel) {
+      qualityPanel.classList.remove("show");
+    }
+  };
+
+  async function applyQualityPreset(preset: "fluid" | "retina" | "auto") {
+    currentQualityPreset = preset;
+    
+    const btnFluid = document.getElementById("btn-quality-fluid");
+    const btnRetina = document.getElementById("btn-quality-retina");
+    const btnAuto = document.getElementById("btn-quality-auto");
+    
+    if (btnFluid) btnFluid.classList.toggle("active", preset === "fluid");
+    if (btnRetina) btnRetina.classList.toggle("active", preset === "retina");
+    if (btnAuto) btnAuto.classList.toggle("active", preset === "auto");
+    
+    if (autoPresetInterval) {
+      clearInterval(autoPresetInterval);
+      autoPresetInterval = null;
+    }
+
+    if (preset === "fluid") {
+      await invoke("trigger_network_simulation", { rttMs: 75, lossRate: 0.04, isRelay: false });
+    } else if (preset === "retina") {
+      await invoke("trigger_network_simulation", { rttMs: 10, lossRate: 0.0, isRelay: false });
+    } else if (preset === "auto") {
+      autoPresetInterval = setInterval(async () => {
+        try {
+          const status = await invoke<any>("get_connection_status");
+          let realRtt = status.rtt_ms;
+          
+          if (realRtt === 10 || realRtt === 75) {
+            const timeSec = Math.floor(Date.now() / 5000) % 2;
+            if (timeSec === 0) {
+              await invoke("trigger_network_simulation", { rttMs: 15, lossRate: 0.001, isRelay: false });
+            } else {
+              await invoke("trigger_network_simulation", { rttMs: 130, lossRate: 0.05, isRelay: false });
+            }
+          }
+        } catch (e) {
+          console.error("Auto preset error:", e);
+        }
+      }, 1500);
+    }
+    
+    triggerHaptic("light");
+  }
+
   // --- 邊緣平移與顯示模式狀態 ---
   let displayMode: "fit" | "original" | "fill" = "fit";
   let panRafId: number | null = null;
@@ -2665,6 +2710,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let initialPinchDistance = -1;
   let maxTouches = 0;
   let isLocalPinching = false;
+  let isThreeFingerGesture = false;
+  let threeFingerStartPos = { x: 0, y: 0 };
+  let threeFingerHasMoved = false;
 
   let pinchStartScale = 1.0;
   let pinchStartTx = 0;
@@ -3083,6 +3131,53 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
   }
 
+  // 輔助函數：發送 Mac 系統手勢快捷鍵宏
+  function triggerMacShortcut(keyName: "mission-control" | "space-left" | "space-right") {
+    const ctrlCode = 17;
+    const upCode = 38;
+    const leftCode = 37;
+    const rightCode = 39;
+
+    const pressKey = (code: number, mods: number = 0) => {
+      const payload = new Uint8Array(3);
+      const view = new DataView(payload.buffer);
+      view.setUint16(0, code, false);
+      payload[2] = mods;
+      sendInputPacket(buildInputPacket(0x05, payload));
+    };
+
+    const releaseKey = (code: number, mods: number = 0) => {
+      const payload = new Uint8Array(3);
+      const view = new DataView(payload.buffer);
+      view.setUint16(0, code, false);
+      payload[2] = mods;
+      sendInputPacket(buildInputPacket(0x06, payload));
+    };
+
+    if (keyName === "mission-control") {
+      pressKey(ctrlCode, 2);
+      pressKey(upCode, 2);
+      setTimeout(() => {
+        releaseKey(upCode, 2);
+        releaseKey(ctrlCode, 0);
+      }, 50);
+    } else if (keyName === "space-left") {
+      pressKey(ctrlCode, 2);
+      pressKey(leftCode, 2);
+      setTimeout(() => {
+        releaseKey(leftCode, 2);
+        releaseKey(ctrlCode, 0);
+      }, 50);
+    } else if (keyName === "space-right") {
+      pressKey(ctrlCode, 2);
+      pressKey(rightCode, 2);
+      setTimeout(() => {
+        releaseKey(rightCode, 2);
+        releaseKey(ctrlCode, 0);
+      }, 50);
+    }
+  }
+
   videoEl.addEventListener("pointerup", (e) => {
     if (e.pointerType === "touch" || e.pointerType === "pen") return;
     e.preventDefault();
@@ -3101,7 +3196,18 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     stopMomentum();
     stopScrollMomentum();
     
-    if (e.touches.length === 2) {
+    if (e.touches.length === 3) {
+      isThreeFingerGesture = true;
+      threeFingerHasMoved = false;
+      const avgX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
+      const avgY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
+      threeFingerStartPos = { x: avgX, y: avgY };
+      touchStartTime = Date.now();
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    } else if (e.touches.length === 2) {
       if (longPressTimer) {
         clearTimeout(longPressTimer);
         longPressTimer = null;
@@ -3171,6 +3277,33 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   videoEl.addEventListener("touchmove", (e) => {
     e.preventDefault();
+    if (e.touches.length === 3 && isThreeFingerGesture) {
+      if (threeFingerHasMoved) return;
+      
+      const avgX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
+      const avgY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
+      
+      const dx = avgX - threeFingerStartPos.x;
+      const dy = avgY - threeFingerStartPos.y;
+      
+      const distH = Math.abs(dx);
+      const distV = Math.abs(dy);
+      
+      if (distH > 50 && distH > distV) {
+        threeFingerHasMoved = true;
+        if (dx > 0) {
+          triggerMacShortcut("space-left");
+          triggerHaptic("medium");
+          console.log("[Gesture] 三指向右滑動，觸發切換至左邊桌面");
+        } else {
+          triggerMacShortcut("space-right");
+          triggerHaptic("medium");
+          console.log("[Gesture] 三指向左滑動，觸發切換至右邊桌面");
+        }
+      }
+      return;
+    }
+
     if (e.touches.length === 2) {
       if (longPressTimer) {
         clearTimeout(longPressTimer);
@@ -3378,6 +3511,19 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
 
     const now = Date.now();
+
+    if (isThreeFingerGesture) {
+      if (!threeFingerHasMoved && touchStartTime > 0 && now - touchStartTime < 300) {
+        triggerMacShortcut("mission-control");
+        triggerHaptic("medium");
+        console.log("[Gesture] 三指輕點，觸發 Mission Control");
+      }
+      isThreeFingerGesture = false;
+      threeFingerHasMoved = false;
+      maxTouches = 0;
+      touchStartTime = 0;
+      return;
+    }
 
     // 雙指輕觸判定優化：只要在 350ms 內偵測到 maxTouches === 2，且未發生大範圍縮放，在第一根手指抬起時即刻觸發右鍵
     if (maxTouches === 2) {
@@ -3817,6 +3963,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       dialTrigger.classList.remove("active");
       dialTrigger.classList.add("pulse");
     }
+    collapseQualityPanel();
   };
 
   // 曝露給全域以供連線重置時調用
@@ -3972,6 +4119,47 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         }
       };
     }
+
+    const itemQuality = document.getElementById("dial-item-quality");
+    if (itemQuality) {
+      itemQuality.onclick = (e) => {
+        e.stopPropagation();
+        
+        const qualityPanel = document.getElementById("mobile-quality-panel");
+        if (qualityPanel) {
+          const isShown = qualityPanel.classList.contains("show");
+          collapseQualityPanel();
+          if (!isShown) {
+            qualityPanel.classList.add("show");
+            triggerHaptic("light");
+          }
+        }
+        collapseDial();
+      };
+    }
+
+    const btnFluid = document.getElementById("btn-quality-fluid");
+    const btnRetina = document.getElementById("btn-quality-retina");
+    const btnAuto = document.getElementById("btn-quality-auto");
+
+    if (btnFluid) {
+      btnFluid.onclick = (e) => {
+        e.stopPropagation();
+        applyQualityPreset("fluid");
+      };
+    }
+    if (btnRetina) {
+      btnRetina.onclick = (e) => {
+        e.stopPropagation();
+        applyQualityPreset("retina");
+      };
+    }
+    if (btnAuto) {
+      btnAuto.onclick = (e) => {
+        e.stopPropagation();
+        applyQualityPreset("auto");
+      };
+    }
   }
 
   // 舊事件與舊渲染迴圈已被清理，已併入全新的 setupInputControl 實作。
@@ -3997,6 +4185,7 @@ function initPanelToggle() {
   if (btnShowHelp && btnCloseHelp && helpModal) {
     btnShowHelp.addEventListener("click", () => {
       helpModal.style.display = "flex";
+      switchHelpTab("controls");
     });
     btnCloseHelp.addEventListener("click", () => {
       helpModal.style.display = "none";
@@ -4006,6 +4195,21 @@ function initPanelToggle() {
         helpModal.style.display = "none";
       }
     });
+
+    const tabBtnControls = document.getElementById("tab-btn-controls");
+    const tabBtnPrivacy = document.getElementById("tab-btn-privacy");
+    if (tabBtnControls) {
+      tabBtnControls.onclick = (e) => {
+        e.stopPropagation();
+        switchHelpTab("controls");
+      };
+    }
+    if (tabBtnPrivacy) {
+      tabBtnPrivacy.onclick = (e) => {
+        e.stopPropagation();
+        switchHelpTab("privacy");
+      };
+    }
   }
 }
 

@@ -4,8 +4,6 @@ use syn_core::security::{generate_hwid, LicenseValidator, SecureStorage, TotpAut
 #[cfg(not(target_os = "ios"))]
 use syn_core::connection::{ConnectionManager, ConnectionType};
 #[cfg(not(target_os = "ios"))]
-use syn_core::file_transfer::FileTransferEngine;
-#[cfg(not(target_os = "ios"))]
 use std::sync::Arc;
 #[cfg(not(target_os = "ios"))]
 use tauri::{State, Manager, Emitter};
@@ -18,8 +16,6 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessa
 struct AppState {
     #[cfg(not(target_os = "ios"))]
     connection_manager: Arc<ConnectionManager>,
-    #[cfg(not(target_os = "ios"))]
-    file_transfer_engine: Arc<FileTransferEngine>,
     #[cfg(not(target_os = "ios"))]
     active_pc: tokio::sync::Mutex<Option<Arc<webrtc::peer_connection::RTCPeerConnection>>>,
     #[cfg(not(target_os = "ios"))]
@@ -783,7 +779,7 @@ async fn get_connection_status(state: State<'_, AppState>) -> Result<serde_json:
         "target_fps": config.target_fps,
         "color_format": color_format_str,
         "bitrate_limit_kbps": config.bitrate_limit_kbps,
-        "file_transfer_enabled": config.file_transfer_enabled,
+        "file_transfer_enabled": false,
         "rtt_ms": metrics.rtt_ms,
         "packet_loss_rate": metrics.packet_loss_rate,
         "connection_type": conn_type_str,
@@ -885,69 +881,7 @@ async fn handle_remote_input(data: Vec<u8>) -> Result<(), String> {
     Ok(())
 }
 
-/// 接收來自前端 WebRTC Data Channel 的檔案資料塊並寫入磁碟（被控端）
-#[cfg(not(target_os = "ios"))]
-#[tauri::command]
-async fn receive_file_chunk(chunk: Vec<u8>) -> Result<(), String> {
-    use std::io::Write;
-    use std::sync::OnceLock;
-    use tokio::sync::Mutex as AsyncMutex;
 
-    static RECV_FILE: OnceLock<AsyncMutex<std::fs::File>> = OnceLock::new();
-
-    let tmp_path = std::env::temp_dir().join("2syn_received_file");
-    let file_lock = RECV_FILE.get_or_init(|| {
-        let f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&tmp_path)
-            .expect("[recv_file] 無法開啟暫存檔案");
-        AsyncMutex::new(f)
-    });
-
-    let mut file = file_lock.lock().await;
-    file.write_all(&chunk).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// 發起檔案傳輸，後端會強制驗證連線狀態
-#[cfg(not(target_os = "ios"))]
-#[tauri::command]
-async fn send_file(state: State<'_, AppState>, path: String) -> Result<String, String> {
-    // 取得當前連線狀態指標
-    let metrics = state.connection_manager.get_current_metrics().await;
-    
-    // 呼叫 FileTransferEngine::prepare_send 進行後端強制閘門驗證
-    let (file_name, total_bytes, _chunks) = FileTransferEngine::prepare_send(&path, metrics.connection_type)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let task_id = uuid::Uuid::new_v4().to_string();
-    
-    // 註冊任務，回傳 transferred_bytes 原子計數器
-    let _transferred = state.file_transfer_engine.register_task(&task_id, &file_name, total_bytes).await;
-
-    // TODO: 在背景啟動 tokio::spawn，逐塊透過 file_channel 傳送 _chunks
-    // 並且更新 _transferred 的數值
-    // 若遇上取消訊號，提早結束
-
-    Ok(task_id)
-}
-
-/// 獲取當前所有傳輸任務狀態（供前端輪詢進度條）
-#[cfg(not(target_os = "ios"))]
-#[tauri::command]
-async fn get_active_transfers(state: State<'_, AppState>) -> Result<Vec<syn_core::file_transfer::FileTransferTask>, String> {
-    let tasks = state.file_transfer_engine.get_all_snapshots().await;
-    Ok(tasks)
-}
-
-/// 取消指定傳輸任務
-#[cfg(not(target_os = "ios"))]
-#[tauri::command]
-async fn cancel_transfer(state: State<'_, AppState>, task_id: String) -> Result<bool, String> {
-    Ok(state.file_transfer_engine.cancel_task(&task_id).await)
-}
 
 /// 透過 Rust 信令發送自訂的 WebSocket 訊息 (例如日誌回傳)
 #[cfg(not(target_os = "ios"))]
@@ -969,16 +903,14 @@ async fn send_custom_signaling_message(
 pub fn run() {
     #[cfg(not(target_os = "ios"))]
     let connection_manager = Arc::new(ConnectionManager::new());
-    #[cfg(not(target_os = "ios"))]
-    let file_transfer_engine = Arc::new(FileTransferEngine::new());
+
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(AppState { 
             #[cfg(not(target_os = "ios"))]
             connection_manager,
-            #[cfg(not(target_os = "ios"))]
-            file_transfer_engine,
+
             #[cfg(not(target_os = "ios"))]
             active_pc: tokio::sync::Mutex::new(None),
             #[cfg(not(target_os = "ios"))]
@@ -1030,14 +962,7 @@ pub fn run() {
             trigger_network_simulation,
             #[cfg(not(target_os = "ios"))]
             handle_remote_input,
-            #[cfg(not(target_os = "ios"))]
-            receive_file_chunk,
-            #[cfg(not(target_os = "ios"))]
-            send_file,
-            #[cfg(not(target_os = "ios"))]
-            get_active_transfers,
-            #[cfg(not(target_os = "ios"))]
-            cancel_transfer,
+
             #[cfg(not(target_os = "ios"))]
             update_rust_pin,
             check_macos_permissions,
