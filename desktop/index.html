@@ -32,21 +32,29 @@
       </div>
     </div>
   </div>
-  
-  <!-- 顯示模式切換按鈕 (遠端畫面開啟時顯示) -->
-  <button id="btn-display-mode" style="display: none; position: fixed; top: 20px; right: 20px; z-index: 110; background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.4); border-radius: 8px; padding: 8px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 14px;">🔍 Original Size</button>
-  
-  <!-- 左上方懸浮控制選單 (遠端畫面開啟時顯示) -->
-  <div id="left-floating-menu" style="display: none; position: fixed; top: 20px; left: 20px; z-index: 110; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 6px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); align-items: center; gap: 8px;">
-    <button id="btn-touch-mode" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px;">🖱️ Trackpad Mode</button>
-    <div class="dropdown-wrapper" style="position: relative; display: inline-block;">
-      <button id="btn-send-keys" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px;">⌨️ Shortcuts</button>
-      <div id="shortcuts-dropdown" style="display: none; position: absolute; top: calc(100% + 6px); left: 0; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 6px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); flex-direction: column; gap: 4px; min-width: 140px; z-index: 120;">
-        <button class="shortcut-item" data-keys="ctrl-alt-del" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Ctrl + Alt + Del</button>
-        <button class="shortcut-item" data-keys="win" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Win / Super Key</button>
-        <button class="shortcut-item" data-keys="alt-tab" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Alt + Tab</button>
-        <button class="shortcut-item" data-keys="ctrl-esc" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Ctrl + Esc</button>
+  <!-- 行動端磨砂玻璃懸浮控制面板 -->
+  <div id="mobile-control-orb" style="display: none; position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1100; flex-direction: column; align-items: center; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);">
+    <!-- 懸浮控制柄 / 藥丸型手把 (Notch Handle) -->
+    <div id="btn-control-toggle" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 4px 16px; color: rgba(255,255,255,0.95); cursor: pointer; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.35); user-select: none;">
+      <span>🛠️ Quick Menu</span>
+      <span id="control-toggle-arrow" style="transition: transform 0.3s; display: inline-block;">▼</span>
+    </div>
+    
+    <!-- 展開後的控制條 (磨砂玻璃樣式) -->
+    <div id="control-dock-panel" style="max-height: 0px; opacity: 0; pointer-events: none; transform: translateY(-10px); position: absolute; top: calc(100% + 8px); background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; padding: 8px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); display: flex; align-items: center; gap: 8px; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); white-space: nowrap;">
+      <button id="btn-touch-mode" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;">🖱️ Trackpad Mode</button>
+      
+      <div class="dropdown-wrapper" style="position: relative; display: inline-block;">
+        <button id="btn-send-keys" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;">⌨️ Shortcuts</button>
+        <div id="shortcuts-dropdown" style="display: none; position: absolute; top: calc(100% + 6px); left: 0; background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 6px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); flex-direction: column; gap: 4px; min-width: 140px; z-index: 1200;">
+          <button class="shortcut-item" data-keys="ctrl-alt-del" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Ctrl + Alt + Del</button>
+          <button class="shortcut-item" data-keys="win" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Win / Super Key</button>
+          <button class="shortcut-item" data-keys="alt-tab" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Alt + Tab</button>
+          <button class="shortcut-item" data-keys="ctrl-esc" style="background: none; border: none; border-radius: 6px; padding: 8px 12px; color: white; cursor: pointer; text-align: left; font-size: 12px; transition: background 0.2s; white-space: nowrap;">Ctrl + Esc</button>
+        </div>
       </div>
+      
+      <button id="btn-display-mode" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 12px; font-weight: 600;">🔍 Original Size</button>
     </div>
   </div>
   

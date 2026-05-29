@@ -1247,8 +1247,8 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         if (btnDisplayMode) btnDisplayMode.style.display = "block";
         if (mainContent) mainContent.style.display = "none";
         
-        const leftFloatingMenu = document.getElementById("left-floating-menu");
-        if (leftFloatingMenu) leftFloatingMenu.style.display = "flex";
+        const mobileControlOrb = document.getElementById("mobile-control-orb");
+        if (mobileControlOrb) mobileControlOrb.style.display = "flex";
         
         // 如果是在手機/觸控環境上，顯示鍵盤呼叫按鈕
         if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
@@ -1539,9 +1539,9 @@ function resetConnectionUI() {
     btnKeyboard.style.display = "none";
   }
   
-  const leftFloatingMenu = document.getElementById("left-floating-menu");
-  if (leftFloatingMenu) {
-    leftFloatingMenu.style.display = "none";
+  const mobileControlOrb = document.getElementById("mobile-control-orb");
+  if (mobileControlOrb) {
+    mobileControlOrb.style.display = "none";
   }
 }
 
@@ -2350,8 +2350,21 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           // 模式二：Scale 放大模式，平移 CSS transform
           const containerWidth = videoContainer.clientWidth;
           const containerHeight = videoContainer.clientHeight;
-          const maxTx = ((videoScale - 1) * containerWidth) / 2;
-          const maxTy = ((videoScale - 1) * containerHeight) / 2;
+          const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+          const containerRatio = containerWidth / containerHeight;
+          
+          let renderedWidth = containerWidth;
+          let renderedHeight = containerHeight;
+          if (containerRatio > videoRatio) {
+            renderedHeight = containerHeight;
+            renderedWidth = renderedHeight * videoRatio;
+          } else {
+            renderedWidth = containerWidth;
+            renderedHeight = renderedWidth / videoRatio;
+          }
+          
+          const maxTx = (renderedWidth * videoScale >= containerWidth) ? (renderedWidth * videoScale - containerWidth) / 2 : 0;
+          const maxTy = (renderedHeight * videoScale >= containerHeight) ? (renderedHeight * videoScale - containerHeight) / 2 : 0;
           
           // 畫面往反方向帶：dx > 0 (游標在右側) -> 視訊向左移 (videoTranslateX 減少)
           videoTranslateX -= dx;
@@ -2517,9 +2530,37 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   }
 
   // 初始化懸浮選單與 Toggle 切換按鈕
-  const leftFloatingMenu = document.getElementById("left-floating-menu");
-  if (leftFloatingMenu) {
-    leftFloatingMenu.style.display = "flex";
+  const mobileControlOrb = document.getElementById("mobile-control-orb");
+  if (mobileControlOrb) {
+    mobileControlOrb.style.display = "flex";
+  }
+
+  // 藥丸型手把折疊事件綁定
+  const controlToggle = document.getElementById("btn-control-toggle");
+  const controlPanel = document.getElementById("control-dock-panel");
+  const toggleArrow = document.getElementById("control-toggle-arrow");
+  let isPanelOpen = false;
+  
+  if (controlToggle && controlPanel && toggleArrow) {
+    controlToggle.onclick = (e) => {
+      e.stopPropagation();
+      isPanelOpen = !isPanelOpen;
+      if (isPanelOpen) {
+        controlPanel.style.maxHeight = "200px";
+        controlPanel.style.opacity = "1";
+        controlPanel.style.pointerEvents = "auto";
+        controlPanel.style.transform = "translateY(0)";
+        toggleArrow.textContent = "▲";
+        toggleArrow.style.transform = "rotate(180deg)";
+      } else {
+        controlPanel.style.maxHeight = "0px";
+        controlPanel.style.opacity = "0";
+        controlPanel.style.pointerEvents = "none";
+        controlPanel.style.transform = "translateY(-10px)";
+        toggleArrow.textContent = "▼";
+        toggleArrow.style.transform = "rotate(0deg)";
+      }
+    };
   }
 
   const btnTouchMode = document.getElementById("btn-touch-mode") as HTMLButtonElement;
@@ -2920,8 +2961,22 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         } else if (videoScale > 1.0 && videoContainer) {
           const containerWidth = videoContainer.clientWidth;
           const containerHeight = videoContainer.clientHeight;
-          const maxTx = ((videoScale - 1) * containerWidth) / 2;
-          const maxTy = ((videoScale - 1) * containerHeight) / 2;
+          const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+          const containerRatio = containerWidth / containerHeight;
+          
+          let renderedWidth = containerWidth;
+          let renderedHeight = containerHeight;
+          if (containerRatio > videoRatio) {
+            renderedHeight = containerHeight;
+            renderedWidth = renderedHeight * videoRatio;
+          } else {
+            renderedWidth = containerWidth;
+            renderedHeight = renderedWidth / videoRatio;
+          }
+          
+          const maxTx = (renderedWidth * videoScale >= containerWidth) ? (renderedWidth * videoScale - containerWidth) / 2 : 0;
+          const maxTy = (renderedHeight * videoScale >= containerHeight) ? (renderedHeight * videoScale - containerHeight) / 2 : 0;
+          
           videoTranslateX = Math.max(-maxTx, Math.min(maxTx, videoTranslateX));
           videoTranslateY = Math.max(-maxTy, Math.min(maxTy, videoTranslateY));
         }
@@ -3037,6 +3092,33 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
+
+    const now = Date.now();
+
+    // 雙指輕觸判定優化：只要在 250ms 內偵測到 maxTouches === 2，且未發生大範圍縮放，在第一根手指抬起時即刻觸發右鍵
+    if (maxTouches === 2) {
+      if (touchStartTime > 0 && now - touchStartTime < 250 && !isLocalPinching) {
+        // 雙指輕觸 -> 右鍵點擊
+        const payloadDown = new Uint8Array(1);
+        payloadDown[0] = 2; // Right click down
+        sendInputPacket(buildInputPacket(0x02, payloadDown));
+        const payloadUp = new Uint8Array(1);
+        payloadUp[0] = 2; // Right click up
+        sendInputPacket(buildInputPacket(0x03, payloadUp));
+        
+        console.log("[Gesture] 雙指輕點，極速觸發右鍵點擊");
+        
+        if (typeof navigator.vibrate === "function") {
+          navigator.vibrate(30);
+        }
+      }
+      
+      // 重置雙指狀態，防範後續多重觸發
+      maxTouches = 0;
+      touchStartTime = 0;
+      initialPinchDistance = -1;
+      return;
+    }
     
     if (e.touches.length === 0) {
       if (isKeyboardActive && hiddenInput && document.activeElement !== hiddenInput) {
@@ -3045,8 +3127,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       // 抬起手指時，立刻重置邊緣平移
       currentCursorPercentX = 0.5;
       currentCursorPercentY = 0.5;
-
-      const now = Date.now();
       
       if (hasTriggeredLongPress) {
         hasTriggeredLongPress = false;
@@ -3073,28 +3153,20 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           sendInputPacket(buildInputPacket(0x03, payload));
           isDragging = false;
         } else {
-          if (touchStartTime > 0 && now - touchStartTime < 300) {
-            if (maxTouches >= 2) {
-              // 雙指輕觸 -> 右鍵點擊
+          // 單指輕觸 -> 左鍵點擊 (小於 250ms，且移動距離極小)
+          if (touchStartTime > 0 && now - touchStartTime < 250 && maxTouches === 1) {
+            const endX = e.changedTouches.length > 0 ? e.changedTouches[0].clientX : touchStartPos.x;
+            const endY = e.changedTouches.length > 0 ? e.changedTouches[0].clientY : touchStartPos.y;
+            const dist = Math.sqrt(Math.pow(endX - touchStartPos.x, 2) + Math.pow(endY - touchStartPos.y, 2));
+            if (dist < 10) {
               const payloadDown = new Uint8Array(1);
-              payloadDown[0] = 2; // Right click
+              payloadDown[0] = 1; // Left click down
               sendInputPacket(buildInputPacket(0x02, payloadDown));
               const payloadUp = new Uint8Array(1);
-              payloadUp[0] = 2;
+              payloadUp[0] = 1; // Left click up
               sendInputPacket(buildInputPacket(0x03, payloadUp));
-            } else {
-              // 單指輕觸 -> 左鍵點擊
-              const endX = e.changedTouches.length > 0 ? e.changedTouches[0].clientX : touchStartPos.x;
-              const endY = e.changedTouches.length > 0 ? e.changedTouches[0].clientY : touchStartPos.y;
-              const dist = Math.sqrt(Math.pow(endX - touchStartPos.x, 2) + Math.pow(endY - touchStartPos.y, 2));
-              if (dist < 15) {
-                const payloadDown = new Uint8Array(1);
-                payloadDown[0] = 1;
-                sendInputPacket(buildInputPacket(0x02, payloadDown));
-                const payloadUp = new Uint8Array(1);
-                payloadUp[0] = 1;
-                sendInputPacket(buildInputPacket(0x03, payloadUp));
-              }
+              
+              console.log("[Gesture] 單指輕點，觸發左鍵點擊");
             }
           }
         }
@@ -3256,19 +3328,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       }, 10);
     });
 
-    hiddenInput.addEventListener("keydown", (e) => {
-      if (e.key === "Backspace" || e.keyCode === 8) {
-        if (!isComposing) {
-          e.preventDefault();
-          handleBackspace();
-        }
-      } else if (e.key === "Enter" || e.keyCode === 13) {
-        if (!isComposing) {
-          e.preventDefault();
-          handleEnter();
-        }
-      }
-    });
 
     hiddenInput.addEventListener("input", (e: Event) => {
       if (isComposing) return;
