@@ -235,5 +235,14 @@
   "err_target_wakeup": "원격 장치가 깨어나는 중일 수 있습니다. {0}초 후 자동 재시도합니다({1}/{2})...",
   "err_target_offline_final": "{0}번 재시도 후에도 원격 장치가 오프라인입니다. 호스트가 실행 중인지 확인하세요.",
   "status_online": "온라인",
-  "status_connecting": "연결 중..."
+  "status_connecting": "연결 중...",
+  "log_sig_rust_offer_received": "[Rust] {0}에서 연결 요청 수신, 검증 중...",
+  "log_sig_rust_offer_success": "[Rust] 연결 요청 검증 완료, {0}에 Answer 전송",
+  "log_sig_rust_offer_rejected": "[Rust] {0}의 연결 거부: {1}",
+  "log_sig_rust_ice_received": "[Rust] {0}에서 ICE Candidate 수신, 적용 중...",
+  "log_sig_rust_ice_applied": "[Rust] ICE Candidate가 성공적으로 적용되었습니다",
+  "log_sig_rust_ice_failed": "[Rust] ICE Candidate 적용 실패: {0}",
+  "log_sig_rust_watchdog": "[Rust] 하트비트 타임아웃, 시그널링 연결 재구축",
+  "log_sig_rust_selfheal": "[Rust] 시그널링 자가 복구 트리거, 경로 재설정",
+  "log_sig_rust_forward_candidate": "[Rust] ICE Candidate를 {0}에 전달"
 }

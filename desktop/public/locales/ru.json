@@ -235,5 +235,14 @@
   "err_target_wakeup": "Удалённое устройство, возможно, просыпается. Повтор через {0} сек. ({1}/{2})...",
   "err_target_offline_final": "Удалённое устройство недоступно после {0} попыток. Убедитесь, что хост запущен.",
   "status_online": "В сети",
-  "status_connecting": "Подключение..."
+  "status_connecting": "Подключение...",
+  "log_sig_rust_offer_received": "[Rust] Получен запрос соединения от {0}, проверка...",
+  "log_sig_rust_offer_success": "[Rust] Запрос проверен, Answer отправлен {0}",
+  "log_sig_rust_offer_rejected": "[Rust] Запрос от {0} отклонён: {1}",
+  "log_sig_rust_ice_received": "[Rust] Получен ICE Candidate от {0}, применяется...",
+  "log_sig_rust_ice_applied": "[Rust] ICE Candidate успешно применён",
+  "log_sig_rust_ice_failed": "[Rust] Ошибка применения ICE Candidate: {0}",
+  "log_sig_rust_watchdog": "[Rust] Таймаут сердцебиения, пересоздание сигнального соединения",
+  "log_sig_rust_selfheal": "[Rust] Самовосстановление сигнализации активировано",
+  "log_sig_rust_forward_candidate": "[Rust] ICE Candidate переслан {0}"
 }

@@ -235,5 +235,14 @@
   "err_target_wakeup": "Perangkat jarak jauh mungkin sedang bangun. Mencoba ulang dalam {0} detik ({1}/{2})...",
   "err_target_offline_final": "Perangkat jarak jauh offline setelah {0} percobaan. Pastikan host berjalan dan terhubung.",
   "status_online": "Online",
-  "status_connecting": "Menghubungkan..."
+  "status_connecting": "Menghubungkan...",
+  "log_sig_rust_offer_received": "[Rust] Menerima penawaran dari {0}, memverifikasi...",
+  "log_sig_rust_offer_success": "[Rust] Penawaran terverifikasi, Jawaban dikirim ke {0}",
+  "log_sig_rust_offer_rejected": "[Rust] Penawaran dari {0} ditolak: {1}",
+  "log_sig_rust_ice_received": "[Rust] Menerima ICE Candidate dari {0}, menerapkan...",
+  "log_sig_rust_ice_applied": "[Rust] ICE Candidate berhasil diterapkan",
+  "log_sig_rust_ice_failed": "[Rust] Gagal menerapkan ICE Candidate: {0}",
+  "log_sig_rust_watchdog": "[Rust] Timeout heartbeat, membangun ulang koneksi",
+  "log_sig_rust_selfheal": "[Rust] Penyembuhan diri sinyal dipicu, membangun ulang rute",
+  "log_sig_rust_forward_candidate": "[Rust] ICE Candidate diteruskan ke {0}"
 }

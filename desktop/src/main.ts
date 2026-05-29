@@ -146,6 +146,145 @@ function showToast(message: string, duration: number = 3000) {
       return tFunc("log_input_unreliable_failed").replace("{0}", val);
     }
 
+    // 16. Rust 信令：連線請求收到
+    if (msg.includes("收到來自") && msg.includes("的 Offer，進行驗證")) {
+      const match = msg.match(/收到來自 (.+?) 的 Offer/);
+      const id = match ? match[1] : "?";
+      return tFunc("log_sig_rust_offer_received").replace("{0}", id);
+    }
+    // 17. Rust 信令：成功回傳 Answer
+    if (msg.includes("成功處理 Offer，正在回傳 Answer 至")) {
+      const match = msg.match(/回傳 Answer 至 (.+?)\.\.\./);
+      const id = match ? match[1] : "?";
+      return tFunc("log_sig_rust_offer_success").replace("{0}", id);
+    }
+    // 18. Rust 信令：拒絕連線
+    if (msg.includes("拒絕來自") && msg.includes("的連線：")) {
+      const match = msg.match(/拒絕來自 (.+?) 的連線：(.+)/);
+      const id = match ? match[1] : "?";
+      const reason = match ? match[2] : "";
+      return tFunc("log_sig_rust_offer_rejected").replace("{0}", id).replace("{1}", reason);
+    }
+    if (msg.includes("PIN 碼或固定密碼不符")) {
+      const match = msg.match(/來自 (.+?) 的連線/);
+      const id = match ? match[1] : "?";
+      return tFunc("log_sig_rust_offer_rejected").replace("{0}", id).replace("{1}", "PIN mismatch");
+    }
+    // 19. Rust 信令：ICE 候選收到
+    if (msg.includes("收到來自") && msg.includes("的 ICE Candidate，套用中")) {
+      const match = msg.match(/收到來自 (.+?) 的 ICE/);
+      const id = match ? match[1] : "?";
+      return tFunc("log_sig_rust_ice_received").replace("{0}", id);
+    }
+    // 20. Rust 信令：ICE 套用成功
+    if (msg.includes("已成功加入遠端 ICE Candidate")) {
+      return tFunc("log_sig_rust_ice_applied");
+    }
+    // 21. Rust 信令：ICE 套用失敗
+    if (msg.includes("套用 ICE Candidate 失敗:")) {
+      const val = msg.split("失敗:").slice(1).join("失敗:").trim();
+      return tFunc("log_sig_rust_ice_failed").replace("{0}", val);
+    }
+    // 22. Rust 信令：心跳超時
+    if (msg.includes("心跳接收超時") || msg.includes("主動判定斷線")) {
+      return tFunc("log_sig_rust_watchdog");
+    }
+    // 23. Rust 信令：自癒機制
+    if (msg.includes("自動重連自癒以更新路由")) {
+      return tFunc("log_sig_rust_selfheal");
+    }
+    // 24. Rust 信令：ICE 轉發
+    if (msg.includes("Rust 信令已發送本機 ICE Candidate 至")) {
+      const match = msg.match(/至 (.+)/);
+      const id = match ? match[1] : "?";
+      return tFunc("log_sig_rust_forward_candidate").replace("{0}", id);
+    }
+    // 25. Rust 收到 9 個 ICE Candidate（批次）
+    if (msg.includes("個 ICE Candidate，套用中")) {
+      const match = msg.match(/收到 (\d+) 個/);
+      const count = match ? match[1] : "?";
+      return tFunc("log_sig_rust_ice_received").replace("{0}", count + " candidates");
+    }
+    // 26. Gesture：單指長按
+    if (msg.includes("單指長按，觸發右鍵點擊與震動") || msg.includes("[Gesture] Long press")) {
+      return "[Gesture] " + tFunc("log_gesture_long_press");
+    }
+    // 27. Gesture：觸控被取消
+    if (msg.includes("觸控被取消，重置狀態，釋放滑鼠按鍵") || msg.includes("[Gesture] Touch cancelled")) {
+      return "[Gesture] " + tFunc("log_gesture_cancelled");
+    }
+    // 28. Input：失去焦點，發送 ResetState
+    if (msg.includes("失去焦點或切換分頁，發送 ResetState") || msg.includes("[Input] Focus lost")) {
+      return "[Input] " + tFunc("log_input_focus_lost");
+    }
+    // 29. Pointer Lock：鎖定
+    if (msg.includes("滑鼠指標已鎖定") || msg.includes("[Pointer Lock] Locked")) {
+      return "[Pointer Lock] " + tFunc("pointer_lock_tooltip");
+    }
+    // 30. Pointer Lock：解鎖
+    if (msg.includes("滑鼠指標已解鎖") || msg.includes("[Pointer Lock] Unlocked")) {
+      return "[Pointer Lock] " + tFunc("log_status_disconnected");
+    }
+    // 31. Signaling：手動重連
+    if (msg.includes("使用者手動觸發信令重連") || msg.includes("User manually triggered")) {
+      return "[Signaling] " + tFunc("log_sig_manual_reconnect");
+    }
+    // 32. Signaling：已連線，正在登入
+    if (msg.includes("已連線，正在登入") || msg.includes("Connected, logging in")) {
+      return "[Signaling] " + tFunc("log_sig_connected_logging_in");
+    }
+    // 33. Signaling：WebSocket 斷線重試
+    if (msg.includes("WebSocket 已斷線，5 秒後重新嘗試") || msg.includes("WebSocket disconnected, retrying")) {
+      return "[Signaling] " + tFunc("log_sig_disconnected_retry");
+    }
+    // 34. Signaling：連線錯誤
+    if (msg.includes("[Signaling] 連線錯誤:") || msg.includes("[Signaling] Connection error:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return "[Signaling] " + tFunc("log_sig_connection_error").replace("{0}", val);
+    }
+    // 35. Signaling：伺服器錯誤
+    if (msg.includes("[Signaling] 伺服器錯誤:") || msg.includes("[Signaling] Server error:")) {
+      const val = msg.split(":").slice(1).join(":").trim();
+      return "[Signaling] " + tFunc("log_sig_server_error").replace("{0}", val);
+    }
+    // 36. Signaling Rust：嘗試連線
+    if (msg.includes("[Rust] 嘗試連線至信令伺服器")) {
+      return tFunc("log_sig_rust_connecting");
+    }
+    // 37. Signaling Rust：已成功連線
+    if (msg.includes("[Rust] 已成功連線並登入信令伺服器")) {
+      return tFunc("log_sig_rust_connected");
+    }
+    // 38. Signaling Rust：斷線重試
+    if (msg.includes("[Rust] 與信令伺服器連線已斷開")) {
+      return tFunc("log_sig_rust_disconnected");
+    }
+    // 39. Signaling Rust：委託啟動
+    if (msg.includes("已成功委託 Rust 後端啟動信令客戶端")) {
+      return tFunc("log_sig_rust_start_success");
+    }
+    // 40. Signaling Rust：啟動失敗
+    if (msg.includes("啟動 Rust 信令失敗:")) {
+      const val = msg.split("失敗:").slice(1).join("失敗:").trim();
+      return tFunc("log_sig_rust_start_failed").replace("{0}", val);
+    }
+    // 41. Tauri 桌面環境偵測
+    if (msg.includes("偵測為 Tauri 桌面環境，註冊 Rust 後端信令維護")) {
+      return "[Signaling] " + tFunc("log_sig_tauri_rust_delegation");
+    }
+    // 42. 網頁控制端焦點重連
+    if (msg.includes("網頁控制端獲得焦點，且信令未連線，立即重建連線")) {
+      return "[Signaling] " + tFunc("log_sig_web_focus_reconnect");
+    }
+    // 43. 網頁控制端焦點 ping
+    if (msg.includes("網頁控制端獲得焦點，發送 ping 驗證連線")) {
+      return "[Signaling] " + tFunc("log_sig_web_focus_ping");
+    }
+    // 44. 網頁控制端頁面恢復可見
+    if (msg.includes("網頁控制端頁面恢復可見，且信令未連線，立即重建連線")) {
+      return "[Signaling] " + tFunc("log_sig_web_visible_reconnect");
+    }
+
     return msg;
   }
 
@@ -217,13 +356,6 @@ let myId: string = "";                        // 本機 9 位數 ID
 let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
 let currentCursorPercentX = 0.5;               // 全域游標百分比 X（用於避讓對焦）
 let currentCursorPercentY = 0.5;               // 全域游標百分比 Y（用於避讓對焦）
-// Target offline 自動重試狀態
-let retryCount: number = 0;                    // 目前已重試次數
-let lastRetryRemoteId: string = "";            // 最後一次連線目標 ID
-let lastRetryPin: string = "";                 // 最後一次連線 PIN
-let retryCountdownTimer: ReturnType<typeof setInterval> | null = null; // 倒計時計時器
-const MAX_RETRY_COUNT = 3;                     // 最大重試次數
-const RETRY_INTERVAL_SEC = 15;                 // 每次重試等待秒數
 
 // 取得信令伺服器 WebSocket URL（優先環境變數，備用本地，支援 LAN 測試）
 // 官方中心化信令伺服器位址 (未來上架部署於雲端的主機)
@@ -977,90 +1109,25 @@ function initSignalingClient() {
       case "error":
         console.error("[Signaling] 伺服器錯誤:", msg.message);
         if (msg.message === "Target offline") {
-          // 清除任何殘留的倒計時計時器
-          if (retryCountdownTimer) {
-            clearInterval(retryCountdownTimer);
-            retryCountdownTimer = null;
-          }
-
-          if (retryCount < MAX_RETRY_COUNT) {
-            retryCount++;
-            const currentTry = retryCount;
-            let secondsLeft = RETRY_INTERVAL_SEC;
-
-            const btnConnect = document.getElementById("btn-connect");
-            const btnText = document.getElementById("txt-btn-connect");
-
-            const updateBtnText = () => {
-              const wakeupTemplate = t("err_target_wakeup") ||
-                "Remote device may be waking up. Auto-retrying in {0}s ({1}/{2})...";
-              const msg = wakeupTemplate
-                .replace("{0}", String(secondsLeft))
-                .replace("{1}", String(currentTry))
-                .replace("{2}", String(MAX_RETRY_COUNT));
-              if (btnText) btnText.textContent = msg;
-              else if (btnConnect) btnConnect.textContent = msg;
-            };
-
-            if (btnConnect) {
-              btnConnect.setAttribute("disabled", "true");
-              btnConnect.style.backgroundColor = "#b45309"; // 琥珀色，表示等待中
-            }
-            updateBtnText();
-
-            retryCountdownTimer = setInterval(async () => {
-              secondsLeft--;
-              if (secondsLeft > 0) {
-                updateBtnText();
-              } else {
-                clearInterval(retryCountdownTimer!);
-                retryCountdownTimer = null;
-                console.log(`[Signaling] 自動重試連線（第 ${currentTry}/${MAX_RETRY_COUNT} 次）至 ${lastRetryRemoteId}`);
-                if (btnConnect) {
-                  btnConnect.style.backgroundColor = "";
-                }
-                await startCall(lastRetryRemoteId, lastRetryPin);
-              }
-            }, 1000);
-          } else {
-            // 已達最大重試次數，顯示最終失敗訊息
-            retryCount = 0;
-            const finalTemplate = t("err_target_offline_final") ||
-              "Remote device is offline after {0} retries. Please ensure the host is running.";
-            const finalMsg = finalTemplate.replace("{0}", String(MAX_RETRY_COUNT));
-            const btnConnect = document.getElementById("btn-connect");
-            const btnText = document.getElementById("txt-btn-connect");
-            if (btnConnect) {
-              btnConnect.style.backgroundColor = "#e74c3c";
-              if (btnText) btnText.textContent = finalMsg;
-              else btnConnect.textContent = finalMsg;
-              setTimeout(() => {
-                const btnTextReset = document.getElementById("txt-btn-connect");
-                if (btnTextReset) btnTextReset.textContent = t("btn_connect");
-                else btnConnect.textContent = t("btn_connect");
-                btnConnect.style.backgroundColor = "";
-              }, 4000);
-            }
-            resetConnectionUI();
-          }
-        } else if (msg.message.includes("Connection rejected")) {
-          // 被拒絕時重置重試計數
-          retryCount = 0;
-          if (retryCountdownTimer) {
-            clearInterval(retryCountdownTimer);
-            retryCountdownTimer = null;
-          }
-          const rejectMsg = t("err_rejected");
+          const offlineMsg = t("err_target_offline");
           const btnConnect = document.getElementById("btn-connect");
-          const btnText = document.getElementById("txt-btn-connect");
           if (btnConnect) {
-            if (btnText) btnText.textContent = rejectMsg;
-            else btnConnect.textContent = rejectMsg;
+            btnConnect.textContent = offlineMsg;
             btnConnect.style.backgroundColor = "#e74c3c";
             setTimeout(() => {
-              const btnTextReset = document.getElementById("txt-btn-connect");
-              if (btnTextReset) btnTextReset.textContent = t("btn_connect");
-              else btnConnect.textContent = t("btn_connect");
+              btnConnect.textContent = t("btn_connect");
+              btnConnect.style.backgroundColor = "";
+            }, 3000);
+          }
+          resetConnectionUI();
+        } else if (msg.message.includes("Connection rejected")) {
+          const rejectMsg = t("err_rejected");
+          const btnConnect = document.getElementById("btn-connect");
+          if (btnConnect) {
+            btnConnect.textContent = rejectMsg;
+            btnConnect.style.backgroundColor = "#e74c3c";
+            setTimeout(() => {
+              btnConnect.textContent = t("btn_connect");
               btnConnect.style.backgroundColor = "";
             }, 3000);
           }
@@ -1606,16 +1673,6 @@ function initConnectButton() {
       alert(t("err_invalid_pin"));
       return;
     }
-
-    // 每次手動點擊連線時，重置重試計數與倒計時
-    retryCount = 0;
-    if (retryCountdownTimer) {
-      clearInterval(retryCountdownTimer);
-      retryCountdownTimer = null;
-    }
-    // 記錄此次連線目標，供自動重試使用
-    lastRetryRemoteId = remoteId;
-    lastRetryPin = pin;
 
     btnConnect.setAttribute("disabled", "true");
     const btnText = document.getElementById("txt-btn-connect");
@@ -2380,6 +2437,83 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let touchStartClientY = 0;
   let hasTriggeredLongPress = false;
 
+  // --- 慣性 (Momentum) 狀態 ---
+  let momentumVx = 0;
+  let momentumVy = 0;
+  let momentumRafId: number | null = null;
+  const MOMENTUM_DECAY = 0.92;
+  const MOMENTUM_MIN_VELOCITY = 0.0005;
+  let lastMoveTimestamp = 0;
+
+  function startMomentum() {
+    if (momentumRafId !== null) return;
+    const step = () => {
+      if (Math.abs(momentumVx) < MOMENTUM_MIN_VELOCITY && Math.abs(momentumVy) < MOMENTUM_MIN_VELOCITY) {
+        momentumRafId = null;
+        return;
+      }
+      trackpadCursorX += momentumVx;
+      trackpadCursorY += momentumVy;
+      trackpadCursorX = Math.max(0, Math.min(1, trackpadCursorX));
+      trackpadCursorY = Math.max(0, Math.min(1, trackpadCursorY));
+      pendingMouseMoveX = trackpadCursorX;
+      pendingMouseMoveY = trackpadCursorY;
+      triggerMoveRaf();
+      updateCursorOverlay(trackpadCursorX, trackpadCursorY);
+      currentCursorPercentX = trackpadCursorX;
+      currentCursorPercentY = trackpadCursorY;
+      momentumVx *= MOMENTUM_DECAY;
+      momentumVy *= MOMENTUM_DECAY;
+      momentumRafId = requestAnimationFrame(step);
+    };
+    momentumRafId = requestAnimationFrame(step);
+  }
+
+  function stopMomentum() {
+    if (momentumRafId !== null) {
+      cancelAnimationFrame(momentumRafId);
+      momentumRafId = null;
+    }
+    momentumVx = 0;
+    momentumVy = 0;
+  }
+
+  function applyAcceleration(delta: number): number {
+    const absDelta = Math.abs(delta);
+    let multiplier: number;
+    if (absDelta < 2) {
+      multiplier = 0.8;
+    } else if (absDelta < 8) {
+      multiplier = 0.8 + ((absDelta - 2) / 6) * 1.7;
+    } else {
+      multiplier = 2.5 + (absDelta - 8) * 0.08;
+    }
+    return delta * multiplier;
+  }
+
+  function updateCursorOverlay(percentX: number, percentY: number) {
+    const cursorEl = document.getElementById("remote-cursor");
+    if (!cursorEl || isDirectTouchMode) return;
+    const rect = videoEl.getBoundingClientRect();
+    const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+    const containerRatio = rect.width / rect.height;
+    let renderedWidth: number, renderedHeight: number, offsetX = 0, offsetY = 0;
+    if (containerRatio > videoRatio) {
+      renderedHeight = rect.height;
+      renderedWidth = renderedHeight * videoRatio;
+      offsetX = (rect.width - renderedWidth) / 2;
+    } else {
+      renderedWidth = rect.width;
+      renderedHeight = renderedWidth / videoRatio;
+      offsetY = (rect.height - renderedHeight) / 2;
+    }
+    const pixelX = rect.left + offsetX + percentX * renderedWidth;
+    const pixelY = rect.top + offsetY + percentY * renderedHeight;
+    cursorEl.style.display = "block";
+    cursorEl.style.left = pixelX + "px";
+    cursorEl.style.top = pixelY + "px";
+  }
+
   // 初始化懸浮選單與 Toggle 切換按鈕
   const leftFloatingMenu = document.getElementById("left-floating-menu");
   if (leftFloatingMenu) {
@@ -2458,6 +2592,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
       currentCursorPercentX = x;
       currentCursorPercentY = y;
+      updateCursorOverlay(x, y);
     }
   });
 
@@ -2646,6 +2781,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   videoEl.addEventListener("touchstart", (e) => {
     e.preventDefault();
     maxTouches = Math.max(maxTouches, e.touches.length);
+    stopMomentum();
     
     if (e.touches.length === 2) {
       if (longPressTimer) {
@@ -2698,7 +2834,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           navigator.vibrate(30);
         }
         console.log("[Gesture] 單指長按，觸發右鍵點擊與震動");
-      }, 500);
+      }, 400);
       
       if (isDirectTouchMode) {
         isDragging = true;
@@ -2850,8 +2986,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           const dx = currentX - lastTouchX;
           const dy = currentY - lastTouchY;
           
-          trackpadCursorX += (dx * 1.5) / renderedWidth;
-          trackpadCursorY += (dy * 1.5) / renderedHeight;
+          const accDx = applyAcceleration(dx);
+          const accDy = applyAcceleration(dy);
+          
+          trackpadCursorX += accDx / renderedWidth;
+          trackpadCursorY += accDy / renderedHeight;
           
           if (isNaN(trackpadCursorX)) trackpadCursorX = 0.5;
           if (isNaN(trackpadCursorY)) trackpadCursorY = 0.5;
@@ -2862,6 +3001,16 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           pendingMouseMoveX = trackpadCursorX;
           pendingMouseMoveY = trackpadCursorY;
           triggerMoveRaf();
+
+          updateCursorOverlay(trackpadCursorX, trackpadCursorY);
+
+          const now = performance.now();
+          const dt = now - lastMoveTimestamp;
+          if (dt > 0 && dt < 100) {
+            momentumVx = (accDx / renderedWidth) * (16 / dt);
+            momentumVy = (accDy / renderedHeight) * (16 / dt);
+          }
+          lastMoveTimestamp = now;
 
           currentCursorPercentX = trackpadCursorX;
           currentCursorPercentY = trackpadCursorY;
@@ -2942,6 +3091,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         }
       }
       
+      if (!isDragging && !isDirectTouchMode && (Math.abs(momentumVx) > MOMENTUM_MIN_VELOCITY || Math.abs(momentumVy) > MOMENTUM_MIN_VELOCITY)) {
+        startMomentum();
+      }
+
       initialPinchDistance = -1;
       touchStartTime = 0;
       lastTapTime = now;

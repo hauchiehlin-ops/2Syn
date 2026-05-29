@@ -243,5 +243,14 @@
   "btn_show": "Show",
   "btn_hide": "Hide",
   "err_target_wakeup": "Remote device may be waking up. Auto-retrying in {0} seconds ({1}/{2})...",
-  "err_target_offline_final": "Remote device is offline after {0} retries. Please ensure the host is running and connected."
+  "err_target_offline_final": "Remote device is offline after {0} retries. Please ensure the host is running and connected.",
+  "log_sig_rust_offer_received": "[Rust] Received offer from {0}, verifying...",
+  "log_sig_rust_offer_success": "[Rust] Offer verified, Answer sent to {0}",
+  "log_sig_rust_offer_rejected": "[Rust] Rejected offer from {0}: {1}",
+  "log_sig_rust_ice_received": "[Rust] Received ICE Candidate from {0}, applying...",
+  "log_sig_rust_ice_applied": "[Rust] ICE Candidate applied successfully",
+  "log_sig_rust_ice_failed": "[Rust] Failed to apply ICE Candidate: {0}",
+  "log_sig_rust_watchdog": "[Rust] Heartbeat timeout, rebuilding signaling connection",
+  "log_sig_rust_selfheal": "[Rust] Signaling self-heal triggered, rerouting",
+  "log_sig_rust_forward_candidate": "[Rust] ICE Candidate forwarded to {0}"
 }

@@ -243,5 +243,14 @@
   "btn_show": "顯示",
   "btn_hide": "隱藏",
   "err_target_wakeup": "對方裝置可能正在喚醒中，{0} 秒後自動重試（{1}/{2}）...",
-  "err_target_offline_final": "對方裝置離線，已重試 {0} 次仍無法連線。請確認被控端已開啟且網路正常。"
+  "err_target_offline_final": "對方裝置離線，已重試 {0} 次仍無法連線。請確認被控端已開啟且網路正常。",
+  "log_sig_rust_offer_received": "[Rust] 收到來自 {0} 的連線請求，驗證中...",
+  "log_sig_rust_offer_success": "[Rust] 連線請求驗證通過，Answer 已回傳給 {0}",
+  "log_sig_rust_offer_rejected": "[Rust] 拒絕來自 {0} 的連線：{1}",
+  "log_sig_rust_ice_received": "[Rust] 收到來自 {0} 的 ICE Candidate，套用中...",
+  "log_sig_rust_ice_applied": "[Rust] ICE Candidate 套用成功",
+  "log_sig_rust_ice_failed": "[Rust] ICE Candidate 套用失敗：{0}",
+  "log_sig_rust_watchdog": "[Rust] 心跳超時，主動重建信令連線",
+  "log_sig_rust_selfheal": "[Rust] 信令連線自癒觸發，重新建立路由",
+  "log_sig_rust_forward_candidate": "[Rust] ICE Candidate 已轉發至 {0}"
 }

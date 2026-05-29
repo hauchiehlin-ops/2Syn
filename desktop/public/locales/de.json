@@ -235,5 +235,14 @@
   "err_target_wakeup": "Das Remotegerät wird möglicherweise gestartet. Automatischer Neuversuch in {0} Sekunden ({1}/{2})...",
   "err_target_offline_final": "Remotegerät ist nach {0} Versuchen offline. Bitte stellen Sie sicher, dass der Host läuft.",
   "status_online": "Online",
-  "status_connecting": "Verbinde..."
+  "status_connecting": "Verbinde...",
+  "log_sig_rust_offer_received": "[Rust] Angebot von {0} empfangen, Überprüfung...",
+  "log_sig_rust_offer_success": "[Rust] Angebot verifiziert, Antwort an {0} gesendet",
+  "log_sig_rust_offer_rejected": "[Rust] Angebot von {0} abgelehnt: {1}",
+  "log_sig_rust_ice_received": "[Rust] ICE-Kandidat von {0} empfangen, wird angewendet...",
+  "log_sig_rust_ice_applied": "[Rust] ICE-Kandidat erfolgreich angewendet",
+  "log_sig_rust_ice_failed": "[Rust] Fehler beim Anwenden des ICE-Kandidaten: {0}",
+  "log_sig_rust_watchdog": "[Rust] Heartbeat-Timeout, Signalisierungsverbindung wird neu aufgebaut",
+  "log_sig_rust_selfheal": "[Rust] Signalisierungs-Selbstheilung ausgelöst, Route wird neu aufgebaut",
+  "log_sig_rust_forward_candidate": "[Rust] ICE-Kandidat an {0} weitergeleitet"
 }

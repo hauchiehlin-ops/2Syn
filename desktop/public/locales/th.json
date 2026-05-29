@@ -235,5 +235,14 @@
   "err_target_wakeup": "Remote device may be waking up. Auto-retrying in {0} seconds ({1}/{2})...",
   "err_target_offline_final": "Remote device is offline after {0} retries. Please ensure the host is running.",
   "status_online": "Online",
-  "status_connecting": "Connecting..."
+  "status_connecting": "Connecting...",
+  "log_sig_rust_offer_received": "[Rust] ได้รับคำขอเชื่อมต่อจาก {0} กำลังตรวจสอบ...",
+  "log_sig_rust_offer_success": "[Rust] ตรวจสอบสำเร็จ ส่ง Answer ไปยัง {0}",
+  "log_sig_rust_offer_rejected": "[Rust] ปฏิเสธคำขอจาก {0}: {1}",
+  "log_sig_rust_ice_received": "[Rust] ได้รับ ICE Candidate จาก {0} กำลังนำไปใช้...",
+  "log_sig_rust_ice_applied": "[Rust] นำ ICE Candidate ไปใช้สำเร็จ",
+  "log_sig_rust_ice_failed": "[Rust] ล้มเหลวในการนำ ICE Candidate ไปใช้: {0}",
+  "log_sig_rust_watchdog": "[Rust] หมดเวลาการเต้นของหัวใจ สร้างการเชื่อมต่อใหม่",
+  "log_sig_rust_selfheal": "[Rust] การซ่อมแซมตัวเองเริ่มทำงาน สร้างเส้นทางใหม่",
+  "log_sig_rust_forward_candidate": "[Rust] ส่งต่อ ICE Candidate ไปยัง {0}"
 }

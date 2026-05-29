@@ -235,5 +235,14 @@
   "err_target_wakeup": "对方设备可能正在唤醒中，{0} 秒后自动重试（{1}/{2}）...",
   "err_target_offline_final": "对方设备离线，已重试 {0} 次仍无法连接。请确认被控端已开启且网络正常。",
   "status_online": "已连接",
-  "status_connecting": "连接中..."
+  "status_connecting": "连接中...",
+  "log_sig_rust_offer_received": "[Rust] 收到来自 {0} 的连接请求，验证中...",
+  "log_sig_rust_offer_success": "[Rust] 连接请求验证通过，Answer 已回传给 {0}",
+  "log_sig_rust_offer_rejected": "[Rust] 拒绝来自 {0} 的连接：{1}",
+  "log_sig_rust_ice_received": "[Rust] 收到来自 {0} 的 ICE Candidate，应用中...",
+  "log_sig_rust_ice_applied": "[Rust] ICE Candidate 应用成功",
+  "log_sig_rust_ice_failed": "[Rust] ICE Candidate 应用失败：{0}",
+  "log_sig_rust_watchdog": "[Rust] 心跳超时，主动重建信令连接",
+  "log_sig_rust_selfheal": "[Rust] 信令连接自愈触发，重新建立路由",
+  "log_sig_rust_forward_candidate": "[Rust] ICE Candidate 已转发至 {0}"
 }

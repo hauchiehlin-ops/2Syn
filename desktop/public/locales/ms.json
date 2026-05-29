@@ -235,5 +235,14 @@
   "err_target_wakeup": "Remote device may be waking up. Auto-retrying in {0} seconds ({1}/{2})...",
   "err_target_offline_final": "Remote device is offline after {0} retries. Please ensure the host is running.",
   "status_online": "Online",
-  "status_connecting": "Connecting..."
+  "status_connecting": "Connecting...",
+  "log_sig_rust_offer_received": "[Rust] Menerima tawaran dari {0}, mengesahkan...",
+  "log_sig_rust_offer_success": "[Rust] Tawaran disahkan, Jawapan dihantar ke {0}",
+  "log_sig_rust_offer_rejected": "[Rust] Tawaran dari {0} ditolak: {1}",
+  "log_sig_rust_ice_received": "[Rust] Menerima ICE Candidate dari {0}, menggunakan...",
+  "log_sig_rust_ice_applied": "[Rust] ICE Candidate berjaya digunakan",
+  "log_sig_rust_ice_failed": "[Rust] Gagal menggunakan ICE Candidate: {0}",
+  "log_sig_rust_watchdog": "[Rust] Tamat masa degupan, membina semula sambungan",
+  "log_sig_rust_selfheal": "[Rust] Pemulihan sendiri isyarat dicetuskan",
+  "log_sig_rust_forward_candidate": "[Rust] ICE Candidate dikemukakan ke {0}"
 }

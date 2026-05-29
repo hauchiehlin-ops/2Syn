@@ -235,5 +235,14 @@
   "err_target_wakeup": "リモートデバイスが起動中の可能性があります。{0} 秒後に自動再試行します（{1}/{2}）...",
   "err_target_offline_final": "{0} 回試みましたがリモートデバイスはオフラインです。ホストが起動していることを確認してください。",
   "status_online": "オンライン",
-  "status_connecting": "接続中..."
+  "status_connecting": "接続中...",
+  "log_sig_rust_offer_received": "[Rust] {0} からの接続リクエストを受信、検証中...",
+  "log_sig_rust_offer_success": "[Rust] 接続リクエスト検証成功、{0} に Answer を返送",
+  "log_sig_rust_offer_rejected": "[Rust] {0} からの接続を拒否：{1}",
+  "log_sig_rust_ice_received": "[Rust] {0} から ICE Candidate を受信、適用中...",
+  "log_sig_rust_ice_applied": "[Rust] ICE Candidate を正常に適用しました",
+  "log_sig_rust_ice_failed": "[Rust] ICE Candidate の適用に失敗：{0}",
+  "log_sig_rust_watchdog": "[Rust] ハートビートタイムアウト、シグナリング接続を再構築",
+  "log_sig_rust_selfheal": "[Rust] シグナリング自己修復が起動、ルートを再確立",
+  "log_sig_rust_forward_candidate": "[Rust] ICE Candidate を {0} に転送しました"
 }

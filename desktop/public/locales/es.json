@@ -235,5 +235,14 @@
   "err_target_wakeup": "El dispositivo remoto puede estar despertando. Reintentando en {0} segundos ({1}/{2})...",
   "err_target_offline_final": "El dispositivo remoto está desconectado después de {0} intentos. Verifique que el host esté en línea.",
   "status_online": "En línea",
-  "status_connecting": "Conectando..."
+  "status_connecting": "Conectando...",
+  "log_sig_rust_offer_received": "[Rust] Oferta recibida de {0}, verificando...",
+  "log_sig_rust_offer_success": "[Rust] Oferta verificada, Respuesta enviada a {0}",
+  "log_sig_rust_offer_rejected": "[Rust] Oferta de {0} rechazada: {1}",
+  "log_sig_rust_ice_received": "[Rust] Candidato ICE recibido de {0}, aplicando...",
+  "log_sig_rust_ice_applied": "[Rust] Candidato ICE aplicado correctamente",
+  "log_sig_rust_ice_failed": "[Rust] Error al aplicar el candidato ICE: {0}",
+  "log_sig_rust_watchdog": "[Rust] Tiempo de espera de latido agotado, reconstruyendo conexión",
+  "log_sig_rust_selfheal": "[Rust] Autocuración de señalización activada, restableciendo ruta",
+  "log_sig_rust_forward_candidate": "[Rust] Candidato ICE reenviado a {0}"
 }
