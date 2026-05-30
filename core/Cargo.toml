@@ -1,6 +1,6 @@
 [package]
 name = "syn-core"
-version = "2.2.0"
+version = "2.3.0"
 edition = "2021"
 
 [dependencies]
@@ -18,16 +18,21 @@ lazy_static = "1.4"
 libc = "0.2"
 hex = "0.4"
 base32 = "0.5"
-core-graphics = "0.23"
-foreign-types-shared = "0.3.1"
+dirs = "6.0.0"
+mac_address = "1.1.8"
     
 
-[target.'cfg(not(target_os = "ios"))'.dependencies]
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 webrtc = "0.10"
 xcap = "0.9.6"
 image = "0.25.10"
 openh264 = "0.9.3"
 rayon = "1.8"
+opus = "0.3.1"
+cpal = "0.17.3"
+core-graphics = "0.23"
+foreign-types-shared = "0.3.1"
+apple-cf = "0.9.3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
@@ -39,6 +44,7 @@ windows-sys = { version = "0.52", features = [
     "Win32_Graphics",
     "Win32_Graphics_Gdi"
 ] }
+windows = { version = "0.52", features = ["Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_Foundation", "Win32_Media"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS 平台特定依賴
@@ -46,3 +52,5 @@ objc = "0.2"
 cocoa = "0.24"
 core-graphics = "0.23"
 core-foundation = "0.9"
+screencapturekit = { version = "6.1.0", features = ["async"] }
+videotoolbox = "0.18.0"

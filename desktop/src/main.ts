@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { setupFileTransferDropZone } from "./file_transfer";
 import { I18N_HELP_DOCS } from "./help_i18n";
 import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
@@ -7,13 +8,15 @@ function isDesktopTauri(): boolean {
   if (!isTauri()) return false;
   const ua = navigator.userAgent.toLowerCase();
   
-  // 優先排除明確的行動端 UA 關鍵字
-  const isMobileUA = /iphone|ipad|ipod|android|ios/.test(ua);
+  // 排除明確的行動端 UA 關鍵字
+  const isMobileUA = /iphone|ipad|ipod|android/.test(ua);
   if (isMobileUA) return false;
   
-  // 防範 iPadOS / iOS 模擬 Mac 桌面網站 (觸控點大於 0 且支援 touch)
-  const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-  if (isTouchDevice) return false;
+  // iPadOS 模擬 macOS 桌面 UA，但仍擁有多點觸控
+  // 真正的 Mac/Windows 桌面也可能有觸控螢幕 (Surface/iMac Touch)
+  // 因此僅針對 "Macintosh" + maxTouchPoints > 2 的情況判定為 iPadOS
+  const isMac = /macintosh/.test(ua);
+  if (isMac && navigator.maxTouchPoints > 2) return false;
   
   return true;
 }
@@ -381,6 +384,13 @@ let isHostMode: boolean = false; // 標記目前是否為被控端
 let rustOfferProcessed: boolean = false; // 標記 Rust 是否已經處理完 Offer
 let dataChannelControl: RTCDataChannel | null = null;
 let dataChannelUnreliable: RTCDataChannel | null = null;
+let dataChannelClipboard: RTCDataChannel | null = null;
+let dataChannelFileTransfer: RTCDataChannel | null = null;
+let dataChannelSystemControl: RTCDataChannel | null = null;
+let availableMonitors: any[] = [];
+let currentMonitorIndex: number = 0;
+let _clipboardPollInterval: ReturnType<typeof setInterval> | null = null;
+let _lastRemoteClipboard = "";
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
 let myId: string = "";                        // 本機 9 位數 ID
 let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
@@ -399,15 +409,40 @@ function getSignalingUrl(): string {
   }
   
   // 2. 在 Tauri 中，無論開發或正式環境，window.location.hostname 通常都是 localhost 或 tauri.localhost
-  // 為了確保 iOS 與 Mac mini 能夠順利連線，直接回傳公開部署的信令伺服器網址
+  // 確保 iOS 與 Mac mini 能夠順利連線，直接回傳公開部署的信令伺服器網址
   return OFFICIAL_SIGNALING_SERVER;
 }
 
-// STUN 伺服器清單（堅持不使用 TURN，避免未來營運成本）
-const ICE_SERVERS: RTCIceServer[] = [
+const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
   { urls: ["stun:stun.cloudflare.com:3478"] }
 ];
+
+let ICE_SERVERS: RTCIceServer[] = [...DEFAULT_STUN_SERVERS];
+
+function loadCustomIceServers() {
+  try {
+    const customStr = localStorage.getItem("custom_turn_servers");
+    if (customStr) {
+      const customServers = JSON.parse(customStr);
+      if (Array.isArray(customServers) && customServers.length > 0) {
+        // 驗證每個伺服器項目必須包含 urls 屬性
+        const validServers = customServers.filter(
+          (s: any) => s && s.urls && (typeof s.urls === 'string' || Array.isArray(s.urls))
+        );
+        if (validServers.length > 0) {
+          // 始終保留預設 STUN，附加自訂 TURN
+          ICE_SERVERS = [...DEFAULT_STUN_SERVERS, ...validServers];
+          console.log(`[ICE] Loaded ${validServers.length} custom TURN server(s)`);
+        }
+      }
+    }
+  } catch(e) {
+    console.error("Failed to parse custom TURN servers, reverting to defaults", e);
+    ICE_SERVERS = [...DEFAULT_STUN_SERVERS];
+  }
+}
+loadCustomIceServers();
 
 // 宣告語系翻譯字典快取
 let translations: Record<string, string> = {};
@@ -590,7 +625,22 @@ const fallbackTranslations: Record<string, string> = {
   "metric_loss": "Packet Loss Rate",
   "metric_protocol": "Connection Protocol",
   "metric_encryption": "Codec & Cipher Security",
-  
+  "metric_actual_fps": "Actual FPS (Live)",
+  "metric_actual_bitrate": "Actual Bitrate (Live)",
+  "metric_quality_score": "Connection Quality",
+  "quality_excellent": "Excellent",
+  "quality_fair": "Fair",
+  "quality_poor": "Poor",
+  // 地址簿
+  "device_book_title": "Saved Devices",
+  "device_book_empty": "No saved devices yet. Connect to a device to save it.",
+  "device_book_add": "Save Current",
+  "device_book_connect": "Connect",
+  "device_book_delete": "Remove",
+  "device_book_name_placeholder": "Device nickname",
+  "device_book_last_connected": "Last connected:",
+  "device_book_never": "Never",
+
   // 新增UI文字翻譯
   "toast_system_error": "⚠️ System Error: Open Advanced Panel to view logs",
   "toggle_panel_title": "Toggle Advanced Panel",
@@ -646,7 +696,15 @@ const fallbackTranslations: Record<string, string> = {
   "ts_step_3_desc": "Toggle the switch to 'Connected' in the mobile App (accept VPN configuration prompts if requested). Confirm that the Tailscale menu bar icon on your Mac displays 'Connected'.",
   "ts_step_4_desc": "💡 Once completed, the connection indicator on the Mac host will automatically turn green, allowing your controller device to establish a direct connection without failed or black screen issues.",
   "btn_show": "Show",
-  "btn_hide": "Hide"
+  "btn_hide": "Hide",
+
+  // 首次執行提示 Modal
+  "first_run_title": "Welcome to 2syn — Set Your Security Key",
+  "first_run_subtitle": "First Launch — Required Setup",
+  "first_run_body": "Before accepting any remote connection, you must set a Static Access Password. This password is the sole authentication key for all incoming remote sessions. Without it, all connection requests will be automatically rejected.",
+  "first_run_tip": "Use a strong password of at least 8 characters, combining uppercase letters, lowercase letters, and numbers to keep your device secure.",
+  "first_run_btn_go": "Go to Set Static Password",
+  "first_run_btn_skip": "Set Later (Connections Will Be Rejected)"
 };
 
 // 統一翻譯取值函數
@@ -844,6 +902,10 @@ function updateDomTranslations() {
   setTextContent("lbl-metric-loss", t("metric_loss"));
   setTextContent("lbl-metric-protocol", t("metric_protocol"));
   setTextContent("lbl-metric-encryption", t("metric_encryption"));
+  setTextContent("lbl-metric-actual-fps", t("metric_actual_fps"));
+  setTextContent("lbl-metric-actual-bitrate", t("metric_actual_bitrate"));
+  setTextContent("lbl-metric-quality-score", t("metric_quality_score"));
+  setTextContent("txt-device-book-title", t("device_book_title"));
 
   // 說明區塊文字更新
   setTextContent("help-remote-id", t("help_remote_id"));
@@ -955,6 +1017,14 @@ function updateDomTranslations() {
       }
     });
   }
+
+  // 首次執行提示 Modal 翻譯
+  setTextContent("txt-first-run-title", t("first_run_title"));
+  setTextContent("txt-first-run-subtitle", t("first_run_subtitle"));
+  setTextContent("txt-first-run-body", t("first_run_body"));
+  setTextContent("txt-first-run-tip", t("first_run_tip"));
+  setTextContent("txt-first-run-btn-go", t("first_run_btn_go"));
+  setTextContent("txt-first-run-btn-skip", t("first_run_btn_skip"));
 }
 
 function setTextContent(id: string, text: string) {
@@ -1009,48 +1079,44 @@ function generateMockMyId(): string {
   return storedId; // 回傳純數字字串（不含 dash），供信令登入使用
 }
 
-// 產生本機隨機存取 PIN 碼（6 位數，每次啟動自動刷新）
-function generateAccessPin(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+async function loadMyMac() {
+  const valMyMac = document.getElementById("val-my-mac");
+  if (!valMyMac) return;
+  try {
+    const mac = await invoke<string>("get_local_mac_address");
+    valMyMac.textContent = mac;
+  } catch (e) {
+    valMyMac.textContent = "N/A";
+    console.error("Failed to load MAC:", e);
+  }
 }
 
-// 初始化存取 PIN 碼顯示與刷新邏輯
-function initAccessPin() {
-  const valPin = document.getElementById("val-my-pin");
-  const btnRefresh = document.getElementById("btn-refresh-pin");
-  const btnCopyPin = document.getElementById("btn-copy-pin");
+// 初始化開機自動啟動邏輯
+async function initAutostart() {
+  const chkAutostart = document.getElementById("chk-autostart") as HTMLInputElement;
+  if (!chkAutostart || !isDesktopTauri()) return;
+  
+  try {
+    const { isEnabled, enable, disable } = await import("@tauri-apps/plugin-autostart");
+    const state = await isEnabled();
+    chkAutostart.checked = state;
 
-  // 啟動時自動產生一組 PIN
-  const freshPin = generateAccessPin();
-  if (valPin) {
-    valPin.textContent = `${freshPin.slice(0, 3)}-${freshPin.slice(3)}`;
-  }
-  // 儲存原始 PIN（不含 dash）供後端驗證用
-  (window as any).__localAccessPin = freshPin;
-
-  if (btnRefresh && valPin) {
-    btnRefresh.addEventListener("click", () => {
-      const newPin = generateAccessPin();
-      valPin.textContent = `${newPin.slice(0, 3)}-${newPin.slice(3)}`;
-      (window as any).__localAccessPin = newPin;
-      myPin = newPin; // 同步更新全域變數，確保連線驗證時使用的是最新 PIN
-      if (isDesktopTauri()) {
-        invoke("update_rust_pin", { pin: newPin })
-          .catch(err => console.error("Failed to update Rust pin:", err));
+    chkAutostart.addEventListener("change", async () => {
+      try {
+        if (chkAutostart.checked) {
+          await enable();
+          console.log("[autostart] Enabled on boot");
+        } else {
+          await disable();
+          console.log("[autostart] Disabled on boot");
+        }
+      } catch (error) {
+        console.error("切換開機啟動失敗:", error);
+        chkAutostart.checked = !chkAutostart.checked;
       }
-      btnRefresh.textContent = "✓";
-      setTimeout(() => { btnRefresh.textContent = "🔄"; }, 1000);
     });
-  }
-
-  if (btnCopyPin && valPin) {
-    btnCopyPin.addEventListener("click", () => {
-      const pinText = (window as any).__localAccessPin || myPin;
-      navigator.clipboard.writeText(pinText).then(() => {
-        btnCopyPin.textContent = "✓";
-        setTimeout(() => { btnCopyPin.textContent = "📋"; }, 1500);
-      });
-    });
+  } catch (e) {
+    console.warn("無法載入或取得 autostart 狀態", e);
   }
 }
 
@@ -1061,7 +1127,7 @@ function initSignalingReconnect() {
     btnReconnect.addEventListener("click", () => {
       console.log("[Signaling] 使用者手動觸發信令重連...");
       btnReconnect.textContent = "✓";
-      invoke("start_rust_signaling", { myId: myId, pin: myPin })
+      invoke("start_rust_signaling", { myId: myId, pin: "" })
         .then(() => {
           setTimeout(() => { btnReconnect.textContent = "🔄"; }, 1000);
         })
@@ -1078,41 +1144,394 @@ function initSignalingReconnect() {
 async function initStaticPassword() {
   if (!isDesktopTauri()) return;
   const btnSetPwd = document.getElementById("btn-set-static-pwd") as HTMLButtonElement;
+  const btnDeletePwd = document.getElementById("btn-delete-static-pwd") as HTMLButtonElement;
+  const btnTogglePwd = document.getElementById("btn-toggle-static-pwd") as HTMLButtonElement;
   const inputPwd = document.getElementById("input-static-pwd") as HTMLInputElement;
-  const statusSpan = document.getElementById("static-pwd-status");
+  const statusBadge = document.getElementById("static-pwd-status-badge");
 
-  // 初始化時檢查是否已設定
-  try {
-    const hasPwd = await invoke("check_has_static_password");
-    if (statusSpan) {
-      statusSpan.textContent = hasPwd ? "Status: Set" : "Status: Not Set";
-      statusSpan.style.color = hasPwd ? "var(--success-color, #2ecc71)" : "var(--text-muted)";
+  // 更新密碼狀態與 UI 展示
+  const updateStaticPasswordStatus = async () => {
+    try {
+      const hasPwd = await invoke<boolean>("check_has_static_password");
+      if (statusBadge) {
+        if (hasPwd) {
+          statusBadge.textContent = "Saved (••••••••)";
+          statusBadge.className = "status-badge status-active";
+          if (btnDeletePwd) btnDeletePwd.style.display = "block";
+        } else {
+          statusBadge.textContent = "Not Set";
+          statusBadge.className = "status-badge status-inactive";
+          if (btnDeletePwd) btnDeletePwd.style.display = "none";
+        }
+      }
+    } catch (e) {
+      console.warn("檢查固定密碼狀態失敗:", e);
     }
-  } catch (e) {
-    console.warn("檢查固定密碼狀態失敗:", e);
+  };
+
+  // 初始化時更新一次狀態
+  await updateStaticPasswordStatus();
+
+  // 明碼/隱碼切換按鈕事件
+  if (btnTogglePwd && inputPwd) {
+    btnTogglePwd.addEventListener("click", () => {
+      if (inputPwd.type === "password") {
+        inputPwd.type = "text";
+        btnTogglePwd.textContent = "Hide";
+      } else {
+        inputPwd.type = "password";
+        btnTogglePwd.textContent = "Show";
+      }
+    });
   }
 
+  // 儲存密碼事件
   if (btnSetPwd && inputPwd) {
     btnSetPwd.addEventListener("click", async () => {
       const pwd = inputPwd.value.trim();
       if (!pwd) {
-        alert(t("alert_input_static_password"));
+        alert(t("alert_input_static_password") || "Please enter a static access password.");
         return;
       }
       try {
         await invoke("set_static_password", { password: pwd });
         inputPwd.value = "";
-        if (statusSpan) {
-          statusSpan.textContent = "Status: Set";
-          statusSpan.style.color = "var(--success-color, #2ecc71)";
+        // 儲存後預設切換回隱碼
+        if (inputPwd.type === "text") {
+          inputPwd.type = "password";
+          if (btnTogglePwd) btnTogglePwd.textContent = "Show";
         }
-        showToast(t("toast_static_password_success"));
+        await updateStaticPasswordStatus();
+        showToast(t("toast_static_password_success") || "Unattended password saved successfully.");
       } catch (e) {
-        alert(t("alert_set_static_password_fail") + e);
+        alert((t("alert_set_static_password_fail") || "Failed to set password: ") + e);
+      }
+    });
+  }
+
+  // 一鍵刪除密碼事件
+  if (btnDeletePwd) {
+    btnDeletePwd.addEventListener("click", async () => {
+      const confirmMsg = t("confirm_delete_static_password") || "Are you sure you want to delete the unattended password?";
+      if (confirm(confirmMsg)) {
+        try {
+          await invoke("delete_static_password");
+          inputPwd.value = "";
+          if (inputPwd.type === "text") {
+            inputPwd.type = "password";
+            if (btnTogglePwd) btnTogglePwd.textContent = "Show";
+          }
+          await updateStaticPasswordStatus();
+          showToast(t("toast_delete_static_password_success") || "Unattended password deleted successfully.");
+        } catch (e) {
+          alert((t("alert_delete_static_password_fail") || "Failed to delete password: ") + e);
+        }
       }
     });
   }
 }
+
+// =========================================================================
+// 剪貼簿雙向同步
+// =========================================================================
+function initClipboardSync() {
+  // 主控端複製文字時 → 推送至被控端
+  const onCopy = async (e: ClipboardEvent) => {
+    const text = e.clipboardData?.getData("text/plain") || "";
+    if (!text || !dataChannelClipboard || dataChannelClipboard.readyState !== "open") return;
+    try {
+      const msg = JSON.stringify({ type: "clipboard_push", text });
+      dataChannelClipboard.send(msg);
+      console.log(`[clipboard] 推送主控端剪貼簿至被控端: ${text.substring(0, 40)}`);
+    } catch {}
+  };
+  document.addEventListener("copy", onCopy);
+
+  // 被控端剪貼簿輪詢（每 1.5 秒透過 Tauri read_clipboard 讀取被控端）
+  if (_clipboardPollInterval) clearInterval(_clipboardPollInterval);
+  if (isDesktopTauri()) {
+    _clipboardPollInterval = setInterval(async () => {
+      if (!dataChannelClipboard || dataChannelClipboard.readyState !== "open") return;
+      try {
+        const remoteText = await invoke<string>("read_clipboard");
+        if (remoteText && remoteText !== _lastRemoteClipboard) {
+          _lastRemoteClipboard = remoteText;
+          // 同步至主控端（Tauri 是被控端，推送至主控端的 DataChannel）
+          // 注意：此路徑只在 Tauri Host 模式下運行
+          // 被控端讀到自己的剪貼簿後推送給主控端
+          const msg = JSON.stringify({ type: "clipboard_push", text: remoteText });
+          dataChannelClipboard.send(msg);
+          console.log(`[clipboard] 被控端剪貼簿變化，已推送: ${remoteText.substring(0, 40)}`);
+        }
+      } catch {}
+    }, 1500);
+  }
+
+  // 連線斷開時清理
+  const originalCleanup = (window as any)._clipboardCleanup;
+  (window as any)._clipboardCleanup = () => {
+    document.removeEventListener("copy", onCopy);
+    if (_clipboardPollInterval) { clearInterval(_clipboardPollInterval); _clipboardPollInterval = null; }
+    if (originalCleanup) originalCleanup();
+  };
+}
+
+// =========================================================================
+// 首次執行提示：偵測是否為首次啟動且密碼尚未設定
+// =========================================================================
+async function initFirstRunPrompt() {
+  // 僅在桌面端 Tauri Host 執行
+  if (!isDesktopTauri()) return;
+
+  // 若使用者已完成過首次設定流程，直接返回
+  const alreadyOnboarded = localStorage.getItem("2syn_first_run_done");
+  if (alreadyOnboarded === "1") return;
+
+  // 即便已有密碼（例如從備份還原），也不再騷擾使用者
+  try {
+    const hasPwd = await invoke<boolean>("check_has_static_password");
+    if (hasPwd) {
+      localStorage.setItem("2syn_first_run_done", "1");
+      return;
+    }
+  } catch (e) {
+    console.warn("[FirstRun] 無法檢查密碼狀態:", e);
+    return;
+  }
+
+  // 顯示首次執行提示 Modal
+  const modal = document.getElementById("first-run-modal");
+  if (!modal) return;
+  modal.style.display = "flex";
+
+  // 「前往設定」：關閉 modal、標記已完成、捲動至密碼區並聚焦
+  const btnGo = document.getElementById("btn-first-run-go");
+  if (btnGo) {
+    btnGo.addEventListener("click", () => {
+      modal.style.display = "none";
+      localStorage.setItem("2syn_first_run_done", "1");
+
+      // 捲動至靜態密碼設定區域
+      const pwdSection = document.getElementById("input-static-pwd");
+      if (pwdSection) {
+        pwdSection.scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(() => pwdSection.focus(), 400);
+      }
+    });
+  }
+
+  // 「稍後設定」：關閉 modal，但不標記完成（下次啟動仍會提示）
+  const btnSkip = document.getElementById("btn-first-run-skip");
+  if (btnSkip) {
+    btnSkip.addEventListener("click", () => {
+      modal.style.display = "none";
+    });
+  }
+}
+
+// =========================================================================
+// 地址簿 / 裝置常用裝置清單
+// =========================================================================
+interface SavedDevice {
+  id: string;       // 9-digit device ID
+  name: string;     // user-defined nickname
+  lastConnected: string; // ISO timestamp or empty
+  mac?: string;     // optional MAC address for Wake-on-LAN
+}
+
+const DEVICE_BOOK_KEY = "2syn_device_book";
+
+function loadDeviceBook(): SavedDevice[] {
+  try {
+    const raw = localStorage.getItem(DEVICE_BOOK_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveDeviceBook(devices: SavedDevice[]) {
+  localStorage.setItem(DEVICE_BOOK_KEY, JSON.stringify(devices));
+}
+
+function saveDeviceToBook(deviceId: string) {
+  const devices = loadDeviceBook();
+  const existing = devices.find(d => d.id === deviceId);
+  if (existing) {
+    existing.lastConnected = new Date().toISOString();
+  } else {
+    devices.unshift({ id: deviceId, name: deviceId, lastConnected: new Date().toISOString() });
+  }
+  saveDeviceBook(devices);
+  renderDeviceBook();
+}
+
+function renderDeviceBook() {
+  const list = document.getElementById("device-book-list");
+  const emptyMsg = document.getElementById("device-book-empty-msg");
+  if (!list) return;
+  
+  const devices = loadDeviceBook();
+  list.innerHTML = "";
+  
+  if (devices.length === 0) {
+    if (emptyMsg) emptyMsg.style.display = "block";
+    return;
+  }
+  if (emptyMsg) emptyMsg.style.display = "none";
+  
+  devices.forEach(device => {
+    const lastConnStr = device.lastConnected
+      ? new Date(device.lastConnected).toLocaleString()
+      : t("device_book_never");
+    
+    const macVal = device.mac || "";
+    
+    const card = document.createElement("div");
+    card.className = "device-card";
+    card.innerHTML = `
+      <div class="device-card-info">
+        <div class="device-card-name" contenteditable="true" data-id="${device.id}" 
+             title="${t('device_book_name_placeholder')}">${device.name}</div>
+        <div class="device-card-id">${device.id}</div>
+        <div class="device-card-meta">MAC: <input type="text" class="device-mac-input" placeholder="AA:BB:CC:DD:EE:FF" value="${macVal}" /></div>
+        <div class="device-card-meta">${t("device_book_last_connected")} ${lastConnStr}</div>
+      </div>
+      <div class="device-card-actions">
+        ${device.mac ? `<button class="device-card-btn" onclick="deviceBookWake('${device.mac}')">Wake</button>` : ''}
+        <button class="device-card-btn" onclick="deviceBookConnect('${device.id}')">${t("device_book_connect")}</button>
+        <button class="device-card-btn danger" onclick="deviceBookDelete('${device.id}')">${t("device_book_delete")}</button>
+      </div>
+    `;
+    
+    // Inline name editing
+    const nameEl = card.querySelector(".device-card-name") as HTMLElement;
+    if (nameEl) {
+      nameEl.addEventListener("blur", () => {
+        const newName = nameEl.textContent?.trim() || device.id;
+        const devices = loadDeviceBook();
+        const d = devices.find(x => x.id === device.id);
+        if (d) {
+          d.name = newName;
+          saveDeviceBook(devices);
+        }
+      });
+      nameEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); nameEl.blur(); }
+      });
+    }
+
+    // MAC address editing
+    const macEl = card.querySelector(".device-mac-input") as HTMLInputElement;
+    if (macEl) {
+      macEl.addEventListener("blur", () => {
+        const newMac = macEl.value.trim();
+        const devices = loadDeviceBook();
+        const d = devices.find(x => x.id === device.id);
+        if (d && d.mac !== newMac) {
+          d.mac = newMac;
+          saveDeviceBook(devices);
+          renderDeviceBook(); // Re-render to show/hide Wake button
+        }
+      });
+      macEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); macEl.blur(); }
+      });
+    }
+    
+    list.appendChild(card);
+  });
+}
+
+(window as any).deviceBookConnect = (deviceId: string) => {
+  const remoteIdInput = document.getElementById("remote-id-input") as HTMLInputElement;
+  if (remoteIdInput) {
+    remoteIdInput.value = deviceId;
+    const btnConnect = document.getElementById("btn-connect");
+    if (btnConnect) btnConnect.click();
+  }
+};
+
+(window as any).deviceBookDelete = (deviceId: string) => {
+  const devices = loadDeviceBook().filter(d => d.id !== deviceId);
+  saveDeviceBook(devices);
+  renderDeviceBook();
+};
+
+(window as any).deviceBookWake = async (mac: string) => {
+  try {
+    await invoke("wake_device", { mac });
+    alert(t("wake_success") || "Magic Packet 已送出！");
+  } catch (err) {
+    console.error("WoL failed:", err);
+    alert(`${t("wake_failed") || "喚醒失敗"}: ${err}`);
+  }
+};
+
+(window as any).toggleDeviceBook = () => {
+  const content = document.getElementById("device-book-content");
+  const icon = document.getElementById("device-book-toggle-icon");
+  if (!content) return;
+  const isOpen = content.style.display !== "none";
+  content.style.display = isOpen ? "none" : "block";
+  if (icon) icon.style.transform = isOpen ? "" : "rotate(180deg)";
+};
+
+function initDeviceBook() {
+  renderDeviceBook();
+
+  // JSON Export / Import
+  const btnExport = document.getElementById("btn-export-device-book");
+  const btnImport = document.getElementById("btn-import-device-book");
+  const inputImport = document.getElementById("input-import-device-book") as HTMLInputElement;
+
+  if (btnExport) {
+    btnExport.addEventListener("click", () => {
+      const devices = loadDeviceBook();
+      const jsonStr = JSON.stringify(devices, null, 2);
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `2syn_address_book_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  if (btnImport && inputImport) {
+    btnImport.addEventListener("click", () => {
+      inputImport.click();
+    });
+
+    inputImport.addEventListener("change", async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const imported = JSON.parse(text);
+        if (!Array.isArray(imported)) throw new Error("Invalid format");
+        
+        // Merge strategy: overwrite by ID
+        const existing = loadDeviceBook();
+        const map = new Map();
+        existing.forEach(d => map.set(d.id, d));
+        
+        for (const item of imported) {
+          if (item && item.id) {
+            map.set(item.id, item);
+          }
+        }
+        
+        saveDeviceBook(Array.from(map.values()));
+        renderDeviceBook();
+        inputImport.value = ""; // Reset input
+      } catch (err) {
+        console.error("Failed to parse imported JSON", err);
+        alert("匯入失敗：JSON 格式錯誤 (Failed to parse JSON)");
+      }
+    });
+  }
+}
+
 
 // =========================================================================
 // 信令客戶端：建立 WebSocket 連線並處理訊息路由
@@ -1374,11 +1793,13 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
         const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
         const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
+        const btnAudioToggle = document.getElementById("btn-audio-toggle") as HTMLButtonElement;
         const mainContent = document.querySelector(".glass-container") as HTMLElement;
         const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
         
         if (videoContainer) videoContainer.style.display = "block";
         if (btnDisplayMode) btnDisplayMode.style.display = "block";
+        if (btnAudioToggle) btnAudioToggle.style.display = "block";
         if (mainContent) mainContent.style.display = "none";
         
         const mobileControlOrb = document.getElementById("mobile-control-orb");
@@ -1451,6 +1872,29 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
             console.error("[WebRTC] 視訊播放調用失敗:", err);
           }
         }
+    } else if (event.track.kind === "audio") {
+        console.log("[WebRTC] 收到遠端音訊軌道");
+        let audioEl = document.getElementById("remote-audio") as HTMLAudioElement;
+        if (!audioEl) {
+            audioEl = document.createElement("audio");
+            audioEl.id = "remote-audio";
+            audioEl.autoplay = true;
+            document.body.appendChild(audioEl);
+        }
+        
+        if (!audioEl.srcObject) {
+            audioEl.srcObject = event.streams && event.streams.length > 0 
+                ? event.streams[0] 
+                : new MediaStream([event.track]);
+                
+            try {
+                audioEl.play().catch(err => {
+                    console.warn("[WebRTC] 音訊自動播放受阻，等待使用者互動:", err);
+                });
+            } catch (err) {
+                console.error("[WebRTC] 音訊播放調用失敗:", err);
+            }
+        }
     }
   };
 
@@ -1481,10 +1925,33 @@ async function startCall(remoteId: string, pin: string) {
     });
     bindUnreliableChannel(dataChannelUnreliable);
 
+    dataChannelSystemControl = pc.createDataChannel("system-control", { ordered: true });
+    bindSystemControlChannel(dataChannelSystemControl);
 
+    // 檔案傳輸 DataChannel
+    dataChannelFileTransfer = pc.createDataChannel("file-transfer", { ordered: true });
+    
+    // 剪貼簿同步 DataChannel
+    dataChannelClipboard = pc.createDataChannel("clipboard", { ordered: true });
+    dataChannelClipboard.onopen = () => {
+      console.log("[clipboard] DataChannel opened");
+      initClipboardSync();
+    };
+    dataChannelClipboard.onmessage = (ev) => {
+      // 被控端推送剪貼簿至主控端（被控→主控方向）
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "clipboard_push" && msg.text) {
+          navigator.clipboard.writeText(msg.text).catch(() => {});
+          console.log(`[clipboard] 收到被控端剪貼簿: ${msg.text.substring(0, 40)}`);
+        }
+      } catch {}
+    };
 
     // 要求接收視訊軌道 (加入 m=video 至 SDP Offer)
     pc.addTransceiver("video", { direction: "recvonly" });
+    // 要求接收音訊軌道 (加入 m=audio 至 SDP Offer)
+    pc.addTransceiver("audio", { direction: "recvonly" });
 
     // 產生 SDP Offer
     const offer = await pc.createOffer();
@@ -1535,23 +2002,23 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
   rustIceCandidateQueue = [];
   currentRemoteId = sourceId;
 
-  // 2. 驗證 PIN 碼 (雙軌制：檢查隨機 PIN 或 固定密碼)
+  // 2. 驗證無人值守密碼 (靜態無人值守密碼為唯一連線驗證金鑰)
   let isStaticValid = false;
-  if (incomingPin && incomingPin !== myPin) {
+  if (incomingPin) {
     try {
       isStaticValid = await invoke("verify_static_password", { password: incomingPin });
     } catch (e) {
-      console.warn("驗證固定密碼時發生錯誤:", e);
+      console.warn("驗證無人值守密碼時發生錯誤:", e);
     }
   }
 
-  if (incomingPin !== myPin && !isStaticValid) {
-    console.warn(`[WebRTC] 拒絕連線：PIN 碼不符`);
+  if (!isStaticValid) {
+    console.warn(`[WebRTC] 拒絕連線：密碼不符或未設定密碼`);
     if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
       signalingWs.send(JSON.stringify({
         type: "error",
         target: sourceId,
-        message: "Connection rejected: Invalid PIN or Password"
+        message: "Connection rejected: Invalid Password"
       }));
     }
     return;
@@ -1620,6 +2087,29 @@ function bindUnreliableChannel(ch: RTCDataChannel) {
       await invoke("handle_remote_input", { data: Array.from(data) });
     } catch (e) {
       console.error("[Control-Unreliable] 執行遠端輸入失敗:", e);
+    }
+  };
+}
+
+function bindSystemControlChannel(ch: RTCDataChannel) {
+  ch.onopen = () => console.log("[DataChannel] system-control 已開啟");
+  ch.onclose = () => console.log("[DataChannel] system-control 已關閉");
+  ch.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "monitor_list") {
+        availableMonitors = msg.monitors;
+        currentMonitorIndex = msg.current;
+        console.log("[system-control] 收到螢幕清單:", availableMonitors);
+        
+        const btnSwitchMonitor = document.getElementById("btn-switch-monitor") as HTMLButtonElement;
+        if (btnSwitchMonitor && availableMonitors.length > 1) {
+          btnSwitchMonitor.style.display = "block";
+          btnSwitchMonitor.textContent = `🖥️ ${availableMonitors[currentMonitorIndex].name}`;
+        }
+      }
+    } catch (e) {
+      console.error("[system-control] JSON parse error:", e);
     }
   };
 }
@@ -1693,8 +2183,23 @@ function updateConnectionStatusUI(state: string) {
       // 連線成功後恢復按鈕可用（用來發起中斷）
       const btnConnect = document.getElementById("btn-connect");
       if (btnConnect) btnConnect.removeAttribute("disabled");
+      
+      // 連線成功後自動儲存到地址簿
+      if (currentRemoteId && currentRemoteId !== "manual") {
+        saveDeviceToBook(currentRemoteId);
+      }
     }
   }
+  if (state === "failed" || state === "disconnected" || state === "closed") {
+    // 斷線時，強制關閉可能開啟的隱私黑屏模式，避免主機卡在黑屏
+    const chkPrivacy = document.getElementById("chk-privacy-mode") as HTMLInputElement;
+    if (chkPrivacy && chkPrivacy.checked) {
+      chkPrivacy.checked = false;
+      invoke("toggle_privacy_mode", { enable: false }).catch(e => console.warn("Failed to reset privacy mode:", e));
+      console.log("[security] Connection dropped, privacy mode forcefully disabled to prevent lockout.");
+    }
+  }
+
   if (state === "failed") {
     alert(t("err_rtc_failed"));
     const fixBtn = document.getElementById("btn-fix-network");
@@ -2017,6 +2522,76 @@ function startStatusPolling() {
       console.error("狀態輪詢出錯:", error);
     }
   }, 500);
+
+  // WebRTC 原生 getStats() — 採集真實 inbound-rtp 統計（每 2 秒）
+  let _lastBytesReceived = 0;
+  let _lastStatsTime = performance.now();
+
+  setInterval(async () => {
+    if (!peerConnection) return;
+    try {
+      const statsReport = await peerConnection.getStats();
+      let actualFps = 0;
+      let bytesReceivedDelta = 0;
+      let rttMs = 0;
+      let packetsLost = 0;
+      let packetsReceived = 0;
+      let candidatePairFound = false;
+
+      statsReport.forEach((stat: RTCStatsReport) => {
+        const s = stat as any;
+        // inbound-rtp video
+        if (s.type === "inbound-rtp" && s.kind === "video") {
+          actualFps = s.framesPerSecond ?? 0;
+          const totalBytes = s.bytesReceived ?? 0;
+          const now = performance.now();
+          const elapsed = (now - _lastStatsTime) / 1000;
+          if (elapsed > 0) {
+            bytesReceivedDelta = (totalBytes - _lastBytesReceived) / elapsed;
+          }
+          _lastBytesReceived = totalBytes;
+          _lastStatsTime = now;
+          packetsLost = s.packetsLost ?? 0;
+          packetsReceived = s.packetsReceived ?? 1;
+        }
+        // candidate-pair RTT
+        if (s.type === "candidate-pair" && s.state === "succeeded" && !candidatePairFound) {
+          rttMs = Math.round((s.currentRoundTripTime ?? 0) * 1000);
+          candidatePairFound = true;
+        }
+      });
+
+      // 更新實際 FPS
+      const fpsEl = document.getElementById("val-metric-actual-fps");
+      if (fpsEl) fpsEl.textContent = actualFps > 0 ? `${actualFps.toFixed(1)} fps` : "-- fps";
+
+      // 更新實際位元率
+      const bitrateEl = document.getElementById("val-metric-actual-bitrate");
+      if (bitrateEl) {
+        const mbps = bytesReceivedDelta * 8 / 1_000_000;
+        bitrateEl.textContent = mbps > 0 ? `${mbps.toFixed(2)} Mbps` : "-- Mbps";
+      }
+
+      // 連線品質評分（綠 / 黃 / 紅）
+      const lossRate = packetsReceived > 0 ? packetsLost / packetsReceived : 0;
+      const indicator = document.getElementById("quality-indicator");
+      const qualityLabel = document.getElementById("quality-label");
+      if (indicator && qualityLabel) {
+        if (rttMs <= 80 && lossRate < 0.01) {
+          indicator.style.background = "#10b981"; // 綠 — 優
+          qualityLabel.textContent = t("quality_excellent") || "Excellent";
+        } else if (rttMs <= 200 && lossRate < 0.05) {
+          indicator.style.background = "#f59e0b"; // 黃 — 可
+          qualityLabel.textContent = t("quality_fair") || "Fair";
+        } else {
+          indicator.style.background = "#ef4444"; // 紅 — 差
+          qualityLabel.textContent = t("quality_poor") || "Poor";
+        }
+      }
+    } catch (e) {
+      // getStats() 在非連線狀態下會拋出，忽略即可
+    }
+  }, 2000);
 }
 
 // 初始化離線手動 SDP 連線控制（使用瀏覽器原生 WebRTC）
@@ -2048,6 +2623,9 @@ function initOfflineSdpMode() {
         
         dataChannelUnreliable = pc.createDataChannel("input-unreliable", { ordered: false, maxRetransmits: 0 });
         bindUnreliableChannel(dataChannelUnreliable);
+
+        // 檔案傳輸 DataChannel
+        dataChannelFileTransfer = pc.createDataChannel("file-transfer", { ordered: true });
 
         pc.onicecandidate = (event) => {
           if (!event.candidate) {
@@ -2179,12 +2757,14 @@ function initHelpButtons() {
   });
 }
 
-// 初始化一鍵複製功能 (本機 ID / HWID) 並加上微交互回饋
+// 初始化一鍵複製功能 (本機 ID / HWID / MAC) 並加上微交互回饋
 function initClipboardCopy() {
   const btnCopyId = document.getElementById("btn-copy-id");
   const btnCopyHwid = document.getElementById("btn-copy-hwid");
+  const btnCopyMac = document.getElementById("btn-copy-mac");
   const valMyId = document.getElementById("val-my-id");
   const valHwid = document.getElementById("val-hwid");
+  const valMyMac = document.getElementById("val-my-mac");
 
   if (btnCopyId && valMyId) {
     btnCopyId.addEventListener("click", () => {
@@ -2195,6 +2775,18 @@ function initClipboardCopy() {
           btnCopyId.textContent = "📋";
         }, 1500);
       }).catch((err) => console.error("複製 ID 失敗:", err));
+    });
+  }
+  
+  if (btnCopyMac && valMyMac) {
+    btnCopyMac.addEventListener("click", () => {
+      const macText = valMyMac.textContent || "";
+      navigator.clipboard.writeText(macText).then(() => {
+        btnCopyMac.textContent = "✓";
+        setTimeout(() => {
+          btnCopyMac.textContent = "📋";
+        }, 1500);
+      }).catch((err) => console.error("複製 MAC 失敗:", err));
     });
   }
 
@@ -2561,6 +3153,32 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         displayMode = "fit";
       }
       applyDisplayMode();
+    };
+  }
+
+  const btnAudioToggle = document.getElementById("btn-audio-toggle") as HTMLButtonElement;
+  if (btnAudioToggle) {
+    btnAudioToggle.onclick = () => {
+      const audioEl = document.getElementById("remote-audio") as HTMLAudioElement;
+      if (audioEl) {
+        audioEl.muted = !audioEl.muted;
+        btnAudioToggle.textContent = audioEl.muted ? "🔇 Unmute" : "🔊 Mute";
+      }
+    };
+  }
+
+  const btnSwitchMonitor = document.getElementById("btn-switch-monitor") as HTMLButtonElement;
+  if (btnSwitchMonitor) {
+    btnSwitchMonitor.onclick = () => {
+      if (availableMonitors.length > 1 && dataChannelSystemControl && dataChannelSystemControl.readyState === "open") {
+        currentMonitorIndex = (currentMonitorIndex + 1) % availableMonitors.length;
+        btnSwitchMonitor.textContent = `🖥️ ${availableMonitors[currentMonitorIndex].name}`;
+        
+        dataChannelSystemControl.send(JSON.stringify({
+          type: "switch_monitor",
+          index: currentMonitorIndex
+        }));
+      }
     };
   }
 
@@ -4279,6 +4897,37 @@ function initTailscaleGuide() {
       }
     });
   }
+
+  // 自訂 TURN Server 邏輯
+  const btnSaveTurn = document.getElementById("btn-save-turn");
+  const taCustomTurn = document.getElementById("ta-custom-turn") as HTMLTextAreaElement;
+  
+  if (taCustomTurn) {
+    const saved = localStorage.getItem("custom_turn_servers");
+    if (saved) {
+      taCustomTurn.value = saved;
+    }
+  }
+
+  if (btnSaveTurn && taCustomTurn) {
+    btnSaveTurn.addEventListener("click", () => {
+      try {
+        const val = taCustomTurn.value.trim();
+        if (!val) {
+          localStorage.removeItem("custom_turn_servers");
+        } else {
+          // 驗證 JSON 格式
+          const parsed = JSON.parse(val);
+          if (!Array.isArray(parsed)) throw new Error("Not an array");
+          localStorage.setItem("custom_turn_servers", JSON.stringify(parsed));
+        }
+        showToast("TURN Servers saved! Reloading...");
+        setTimeout(() => window.location.reload(), 1000);
+      } catch (e) {
+        alert("JSON 格式錯誤，請確保輸入正確的陣列配置，例如: [{\"urls\":[\"turn:ip:port\"], \"username\":\"u\", \"credential\":\"p\"}]");
+      }
+    });
+  }
 }
 
 // =========================================================================
@@ -4306,6 +4955,9 @@ function initPinToggle() {
 // 應用程式初始化入口點
 // =========================================================================
 window.addEventListener("DOMContentLoaded", async () => {
+  setupFileTransferDropZone(() => dataChannelFileTransfer);
+  initDeviceBook();
+
   await initI18n();
 
   // 啟動時檢查並請求 macOS 權限 (螢幕錄影、輔助使用)
@@ -4365,16 +5017,15 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (generatedId) myId = generatedId;
 
   await fetchHwid();
+  await loadMyMac();
   
   initConnectButton();
   initLicenseVerification();
   initPrivacyMode();
+  initAutostart();
   initNetworkSimulator();
-  initAccessPin();
   initSignalingReconnect();
   initStaticPassword();
-  // 在 initAccessPin 執行後，才能取得正確產生的 PIN 碼
-  myPin = (window as any).__localAccessPin || "";
   initPanelToggle();
   initOfflineSdpMode();
   initSystemDiagnostic();
@@ -4386,6 +5037,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initTailscaleGuide();
   initPinToggle();
   initVisualViewportListener();
+  initFirstRunPrompt();
   
   // 啟動狀態輪詢
   startStatusPolling();
@@ -4519,7 +5171,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
 
     // 呼叫後端指令，傳入本機 ID 與當前 PIN 碼
-    invoke("start_rust_signaling", { myId: myId, pin: myPin })
+    invoke("start_rust_signaling", { myId: myId, pin: "" })
       .then(() => {
         console.log("[Signaling] 已成功委託 Rust 後端啟動信令客戶端。");
       })

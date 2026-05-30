@@ -58,6 +58,8 @@
         </div>
       </div>
       
+      <button id="btn-switch-monitor" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 12px; font-weight: 600; margin-right: 8px; display: none;">🖥️ Display 1</button>
+      <button id="btn-audio-toggle" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 12px; font-weight: 600; margin-right: 8px; display: none;">🔊 Mute</button>
       <button id="btn-display-mode" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 6px 12px; color: white; cursor: pointer; transition: all 0.2s; font-size: 12px; font-weight: 600;">🔍 Original Size</button>
     </div>
   </div>
@@ -161,6 +163,26 @@
       
       <!-- 左側控制面板 -->
       <section class="control-panel glass-panel">
+        <!-- 地址簿 / 裝置清單 -->
+        <div id="device-book-section" class="panel-section" style="margin-bottom: 16px;">
+          <div id="device-book-header" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding-bottom: 6px; border-bottom: 1px solid var(--panel-border, rgba(255,255,255,0.08));" onclick="toggleDeviceBook()">
+            <h3 id="txt-device-book-title" style="margin: 0; font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">裝置地址簿</h3>
+            <span id="device-book-toggle-icon" style="font-size: 11px; color: var(--text-secondary); transition: transform 0.2s;">&#9660;</span>
+          </div>
+          <div id="device-book-content" style="display: none; margin-top: 8px;">
+            <div id="device-book-list" style="display: flex; flex-direction: column; gap: 6px;">
+              <!-- dynamically populated -->
+            </div>
+            <p id="device-book-empty-msg" style="font-size: 12px; color: var(--text-secondary); text-align: center; padding: 12px 0; display: none;">尚未儲存任何裝置</p>
+            
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+              <button id="btn-import-device-book" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">Import JSON</button>
+              <button id="btn-export-device-book" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">Export JSON</button>
+            </div>
+            <input type="file" id="input-import-device-book" accept=".json" style="display: none;" />
+          </div>
+        </div>
+
         <!-- 建立遠端連線 (僅主控端 Client 顯示) -->
         <div id="client-connection-section">
           <h2 id="txt-connect-title">Establish Connection</h2>
@@ -242,28 +264,32 @@
             </div>
           </div>
           <div class="info-row">
+            <span id="lbl-my-mac">My MAC:</span>
+            <div class="val-with-copy">
+              <span id="val-my-mac" class="code-text">Loading...</span>
+              <button class="btn-copy" id="btn-copy-mac" type="button" title="Copy">📋</button>
+            </div>
+          </div>
+          <div class="info-row">
             <span id="lbl-hwid">My HWID:</span>
             <div class="val-with-copy">
               <span id="val-hwid" class="code-text truncate">Loading...</span>
               <button class="btn-copy" id="btn-copy-hwid" type="button" title="Copy">📋</button>
             </div>
           </div>
-          <div class="info-row">
-            <span id="lbl-my-pin">Access PIN:</span>
-            <div class="val-with-copy">
-              <span id="val-my-pin" class="code-text pin-display">------</span>
-              <button class="btn-copy" id="btn-refresh-pin" type="button" title="Refresh PIN">🔄</button>
-              <button class="btn-copy" id="btn-copy-pin" type="button" title="Copy">📋</button>
+          <div class="info-row" style="flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); width: 100%;">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+              <span id="lbl-static-pwd" style="font-size: 13px; font-weight: 500;">Static Access Password:</span>
+              <span id="static-pwd-status-badge" class="status-badge status-inactive" style="margin-top: 0;">Not Set</span>
             </div>
-          </div>
-          
-          <div class="info-row" style="flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
-            <span id="lbl-static-pwd" style="font-size: 13px;">Static Access Password:</span>
-            <div class="input-with-button" style="width: 100%;">
-              <input type="password" id="input-static-pwd" placeholder="Set Unattended Password" style="flex: 1;">
-              <button id="btn-set-static-pwd" class="btn-secondary" style="padding: 6px 12px;">Save</button>
+            <div style="position: relative; display: flex; width: 100%; gap: 6px;">
+              <div style="position: relative; flex: 1; display: flex; align-items: center;">
+                <input type="password" id="input-static-pwd" placeholder="Set Unattended Password" style="width: 100%; padding-right: 55px; box-sizing: border-box;">
+                <button id="btn-toggle-static-pwd" type="button" class="btn-copy" style="position: absolute; right: 8px; font-size: 11px; padding: 2px 6px; background: rgba(255, 255, 255, 0.08); border-radius: 4px; color: var(--text-muted); cursor: pointer; border: none;" title="Toggle visibility">Show</button>
+              </div>
+              <button id="btn-set-static-pwd" class="btn-secondary" style="padding: 6px 12px; flex-shrink: 0;">Save</button>
+              <button id="btn-delete-static-pwd" class="btn-secondary" style="padding: 6px 12px; flex-shrink: 0; background: var(--color-danger-bg, rgba(230, 45, 65, 0.1)); color: var(--color-danger, #e62d41); border: 1px solid rgba(230, 45, 65, 0.2); display: none;">Delete</button>
             </div>
-            <span id="static-pwd-status" style="font-size: 12px; color: var(--text-muted);">Status: Not Set</span>
           </div>
           
           <div class="input-group license-group">
@@ -312,6 +338,16 @@
               <span class="slider round"></span>
             </label>
           </div>
+          
+          <div class="toggle-row host-only" style="margin-top: 10px;">
+            <span style="display: inline-flex; align-items: center;">
+              <span id="lbl-autostart">Run on System Startup</span>
+            </span>
+            <label class="switch">
+              <input type="checkbox" id="chk-autostart">
+              <span class="slider round"></span>
+            </label>
+          </div>
           <div id="help-privacy" class="help-block"></div>
         </div>
       </section>
@@ -353,6 +389,23 @@
             <div class="metric-card">
               <span class="metric-label" id="lbl-metric-encryption">Codec & Cipher Security</span>
               <span class="metric-value" id="val-metric-encryption">--</span>
+            </div>
+
+            <!-- WebRTC getStats() 真實指標 -->
+            <div class="metric-card">
+              <span class="metric-label" id="lbl-metric-actual-fps">Actual FPS (Live)</span>
+              <span class="metric-value" id="val-metric-actual-fps">-- fps</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label" id="lbl-metric-actual-bitrate">Actual Bitrate (Live)</span>
+              <span class="metric-value" id="val-metric-actual-bitrate">-- Mbps</span>
+            </div>
+            <div class="metric-card" style="grid-column: span 1;">
+              <span class="metric-label" id="lbl-metric-quality-score">Connection Quality</span>
+              <span class="metric-value" id="val-metric-quality-score" style="display: flex; align-items: center; gap: 6px;">
+                <span id="quality-indicator" style="width: 10px; height: 10px; border-radius: 50%; background: #6b7280; display: inline-block; flex-shrink: 0;"></span>
+                <span id="quality-label">--</span>
+              </span>
             </div>
           </div>
         </div>
@@ -519,11 +572,20 @@
   <div id="tailscale-guide-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 200; background: rgba(0,0,0,0.5); backdrop-filter: blur(5px); justify-content: center; align-items: center; padding: 20px;">
     <div style="background: var(--glass-bg, rgba(255,255,255,0.95)); border: 1px solid var(--panel-border, rgba(0,0,0,0.1)); border-radius: var(--border-radius-lg, 16px); padding: 24px; max-width: 550px; width: 100%; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.2); display: flex; flex-direction: column; gap: 16px;">
       <div style="display: flex; justify-content: space-between; align-items: center;">
-        <h2 style="margin: 0; font-size: 18px; font-weight: 600; color: var(--text-main);" id="txt-ts-guide-title">Tailscale 零基礎穿透設定指南</h2>
+        <h2 style="margin: 0; font-size: 18px; font-weight: 600; color: var(--text-main);" id="txt-ts-guide-title">Tailscale / TURN Server 穿透設定</h2>
         <button id="btn-close-ts-guide" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-main);">&times;</button>
       </div>
       <div style="font-size: 13px; line-height: 1.6; color: var(--text-main); display: flex; flex-direction: column; gap: 12px;">
-        <p id="txt-ts-guide-desc">由於 WebRTC 受到電信商對稱型 NAT 限制，建議在雙端安裝免費的安全虛擬局域網工具 Tailscale，以 100% 實現 P2P 超低延遲直連。</p>
+        
+        <!-- TURN Server Setting Section -->
+        <div style="background: rgba(0,0,0,0.05); border-radius: 8px; padding: 12px;">
+          <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">進階：自攜 TURN 伺服器 (BYOI)</h4>
+          <p style="margin: 0 0 8px 0; font-size: 12px;">若您有自架 Coturn 等中繼伺服器，可在此輸入 JSON 陣列格式配置：</p>
+          <textarea id="ta-custom-turn" rows="3" style="width: 100%; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 4px; padding: 6px; font-family: monospace; font-size: 11px; margin-bottom: 8px;" placeholder='[{"urls":["turn:ip:3478"],"username":"...","credential":"..."}]'></textarea>
+          <button id="btn-save-turn" class="btn-primary" style="padding: 4px 10px; font-size: 12px;">儲存並重新載入</button>
+        </div>
+
+        <p id="txt-ts-guide-desc" style="margin-top: 8px; border-top: 1px solid var(--panel-border); padding-top: 12px;">若不具備 TURN 伺服器，建議在雙端安裝免費的安全虛擬局域網工具 Tailscale，以 100% 實現 P2P 超低延遲直連。</p>
         
         <div style="border-left: 3px solid var(--accent-color, #3b82f6); padding-left: 10px; margin-bottom: 8px;">
           <h4 id="txt-ts-step-1-title" style="margin: 0 0 4px 0; font-size: 14px; font-weight: 600;">步驟一：下載與安裝</h4>
@@ -548,6 +610,38 @@
         <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 10px; font-size: 12px; color: #10b981; line-height: 1.4;" id="txt-ts-step-4-desc">
           💡 完成後，Mac 端的 2syn 燈號會自動變為綠色，手機端即可透過 2syn 順利發起超低延遲直連，不再有連線失敗與黑屏問題。
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 首次執行提示 Modal -->
+  <div id="first-run-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 300; background: rgba(0,0,0,0.65); backdrop-filter: blur(8px); justify-content: center; align-items: center; padding: 20px;">
+    <div style="background: var(--glass-bg, rgba(18,24,38,0.98)); border: 1px solid rgba(99,179,237,0.3); border-radius: 20px; padding: 32px 28px; max-width: 480px; width: 100%; box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(99,179,237,0.1); display: flex; flex-direction: column; gap: 20px;">
+      <!-- Header -->
+      <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; text-align: center;">
+        <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 28px; margin-bottom: 4px;">🔐</div>
+        <h2 id="txt-first-run-title" style="margin: 0; font-size: 20px; font-weight: 700; color: var(--text-main, #f0f4ff); line-height: 1.3;">歡迎使用 2syn — 設定安全金鑰</h2>
+        <p id="txt-first-run-subtitle" style="margin: 0; font-size: 13px; color: rgba(160,180,220,0.8); line-height: 1.5;">首次啟動必讀</p>
+      </div>
+      <!-- Content -->
+      <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(99,179,237,0.15); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; gap: 12px; align-items: flex-start;">
+          <span style="font-size: 20px; line-height: 1;">⚠️</span>
+          <p id="txt-first-run-body" style="margin: 0; font-size: 13px; color: var(--text-main, #e2e8f0); line-height: 1.65;">在接受任何遠端連線之前，您必須先設定「靜態無人值守密碼」。此密碼是遠端控制連線的唯一驗證金鑰，未設定時所有連線請求均會被自動拒絕。</p>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: flex-start;">
+          <span style="font-size: 20px; line-height: 1;">🔒</span>
+          <p id="txt-first-run-tip" style="margin: 0; font-size: 12px; color: rgba(160,180,220,0.75); line-height: 1.6;">建議使用長度至少 8 個字元、包含英文大小寫與數字的強密碼，以保障您的設備安全。</p>
+        </div>
+      </div>
+      <!-- Actions -->
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <button id="btn-first-run-go" style="width: 100%; padding: 13px; background: linear-gradient(135deg, #3b82f6, #6366f1); border: none; color: white; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s, transform 0.1s; box-shadow: 0 4px 16px rgba(99,102,241,0.4);">
+          <span id="txt-first-run-btn-go">前往設定靜態密碼</span>
+        </button>
+        <button id="btn-first-run-skip" style="width: 100%; padding: 10px; background: transparent; border: 1px solid rgba(160,180,220,0.2); color: rgba(160,180,220,0.6); border-radius: 10px; font-size: 13px; cursor: pointer; transition: all 0.2s;">
+          <span id="txt-first-run-btn-skip">稍後再設定（連線將被拒絕）</span>
+        </button>
       </div>
     </div>
   </div>

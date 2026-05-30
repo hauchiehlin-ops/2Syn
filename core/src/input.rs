@@ -341,7 +341,7 @@ impl InputEvent {
                 InputEvent::MouseMove { x, y } => {
                     let clamped_x = x.clamp(0.0, 1.0);
                     let clamped_y = y.clamp(0.0, 1.0);
-                    let point = core_graphics::geometry::CGPoint::new((clamped_x as f64 * screen_w), (clamped_y as f64 * screen_h));
+                    let point = core_graphics::geometry::CGPoint::new(clamped_x as f64 * screen_w, clamped_y as f64 * screen_h);
                     
                     let mut event_type = CGEventType::MouseMoved;
                     let mut mouse_btn = CGMouseButton::Left;
@@ -392,10 +392,38 @@ impl InputEvent {
                         .map_err(|_| CoreError::SystemError("建立 macOS 按鍵放開事件失敗".to_string()))?;
                     event.post(CGEventTapLocation::HID);
                 }
-                InputEvent::MouseScroll { delta_x: _, delta_y } => {
-                    // macOS 滾輪事件需使用核心 CoreGraphics C API 進行 FFI 呼叫
-                    // 此處做虛擬的輸出，實際整合可透過 CoreGraphics CGEventCreateScrollWheelEvent
-                    println!("macOS 滾輪模擬: {}", delta_y);
+                InputEvent::MouseScroll { delta_x, delta_y } => {
+                    // 使用 CGEventCreateScrollWheelEvent2 FFI 實作真實 macOS 捲動事件
+                    extern "C" {
+                        fn CGEventCreateScrollWheelEvent2(
+                            source: *mut std::ffi::c_void,
+                            units: i32,
+                            wheel_count: u32,
+                            wheel1: i32,
+                            wheel2: i32,
+                            wheel3: i32,
+                        ) -> *mut std::ffi::c_void;
+                        fn CGEventPost(tap: u32, event: *mut std::ffi::c_void);
+                        fn CFRelease(cf: *mut std::ffi::c_void);
+                    }
+                    use foreign_types_shared::ForeignType;
+                    unsafe {
+                        // kCGScrollEventUnitLine = 0（自然行捲動）
+                        // kCGHIDEventTap = 0
+                        // 垂直方向取反以符合 macOS 自然捲動方向
+                        let raw_event = CGEventCreateScrollWheelEvent2(
+                            source.as_ptr() as *mut std::ffi::c_void,
+                            0i32,               // units (kCGScrollEventUnitLine = 0)
+                            2u32,               // wheel_count (2 axes: vertical + horizontal)
+                            (-*delta_y) as i32, // wheel1: 垂直（取反以符合 macOS 自然方向）
+                            (*delta_x) as i32,  // wheel2: 水平
+                            0i32,               // wheel3: not used
+                        );
+                        if !raw_event.is_null() {
+                            CGEventPost(0u32, raw_event); // kCGHIDEventTap = 0
+                            CFRelease(raw_event);
+                        }
+                    }
                 }
                 InputEvent::KeyDown { keycode, modifiers: _ } => {
                     let mac_key = vk_to_mac_keycode(*keycode);

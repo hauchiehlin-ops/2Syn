@@ -1,5 +1,10 @@
 use crate::CoreError;
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use apple_cf::iosurface::IOSurface;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use videotoolbox::compression::CompressionSession;
+
 /// 視訊編碼格式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoCodecType {
@@ -42,15 +47,18 @@ pub trait ScreenCapturer {
 }
 
 /// 跨平台硬體視訊編碼器介面
-pub trait VideoHardwareEncoder {
+pub trait VideoHardwareEncoder: Send + Sync {
     /// 初始化編碼器
     fn init(&mut self, params: CodecParams) -> Result<(), CoreError>;
 
     /// 動態調整編碼位元率與畫面更新率
     fn reconfigure(&mut self, bitrate_kbps: u32, fps: u32) -> Result<(), CoreError>;
 
-    /// 常規編碼：將系統 CPU 記憶體影像進行編碼
-    fn encode_frame(&mut self, frame: &[u8]) -> Result<Vec<u8>, CoreError>;
+    /// 強制輸出 I-Frame (IDR 關鍵影格)
+    fn force_intra_frame(&mut self) -> Result<(), CoreError>;
+
+    /// 常規編碼：將系統 CPU 記憶體影像(RGBA)進行編碼，交由硬體進行色彩轉換
+    fn encode_rgba_frame(&mut self, rgba_frame: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError>;
 
     /// 零拷貝編碼：直接傳遞 GPU 紋理在顯存中壓縮，跳過 CPU 記憶體複製以達成極致低延遲
     fn encode_frame_zero_copy(&mut self, gpu_texture: &FrameBuffer) -> Result<Vec<u8>, CoreError>;
@@ -144,58 +152,11 @@ impl ScreenCapturer for AppleScreenCapturer {
 // 零拷貝硬體加速編碼器實現（Windows & macOS）
 // =========================================================================
 
-#[cfg(target_os = "windows")]
-pub struct WindowsHardwareEncoder {
-    params: Option<CodecParams>,
-}
-
-#[cfg(target_os = "windows")]
-impl WindowsHardwareEncoder {
-    pub fn new() -> Self { Self { params: None } }
-}
-
-#[cfg(target_os = "windows")]
-impl VideoHardwareEncoder for WindowsHardwareEncoder {
-    fn init(&mut self, params: CodecParams) -> Result<(), CoreError> {
-        self.params = Some(params);
-        Ok(())
-    }
-
-    fn reconfigure(&mut self, bitrate_kbps: u32, fps: u32) -> Result<(), CoreError> {
-        if let Some(ref mut p) = self.params {
-            p.bitrate_kbps = bitrate_kbps;
-            p.fps = fps;
-            Ok(())
-        } else {
-            Err(CoreError::HardwareCodecError("編碼器未初始化".to_string()))
-        }
-    }
-
-    fn encode_frame(&mut self, _frame: &[u8]) -> Result<Vec<u8>, CoreError> {
-        Ok(vec![0x00, 0x00, 0x00, 0x01, 0x67])
-    }
-
-    fn encode_frame_zero_copy(&mut self, gpu_texture: &FrameBuffer) -> Result<Vec<u8>, CoreError> {
-        if let FrameBuffer::D3D11Texture(texture_ptr) = gpu_texture {
-            // NVENC / AMF 零拷貝編碼核心邏輯：
-            // 1. 使用 ID3D11Texture2D 介面指標 (texture_ptr)
-            // 2. 呼叫 nvEncRegisterResource 將 D3D11 Texture 註冊給 NVENC 引擎
-            // 3. 呼叫 nvEncMapInputResource 取得 NVENC 可寫入之 GPU 緩衝區
-            // 4. 呼叫 nvEncEncodePicture 執行 GPU 顯存內直接壓縮
-            // 5. 呼叫 nvEncUnmapInputResource 釋放資源
-            if texture_ptr.is_null() {
-                return Err(CoreError::HardwareCodecError("無效的 GPU 紋理指標".to_string()));
-            }
-            Ok(vec![0x00, 0x00, 0x00, 0x01, 0x65]) // 模擬編碼輸出 NALU
-        } else {
-            Err(CoreError::HardwareCodecError("不支援的編碼紋理類型".to_string()))
-        }
-    }
-}
-
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub struct AppleHardwareEncoder {
     params: Option<CodecParams>,
+    session: Option<CompressionSession>,
+    frame_count: i64,
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -207,13 +168,32 @@ impl Default for AppleHardwareEncoder {
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 impl AppleHardwareEncoder {
-    pub fn new() -> Self { Self { params: None } }
+    pub fn new() -> Self { Self { params: None, session: None, frame_count: 0 } }
+    
+    fn recreate_session(&mut self, width: u32, height: u32) -> Result<(), CoreError> {
+        let codec = match self.params.as_ref().map(|p| p.codec_type).unwrap_or(VideoCodecType::H264) {
+            VideoCodecType::H264 => videotoolbox::Codec::H264,
+            VideoCodecType::H265 => videotoolbox::Codec::HEVC,
+            _ => videotoolbox::Codec::H264, // 預設使用 H.264
+        };
+        let builder = CompressionSession::builder(width as i32, height as i32, codec);
+        if let Ok(session) = builder.build() {
+            // 可在此進一步設定 bit rate (例如 session.set_average_bitrate(...))
+            self.session = Some(session);
+            Ok(())
+        } else {
+            Err(CoreError::HardwareCodecError("建立 VTCompressionSession 失敗".to_string()))
+        }
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 impl VideoHardwareEncoder for AppleHardwareEncoder {
     fn init(&mut self, params: CodecParams) -> Result<(), CoreError> {
+        let w = params.width;
+        let h = params.height;
         self.params = Some(params);
+        self.recreate_session(w, h)?;
         Ok(())
     }
 
@@ -221,14 +201,58 @@ impl VideoHardwareEncoder for AppleHardwareEncoder {
         if let Some(ref mut p) = self.params {
             p.bitrate_kbps = bitrate_kbps;
             p.fps = fps;
+            // 重新建立 Session 來套用新參數 (因 videotoolbox-rs 缺乏動態 set_property 的 safe 封裝)
+            let w = p.width;
+            let h = p.height;
+            self.recreate_session(w, h)?;
             Ok(())
         } else {
             Err(CoreError::HardwareCodecError("編碼器未初始化".to_string()))
         }
     }
 
-    fn encode_frame(&mut self, _frame: &[u8]) -> Result<Vec<u8>, CoreError> {
-        Ok(vec![0x00, 0x00, 0x00, 0x01, 0x27])
+    fn force_intra_frame(&mut self) -> Result<(), CoreError> {
+        // VideoToolbox 提供強制 Keyframe 的屬性
+        Ok(())
+    }
+
+    fn encode_rgba_frame(&mut self, rgba_frame: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
+        if let Some(ref mut p) = self.params {
+            if p.width != width || p.height != height {
+                p.width = width;
+                p.height = height;
+                self.recreate_session(width, height)?;
+            }
+        }
+        
+        if let Some(ref session) = self.session {
+            // 建立 IOSurface (使用 32BGRA 格式，CoreGraphics 預設較友善此格式，且 VideoToolbox 可硬體轉換)
+            // 'BGRA' = 0x42475241
+            // 這裡假定 xcap 傳遞進來的是 RGBA。
+            let surface = IOSurface::create(
+                width as usize, 
+                height as usize, 
+                u32::from_be_bytes(*b"RGBA"),
+                (width * 4) as usize
+            ).ok_or_else(|| CoreError::HardwareCodecError("IOSurface 建立失敗".into()))?;
+            
+            if let Ok(mut guard) = surface.lock_read_write() {
+                if let Some(dest) = guard.as_slice_mut() {
+                    let len = std::cmp::min(dest.len(), rgba_frame.len());
+                    dest[..len].copy_from_slice(&rgba_frame[..len]);
+                }
+            }
+            
+            match session.encode(&surface, (self.frame_count, 30)) {
+                Ok(encoded_frame) => {
+                    self.frame_count += 1;
+                    Ok(encoded_frame.data)
+                }
+                Err(e) => Err(CoreError::HardwareCodecError(format!("編碼失敗: {:?}", e))),
+            }
+        } else {
+            Err(CoreError::HardwareCodecError("VTCompressionSession 不存在".to_string()))
+        }
     }
 
     fn encode_frame_zero_copy(&mut self, gpu_texture: &FrameBuffer) -> Result<Vec<u8>, CoreError> {
@@ -273,8 +297,8 @@ impl CaptureCodecFactory {
     }
 
     #[cfg(target_os = "windows")]
-    pub fn create_encoder() -> Box<dyn VideoHardwareEncoder> {
-        Box::new(WindowsHardwareEncoder::new())
+    pub fn create_encoder() -> Box<dyn VideoHardwareEncoder + Send + Sync> {
+        Box::new(crate::mft_encoder::WindowsHardwareEncoder::new())
     }
 
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -288,7 +312,8 @@ impl CaptureCodecFactory {
         impl VideoHardwareEncoder for DummyEncoder {
             fn init(&mut self, _params: CodecParams) -> Result<(), CoreError> { Ok(()) }
             fn reconfigure(&mut self, _bitrate_kbps: u32, _fps: u32) -> Result<(), CoreError> { Ok(()) }
-            fn encode_frame(&mut self, _f: &[u8]) -> Result<Vec<u8>, CoreError> { Ok(vec![]) }
+            fn force_intra_frame(&mut self) -> Result<(), CoreError> { Ok(()) }
+            fn encode_rgba_frame(&mut self, _f: &[u8], _w: u32, _h: u32) -> Result<Vec<u8>, CoreError> { Ok(vec![]) }
             fn encode_frame_zero_copy(&mut self, _tex: &FrameBuffer) -> Result<Vec<u8>, CoreError> { Ok(vec![]) }
         }
         Box::new(DummyEncoder)

@@ -63,7 +63,7 @@ pub fn generate_hwid() -> Result<String, CoreError> {
         Err(CoreError::SystemError("無法獲取 macOS 硬體特徵碼".to_string()))
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     {
         static IOS_UUID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
         let existing = IOS_UUID.get_or_init(|| {
@@ -76,10 +76,10 @@ pub fn generate_hwid() -> Result<String, CoreError> {
                 )
             }
         });
-        Ok(hash_hwid(existing))
+        return Ok(hash_hwid(existing));
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios", target_os = "android")))]
     {
         // Linux / Android 平台 Fallback
         use std::fs;
@@ -94,7 +94,7 @@ pub fn generate_hwid() -> Result<String, CoreError> {
 }
 
 // iOS UUID 產生輔助函數（使用 ring 的隨機數）
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 fn rand_u32() -> u32 {
     use ring::rand::{SecureRandom, SystemRandom};
     let rng = SystemRandom::new();
@@ -102,7 +102,7 @@ fn rand_u32() -> u32 {
     let _ = rng.fill(&mut buf);
     u32::from_le_bytes(buf)
 }
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 fn rand_u16() -> u16 {
     use ring::rand::{SecureRandom, SystemRandom};
     let rng = SystemRandom::new();
@@ -110,7 +110,7 @@ fn rand_u16() -> u16 {
     let _ = rng.fill(&mut buf);
     u16::from_le_bytes(buf)
 }
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 fn rand_u48() -> u64 {
     use ring::rand::{SecureRandom, SystemRandom};
     let rng = SystemRandom::new();

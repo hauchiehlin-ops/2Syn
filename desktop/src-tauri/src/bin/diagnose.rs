@@ -1,4 +1,4 @@
-use futures_util::{StreamExt, SinkExt};
+use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 use url::Url;
 
@@ -28,22 +28,22 @@ async fn main() {
             for (name, value) in response.headers() {
                 println!("  {}: {:?}", name, value);
             }
-            
+
             let (mut ws_write, mut ws_read) = ws_stream.split();
-            
+
             let my_id = "test_diag_123";
             println!("發送登入封包，ID: {}", my_id);
             let login_msg = serde_json::json!({
                 "type": "login",
                 "id": my_id
             });
-            
+
             if let Err(e) = ws_write.send(WsMessage::Text(login_msg.to_string())).await {
                 eprintln!("發送登入封包失敗: {}", e);
                 return;
             }
             println!("登入封包發送成功，等待 5 秒接收伺服器消息...");
-            
+
             tokio::select! {
                 res = ws_read.next() => {
                     match res {

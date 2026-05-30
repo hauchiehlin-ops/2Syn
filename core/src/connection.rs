@@ -9,7 +9,6 @@ use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::data_channel::RTCDataChannel;
-use webrtc::ice_transport::ice_credential_type::RTCIceCredentialType;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
@@ -116,26 +115,23 @@ impl ConnectionManager {
         // 1. 判斷連線媒介是否為 Relay
         // （堅持不使用 TURN 策略：不會出現 Relay 狀態，保留分支以備未來擴展如 Tailscale Relay）
         if metrics.connection_type == ConnectionType::Relay {
-            // 目前維持預設不調整，依賴 STUN P2P
+            config.target_fps = 30;
+            config.bitrate_limit_kbps = 2000; // 降低頻寬以適應中繼
+            config.color_format = ColorFormat::Yuv420;
         }
 
-        // 2. 基於網路延遲 (RTT) 與丟包率的動態降級 (P2P 狀態下)
-        if metrics.rtt_ms > 150 || metrics.packet_loss_rate > 0.08 {
+        // 2. 基於網路指標 (ABR: Adaptive Bitrate) 的動態調整
+        // RTT 或 Packet Loss 過高時大幅降速
+        if metrics.rtt_ms > 150 || metrics.packet_loss_rate > 0.05 {
             config.target_fps = 30;
-            config.color_format = ColorFormat::Yuv420;
-            config.bitrate_limit_kbps = 2000;
-        } else if metrics.rtt_ms > 60 || metrics.packet_loss_rate > 0.03 {
+            config.bitrate_limit_kbps = 1000;
+        } else if metrics.rtt_ms > 80 || metrics.packet_loss_rate > 0.01 {
             config.target_fps = 60;
-            config.color_format = ColorFormat::Yuv420;
-            config.bitrate_limit_kbps = 8000;
-        } else if metrics.rtt_ms > 30 || metrics.packet_loss_rate > 0.01 {
-            config.target_fps = 90;
-            config.color_format = ColorFormat::Yuv444;
-            config.bitrate_limit_kbps = 20000;
+            config.bitrate_limit_kbps = 3000;
         } else {
-            config.target_fps = 144;
-            config.color_format = ColorFormat::Yuv444;
-            config.bitrate_limit_kbps = 50000;
+            // 網路暢通，提升至最高畫質
+            config.target_fps = 60;
+            config.bitrate_limit_kbps = 8000;
         }
 
         config
@@ -149,21 +145,40 @@ impl ConnectionManager {
         self.current_metrics.lock().await.clone()
     }
 
-    pub async fn start_monitor_loop(manager: Arc<Self>) {
-        loop {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            
-            let mock_metrics = {
-                let current_m = manager.current_metrics.lock().await;
-                NetworkMetrics {
-                    rtt_ms: current_m.rtt_ms,
-                    packet_loss_rate: current_m.packet_loss_rate,
-                    connection_type: current_m.connection_type,
+    pub fn spawn_monitor_task(manager: Arc<Self>, pc: Arc<webrtc::peer_connection::RTCPeerConnection>) {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+                
+                if pc.connection_state() == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Closed {
+                    break;
                 }
-            };
-            
-            manager.update_metrics(mock_metrics).await;
-        }
+
+                let stats = pc.get_stats().await;
+                let mut current_rtt = 0u32;
+                let mut current_loss = 0.0f32;
+
+                for (_id, stat) in stats.reports.iter() {
+                    if let webrtc::stats::StatsReportType::RemoteInboundRTP(rtp_stats) = stat {
+                        current_rtt = (rtp_stats.round_trip_time.unwrap_or(0.0) * 1000.0) as u32;
+                        current_loss = rtp_stats.fraction_lost as f32;
+                        break;
+                    }
+                }
+
+                // 如果完全沒有收到 RTCP，則使用上一次的數值避免震盪
+                let new_metrics = {
+                    let current_m = manager.current_metrics.lock().await;
+                    NetworkMetrics {
+                        rtt_ms: if current_rtt > 0 { current_rtt } else { current_m.rtt_ms },
+                        packet_loss_rate: if current_rtt > 0 { current_loss } else { current_m.packet_loss_rate },
+                        connection_type: current_m.connection_type.clone(),
+                    }
+                };
+
+                manager.update_metrics(new_metrics).await;
+            }
+        });
     }
 }
 
@@ -238,6 +253,25 @@ impl WebRtcSession {
         Ok(video_track)
     }
 
+    /// 加入本機系統音訊擷取的音訊串流軌道
+    pub async fn add_audio_track(&self) -> Result<Arc<TrackLocalStaticSample>, CoreError> {
+        let audio_track = Arc::new(TrackLocalStaticSample::new(
+            RTCRtpCodecCapability {
+                mime_type: "audio/opus".to_owned(),
+                ..Default::default()
+            },
+            "audio".to_owned(),
+            "webrtc-rs".to_owned(),
+        ));
+
+        self.peer_connection
+            .add_track(Arc::clone(&audio_track) as Arc<dyn TrackLocal + Send + Sync>)
+            .await
+            .map_err(|e| CoreError::NetworkError(format!("無法加入音訊軌道: {}", e)))?;
+
+        Ok(audio_track)
+    }
+
     /// 建立高優先權的滑鼠與鍵盤控制輸入通道 (可靠傳輸)
     pub async fn setup_input_channel(&self) -> Result<Arc<RTCDataChannel>, CoreError> {
         let init = RTCDataChannelInit {
@@ -253,6 +287,15 @@ impl WebRtcSession {
 
         // 反重放序號計數器
         let last_seq = Arc::new(AtomicU32::new(0));
+
+        data_channel.on_close(Box::new(move || {
+            Box::pin(async move {
+                println!("[input-control] DataChannel closed, resetting input state to prevent stuck keys.");
+                if let Err(e) = crate::input::InputEvent::ResetState.simulate() {
+                    eprintln!("[input-control] ResetState failed on close: {}", e);
+                }
+            })
+        }));
 
         let _dc = Arc::clone(&data_channel);
         data_channel.on_message(Box::new(move |msg| {
@@ -321,6 +364,65 @@ impl WebRtcSession {
                     }
                     Err(err) => {
                         eprintln!("[input-unreliable] deserialize failed: {:?}", err);
+                    }
+                }
+            })
+        }));
+
+        Ok(data_channel)
+    }
+
+    /// 建立系統控制通道，用於傳送與接收螢幕切換等狀態設定 (可靠傳輸)
+    pub async fn setup_system_control_channel(
+        &self,
+        monitor_tx: tokio::sync::watch::Sender<usize>,
+    ) -> Result<Arc<RTCDataChannel>, CoreError> {
+        let init = RTCDataChannelInit {
+            ordered: Some(true),
+            ..Default::default()
+        };
+
+        let data_channel = self.peer_connection
+            .create_data_channel("system-control", Some(init))
+            .await
+            .map_err(|e| CoreError::NetworkError(format!("無法建立 system-control 通道: {}", e)))?;
+
+        let dc_clone_for_open = Arc::clone(&data_channel);
+        
+        data_channel.on_open(Box::new(move || {
+            let dc = Arc::clone(&dc_clone_for_open);
+            Box::pin(async move {
+                let monitors = xcap::Monitor::all().unwrap_or_default();
+                let mut monitor_list = Vec::new();
+                for (i, m) in monitors.iter().enumerate() {
+                    monitor_list.push(serde_json::json!({
+                        "id": m.id().unwrap_or(0),
+                        "name": m.name().unwrap_or_else(|_| format!("Display {}", i)),
+                        "is_primary": m.is_primary().unwrap_or(false),
+                    }));
+                }
+                let msg = serde_json::json!({
+                    "type": "monitor_list",
+                    "monitors": monitor_list,
+                    "current": 0
+                });
+                if let Ok(json_str) = serde_json::to_string(&msg) {
+                    let _ = dc.send_text(json_str).await;
+                }
+            })
+        }));
+
+        data_channel.on_message(Box::new(move |msg| {
+            let monitor_tx = monitor_tx.clone();
+            let data = msg.data.to_vec();
+            Box::pin(async move {
+                if let Ok(text) = String::from_utf8(data) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if json["type"] == "switch_monitor" {
+                            if let Some(index) = json["index"].as_u64() {
+                                let _ = monitor_tx.send(index as usize);
+                            }
+                        }
                     }
                 }
             })

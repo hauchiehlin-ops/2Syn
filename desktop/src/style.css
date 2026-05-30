@@ -1444,4 +1444,77 @@ input:checked + .slider:before {
   background: rgba(255, 255, 255, 0.35);
 }
 
-
+/* =========================================================================
+   裝置地址簿卡片（Device Address Book）
+   ========================================================================= */
+.device-card {
+  background: var(--glass-bg-light, rgba(255,255,255,0.06));
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.08));
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.device-card:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: var(--accent-color, #3b82f6);
+}
+.device-card-info {
+  flex: 1;
+  min-width: 0;
+}
+.device-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  outline: none;
+}
+.device-card-name:focus {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.device-card-id {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+.device-card-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.device-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.device-card-btn {
+  padding: 4px 8px;
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.15));
+  background: transparent;
+  color: var(--text-main);
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.device-card-btn:hover {
+  background: var(--accent-color, #3b82f6);
+  border-color: var(--accent-color, #3b82f6);
+  color: white;
+}
+.device-card-btn.danger:hover {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: white;
+}

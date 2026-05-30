@@ -1,9 +1,13 @@
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod connection;
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod codec;
+#[cfg(target_os = "windows")]
+pub mod mft_encoder;
 pub mod security;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod input;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod idd;
 
 
@@ -31,5 +35,10 @@ impl std::fmt::Display for CoreError {
 }
 
 impl std::error::Error for CoreError {}
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod video;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod file_transfer;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod audio;
+pub mod wol;

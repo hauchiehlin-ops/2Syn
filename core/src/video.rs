@@ -4,89 +4,31 @@ use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSampl
 use webrtc::media::Sample;
 use std::time::Duration;
 use xcap::Monitor;
-use openh264::encoder::{Encoder, EncoderConfig};
-use openh264::formats::YUVSource;
-use rayon::prelude::*;
+use crate::codec::{VideoHardwareEncoder, CaptureCodecFactory, CodecParams, VideoCodecType};
 
 pub struct VideoStreamer {
     track: Arc<TrackLocalStaticSample>,
-    encoder: Arc<Mutex<Encoder>>,
-}
-
-/// 將 RGBA 轉換為 YUV420 平面格式
-struct RgbaToYuv420 {
-    y: Vec<u8>,
-    u: Vec<u8>,
-    v: Vec<u8>,
-    width: usize,
-    height: usize,
-}
-
-impl RgbaToYuv420 {
-    fn new(rgba: &[u8], width: usize, height: usize) -> Self {
-        let mut y_plane = vec![0u8; width * height];
-        let mut u_plane = vec![0u8; (width / 2) * (height / 2)];
-        let mut v_plane = vec![0u8; (width / 2) * (height / 2)];
-
-        // 使用 Rayon 平行處理 Y 平面與 U/V 平面
-        // 因為 Y 是一維矩陣，我們可以直接依照列 (row) 進行並行處理
-        y_plane.par_chunks_exact_mut(width).enumerate().for_each(|(j, y_row)| {
-            for i in 0..width {
-                let idx = (j * width + i) * 4;
-                let r = rgba[idx] as i32;
-                let g = rgba[idx + 1] as i32;
-                let b = rgba[idx + 2] as i32;
-
-                let y = (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16).clamp(0, 255) as u8;
-                y_row[i] = y;
-            }
-        });
-
-        // U 和 V 平面大小是原來的 1/4 (長寬各一半)
-        let uv_width = width / 2;
-        u_plane.par_chunks_exact_mut(uv_width).zip(v_plane.par_chunks_exact_mut(uv_width)).enumerate().for_each(|(u_j, (u_row, v_row))| {
-            let j = u_j * 2;
-            for u_i in 0..uv_width {
-                let i = u_i * 2;
-                let idx = (j * width + i) * 4;
-                let r = rgba[idx] as i32;
-                let g = rgba[idx + 1] as i32;
-                let b = rgba[idx + 2] as i32;
-
-                let u = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-                let v = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-                
-                u_row[u_i] = u;
-                v_row[u_i] = v;
-            }
-        });
-
-        Self {
-            y: y_plane,
-            u: u_plane,
-            v: v_plane,
-            width,
-            height,
-        }
-    }
-}
-
-impl YUVSource for RgbaToYuv420 {
-    fn dimensions(&self) -> (usize, usize) { (self.width, self.height) }
-    fn strides(&self) -> (usize, usize, usize) { (self.width, self.width / 2, self.width / 2) }
-    fn y(&self) -> &[u8] { &self.y }
-    fn u(&self) -> &[u8] { &self.u }
-    fn v(&self) -> &[u8] { &self.v }
+    encoder: Arc<Mutex<Box<dyn VideoHardwareEncoder + Send + Sync>>>,
 }
 
 impl VideoStreamer {
     pub fn new(track: Arc<TrackLocalStaticSample>) -> Result<Self, String> {
-        let mut config = EncoderConfig::new();
-        config = config.sps_pps_strategy(openh264::encoder::SpsPpsStrategy::IncreasingId);
-        config = config.profile(openh264::encoder::Profile::Baseline);
-        config = config.level(openh264::encoder::Level::Level_3_1);
-        let api = openh264::OpenH264API::from_source();
-        let encoder = Encoder::with_api_config(api, config).map_err(|e| e.to_string())?;
+        let mut encoder = CaptureCodecFactory::create_encoder();
+        
+        let params = CodecParams {
+            width: 1920,
+            height: 1080,
+            bitrate_kbps: 6000,
+            fps: 60,
+            codec_type: VideoCodecType::H264,
+        };
+        
+        encoder.init(params).map_err(|e| format!("Failed to init encoder: {:?}", e))?;
+        
+        // Since we need to wrap our encoder in Arc<Mutex<...>> it requires Send + Sync.
+        // We'll trust the underlying implementation to be thread-safe for our basic usage,
+        // but we need to ensure the dyn trait expresses it. We'll add a wrapper if needed.
+        // For now, let's assume the box can be coerced or we define a custom wrapper.
         
         Ok(Self {
             track,
@@ -94,16 +36,14 @@ impl VideoStreamer {
         })
     }
 
-    pub async fn start_capture_loop(&self, status_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>, config_rx: tokio::sync::watch::Receiver<crate::connection::QualityConfig>) {
-        let monitors = Monitor::all().unwrap_or_default();
-        if monitors.is_empty() {
-            eprintln!("[Video] 無法找到顯示器");
-            return;
-        }
-        let monitor = &monitors[0]; // 擷取主螢幕
+    pub async fn start_capture_loop(
+        &self,
+        status_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+        config_rx: tokio::sync::watch::Receiver<crate::connection::QualityConfig>,
+        monitor_rx: tokio::sync::watch::Receiver<usize>,
+    ) {
         let encoder_arc = Arc::clone(&self.encoder);
         let track_arc = Arc::clone(&self.track);
-        let monitor_clone = monitor.clone();
 
         // 建立一個有界通道，用於將編碼後的資料從同步執行緒送回非同步任務中發送
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
@@ -127,6 +67,20 @@ impl VideoStreamer {
         tokio::task::spawn_blocking(move || {
             let mut tick = std::time::Instant::now();
             let mut frame_count: u64 = 0;
+            
+            // 初始化 Monitor
+            let mut current_monitor_index = *monitor_rx.borrow();
+            let mut monitors = Monitor::all().unwrap_or_default();
+            let mut monitor_clone = if !monitors.is_empty() {
+                Some(monitors[current_monitor_index.min(monitors.len() - 1)].clone())
+            } else {
+                None
+            };
+            
+            // 紀錄上次套用的 ABR 配置
+            let mut last_applied_bitrate = 0;
+            let mut last_applied_fps = 0;
+
             loop {
                 // catch_unwind 防線：確保任何內部 panic 不會傳播到 tao 主執行緒
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -135,6 +89,33 @@ impl VideoStreamer {
                 let target_fps = current_config.target_fps.max(1); // 避免為 0
                 let frame_time = std::time::Duration::from_millis((1000 / target_fps) as u64);
                 
+                // 若 ABR 觸發了品質變更，通知硬體編碼器動態調整
+                if current_config.bitrate_limit_kbps != last_applied_bitrate || target_fps != last_applied_fps {
+                    if let Ok(mut encoder_guard) = encoder_arc.try_lock() {
+                        if let Err(e) = encoder_guard.reconfigure(current_config.bitrate_limit_kbps, target_fps) {
+                            eprintln!("[Video] 動態調整編碼器失敗: {}", e);
+                        } else {
+                            last_applied_bitrate = current_config.bitrate_limit_kbps;
+                            last_applied_fps = target_fps;
+                            let _ = encoder_guard.force_intra_frame();
+                        }
+                    }
+                }
+                
+                // 檢查是否需要切換螢幕
+                let requested_monitor_index = *monitor_rx.borrow();
+                if requested_monitor_index != current_monitor_index {
+                    current_monitor_index = requested_monitor_index;
+                    monitors = Monitor::all().unwrap_or_default();
+                    if !monitors.is_empty() {
+                        monitor_clone = Some(monitors[current_monitor_index.min(monitors.len() - 1)].clone());
+                    }
+                    // 強制觸發 IDR 幀以利前端解碼器重置
+                    if let Ok(mut encoder_guard) = encoder_arc.try_lock() {
+                        let _ = encoder_guard.force_intra_frame();
+                    }
+                }
+
                 // 根據頻寬限制動態決定畫面解析度上限 (ABR 降階邏輯)
                 let max_width = if current_config.bitrate_limit_kbps < 3000 {
                     854.0 // 480p 級別
@@ -145,7 +126,13 @@ impl VideoStreamer {
                 };
                 
                 // 擷取螢幕
-                if let Ok(mut image) = monitor_clone.capture_image() {
+                let capture_result = if let Some(ref m) = monitor_clone {
+                    Some(m.capture_image())
+                } else {
+                    None
+                };
+
+                if let Some(Ok(mut image)) = capture_result {
                     let mut width = image.width() as usize;
                     let mut height = image.height() as usize;
                     
@@ -177,16 +164,15 @@ impl VideoStreamer {
                         return;
                     }
 
-                    let yuv = RgbaToYuv420::new(image.as_raw(), adj_width, adj_height);
                     
                     // 在同步區塊中取得 encoder 並進行編碼
                     if let Ok(mut encoder_guard) = encoder_arc.try_lock() {
                         if frame_count % 30 == 0 {
-                            encoder_guard.force_intra_frame();
+                            let _ = encoder_guard.force_intra_frame();
                         }
                         frame_count += 1;
                         
-                        match encoder_guard.encode(&yuv) {
+                        match encoder_guard.encode_rgba_frame(image.as_raw(), adj_width as u32, adj_height as u32) {
                             Ok(encoded) => {
                                 let data = encoded.to_vec();
                                 if !data.is_empty() {
@@ -207,7 +193,7 @@ impl VideoStreamer {
                             }
                         }
                     }
-                } else if let Err(err) = monitor_clone.capture_image() {
+                } else if let Some(Err(err)) = capture_result {
                     let msg = format!("Screen capture failed (Missing permissions?): {:?}", err);
                     eprintln!("[Video] {}", msg);
                     if let Some(tx) = &status_tx {

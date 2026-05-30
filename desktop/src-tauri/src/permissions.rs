@@ -1,13 +1,11 @@
 #[cfg(target_os = "macos")]
-use std::ffi::c_void;
-#[cfg(target_os = "macos")]
-use core_foundation::dictionary::CFMutableDictionary;
-#[cfg(target_os = "macos")]
-use core_foundation::string::CFString;
+use core_foundation::base::TCFType;
 #[cfg(target_os = "macos")]
 use core_foundation::boolean::CFBoolean;
 #[cfg(target_os = "macos")]
-use core_foundation::base::TCFType;
+use core_foundation::string::CFString;
+#[cfg(target_os = "macos")]
+use std::ffi::c_void;
 
 #[cfg(target_os = "macos")]
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -43,7 +41,7 @@ pub fn check_and_request_permissions() -> bool {
             CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt as _),
             CFBoolean::true_value().as_CFType(),
         )]);
-        
+
         let ax_granted = AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef() as _);
         if !ax_granted {
             all_granted = false;

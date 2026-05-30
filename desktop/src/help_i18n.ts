@@ -28,11 +28,26 @@ export const I18N_HELP_DOCS: Record<string, {
         </ul>
       </div>
       <div>
+        <h3>安全連線與無人值守密碼</h3>
+        <ul>
+          <li><strong>唯一驗證金鑰</strong>：為提升無人值守安全性，本系統已徹底取消隨機 Access PIN 機制。現在統一改以「靜態無人值守密碼 (Static Access Password)」作為唯一的連線驗證金鑰。</li>
+          <li><strong>安全保存</strong>：所有設定的無人值守密碼均儲存於系統 Keychain 安全區，並以最高安全層級加密保存，絕不暴露明文。</li>
+          <li><strong>明隱碼切換與刪除</strong>：在被控端設定介面中，可隨時點擊 Show/Hide 切換明隱碼，或點擊 Delete 抹除密碼以停止所有遠端存取。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>上方工具列 (Top Toolbar)</h3>
+        <ul>
+          <li><strong>Monitor (多螢幕切換)</strong>：若遠端主機具備多螢幕環境，點擊按鈕可無縫循環切換目標螢幕。</li>
+          <li><strong>Audio (音訊轉發)</strong>：預設開啟無損音訊串流，點擊可快速靜音/恢復音訊。</li>
+          <li><strong>Display (顯示模式)</strong>：切換「自適應縮放」、「原始比例」與「延展填充」，適配行動裝置無黑邊。</li>
+        </ul>
+      </div>
+      <div>
         <h3>懸浮控制轉盤按鈕說明</h3>
         <ul>
           <li><strong>Keyboard (鍵盤)</strong>：喚起或關閉行動端鍵盤，用於在遠端 Mac 輸入文字。</li>
           <li><strong>Mode (控制模式)</strong>：切換虛擬軌跡板與直控模式，適配不同操控場景。</li>
-          <li><strong>Display (顯示模式)</strong>：切換「自適應縮放 (Fit)」、「原始比例 (Original)」與「延展填充 (Fill)」，解決不同行動裝置的黑邊問題。</li>
           <li><strong>Shortcuts (複合快捷鍵)</strong>：快速發送 Ctrl-Alt-Del、Win、Alt-Tab、Ctrl-Esc 等 macOS 系統複合鍵。</li>
           <li><strong>Logs (診斷日誌)</strong>：即時開啟遠端主機的系統診斷日誌與網路診斷工具，以便進行連線除錯。</li>
           <li><strong>Quality (畫質變頻)</strong>：切換畫質檔位：
@@ -90,11 +105,18 @@ export const I18N_HELP_DOCS: Record<string, {
         </ul>
       </div>
       <div>
+        <h3>上方工具栏 (Top Toolbar)</h3>
+        <ul>
+          <li><strong>Monitor (多屏幕切换)</strong>：若远程主机具备多屏幕环境，点击按钮可无缝循环切换目标屏幕。</li>
+          <li><strong>Audio (音频转发)</strong>：默认开启无损音频串流，点击可快速静音/恢复音频。</li>
+          <li><strong>Display (显示模式)</strong>：切换“自适应缩放”、“原始比例”与“延展填充”，适配移动设备无黑边。</li>
+        </ul>
+      </div>
+      <div>
         <h3>悬浮控制转盘按钮说明</h3>
         <ul>
           <li><strong>Keyboard (键盘)</strong>：唤起或关闭移动端键盘，用于在远程 Mac 输入文字。</li>
           <li><strong>Mode (控制模式)</strong>：切换虚拟触控板与直控模式，适配不同操控场景。</li>
-          <li><strong>Display (显示模式)</strong>：切换“自适应缩放 (Fit)”、“原始比例 (Original)”与“延展填充 (Fill)”，解决不同移动设备的黑边问题。</li>
           <li><strong>Shortcuts (复合快捷键)</strong>：快速发送 Ctrl-Alt-Del、Win、Alt-Tab、Ctrl-Esc 等 macOS 系统复合键。</li>
           <li><strong>Logs (诊断日志)</strong>：即时开启远程主机的系统诊断日志与网络诊断工具，以便进行连接除错。</li>
           <li><strong>Quality (画质变频)</strong>：切换画质档位：
@@ -152,11 +174,26 @@ export const I18N_HELP_DOCS: Record<string, {
         </ul>
       </div>
       <div>
+        <h3>Secure Connection & Unattended Password</h3>
+        <ul>
+          <li><strong>Exclusive Verification Key</strong>: To upgrade unattended security, the random Access PIN mechanism has been fully deprecated. The "Static Access Password" is now the sole verification key for remote sessions.</li>
+          <li><strong>Secure Cryptography</strong>: All passwords are securely encrypted and saved within the system-level Keychain (SecureStorage), ensuring no raw passwords are exposed.</li>
+          <li><strong>Visibility & Deletion</strong>: You can toggle the password visibility using the Show/Hide button, or wipe the password completely by clicking Delete to disable all unattended access.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Top Toolbar</h3>
+        <ul>
+          <li><strong>Monitor</strong>: Cycle seamlessly through target displays if the remote host has a multi-monitor setup.</li>
+          <li><strong>Audio</strong>: Lossless audio streaming is enabled by default. Click to quickly mute or unmute.</li>
+          <li><strong>Display Mode</strong>: Switch between Fit (adaptive scale), Original ratio, and Fill to eliminate black borders on different screens.</li>
+        </ul>
+      </div>
+      <div>
         <h3>Floating Control Dial Actions</h3>
         <ul>
           <li><strong>Keyboard</strong>: Show or hide the virtual keyboard for typing on the remote Mac.</li>
           <li><strong>Mode</strong>: Toggle between Trackpad and Direct Touch modes based on your workflow.</li>
-          <li><strong>Display</strong>: Switch between Fit (adaptive scale), Original ratio, and Fill to eliminate black borders on different screens.</li>
           <li><strong>Shortcuts</strong>: Send complex macOS system combinations such as Ctrl-Alt-Del, Win, Alt-Tab, and Ctrl-Esc.</li>
           <li><strong>Logs</strong>: Instantly open the remote system diagnostic log and network diagnostic panel for troubleshooting.</li>
           <li><strong>Quality</strong>: Toggle stream presets:
