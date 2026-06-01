@@ -69,6 +69,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Linux Build Dependencies
+        run: sudo apt-get update && sudo apt-get install -y gcc-x86-64-linux-gnu gcc-multilib
+
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
@@ -77,6 +80,13 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+          add-to-path: false
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -97,10 +107,16 @@ jobs:
 
       - name: Build Android Host
         working-directory: ./desktop
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: x86_64-linux-gnu-gcc
         run: npm run tauri:build:android:host
 
       - name: Build Android Client
         working-directory: ./desktop
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: x86_64-linux-gnu-gcc
         run: npm run tauri:build:android:client
 
       - name: Upload Android Artifacts
