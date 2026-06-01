@@ -23,3 +23,7 @@ desktop/src-tauri/target/
 # Env
 .env
 .env.local
+
+# Android builds
+*.apk
+*.aab
