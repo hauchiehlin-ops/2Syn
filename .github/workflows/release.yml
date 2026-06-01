@@ -52,17 +52,7 @@ jobs:
           releaseDraft: true
           prerelease: false
 
-      - name: Build Client App
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: ./desktop
-          args: --config src-tauri/tauri.client.conf.json
-          tagName: ${{ github.ref_name }}
-          releaseName: "2syn ${{ github.ref_name }}"
-          releaseDraft: true
-          prerelease: false
+
 
   build-android:
     permissions:
@@ -107,13 +97,6 @@ jobs:
       - name: Install Frontend Dependencies
         working-directory: ./desktop
         run: npm install
-
-      - name: Build Android Host
-        working-directory: ./desktop
-        env:
-          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: x86_64-linux-gnu-gcc
-        run: npm run tauri:build:android:host
 
       - name: Build Android Client
         working-directory: ./desktop

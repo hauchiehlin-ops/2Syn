@@ -14,7 +14,7 @@ if (target !== '--client' && target !== '--host') {
 }
 
 const isClient = target === '--client';
-const appName = isClient ? '2syn Client' : '2syn';
+const appName = isClient ? '2syn_Client' : '2syn_Duel';
 const appId = isClient ? 'com.twosyn.app' : 'com.twosyn.host';
 const iconSource = isClient ? 'src-tauri/icons-client/icon.png' : 'src-tauri/icons/icon.png';
 const configArg = isClient ? ' --config src-tauri/tauri.client.conf.json' : '';
