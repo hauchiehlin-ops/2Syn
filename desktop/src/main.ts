@@ -3131,6 +3131,22 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let panRafId: number | null = null;
   currentCursorPercentX = 0.5;
   currentCursorPercentY = 0.5;
+  let remoteCursor = document.getElementById("remote-cursor-indicator");
+  if (!remoteCursor) {
+    remoteCursor = document.createElement("div");
+    remoteCursor.id = "remote-cursor-indicator";
+    remoteCursor.style.position = "absolute";
+    remoteCursor.style.width = "12px";
+    remoteCursor.style.height = "12px";
+    remoteCursor.style.borderRadius = "50%";
+    remoteCursor.style.backgroundColor = "rgba(255, 60, 60, 0.8)";
+    remoteCursor.style.boxShadow = "0 0 4px rgba(0,0,0,0.5)";
+    remoteCursor.style.pointerEvents = "none";
+    remoteCursor.style.zIndex = "1001";
+    remoteCursor.style.display = "none";
+    remoteCursor.style.transform = "translate(-50%, -50%)"; // Center it exactly
+    document.body.appendChild(remoteCursor);
+  }
   const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
   const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
   const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
@@ -3526,8 +3542,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   }
 
   function updateCursorOverlay(percentX: number, percentY: number) {
-    
-    
+    let remoteCursor = document.getElementById("remote-cursor-indicator");
+    if (isDirectTouchMode) {
+      if (remoteCursor) remoteCursor.style.display = "none";
+      return;
+    }
     const rect = videoEl.getBoundingClientRect();
     const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
     const containerRatio = rect.width / rect.height;
@@ -3544,8 +3563,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     const pixelX = rect.left + offsetX + percentX * renderedWidth;
     const pixelY = rect.top + offsetY + percentY * renderedHeight;
     
-    
-    
+    if (remoteCursor) {
+      remoteCursor.style.display = "block";
+      remoteCursor.style.left = `${pixelX}px`;
+      remoteCursor.style.top = `${pixelY}px`;
+    }
   }
 
   // 初始化懸浮選單與 Toggle 切換按鈕
@@ -5134,9 +5156,21 @@ window.addEventListener("DOMContentLoaded", async () => {
 
 // 監聽 VisualViewport 以應對 iOS 鍵盤彈出與自適應縮放
 if (window.visualViewport) {
+  const isAndroid = /android/i.test(navigator.userAgent);
+  
   window.visualViewport.addEventListener("resize", () => {
     const vv = window.visualViewport;
     if (!vv) return;
+    
+    // Android WebView naturally resizes window.innerHeight and adjusts layout,
+    // so we don't need manual offset push which causes black screens.
+    if (isAndroid) {
+      keyboardOffsetUpdateY = 0;
+      applyVideoTransform();
+      return;
+    }
+
+    // iOS Safari logic: viewport overlays the content, so we must manually push up.
     if (vv.height < window.innerHeight * 0.8) {
       // 鍵盤彈出
       const offset = window.innerHeight - vv.height;
@@ -5148,10 +5182,12 @@ if (window.visualViewport) {
       applyVideoTransform();
     }
   });
+
   window.visualViewport.addEventListener("scroll", () => {
      const vv = window.visualViewport;
      // 防止 iOS 自動滾動整個頁面導致黑屏
-     if (vv && vv.offsetTop > 0) {
+     // Android uses native scroll, so we shouldn't block it.
+     if (!isAndroid && vv && vv.offsetTop > 0) {
          window.scrollTo(0, 0);
      }
   });
