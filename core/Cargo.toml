@@ -1,6 +1,6 @@
 [package]
 name = "syn-core"
-version = "3.2.3"
+version = "3.2.6"
 edition = "2021"
 
 [dependencies]
@@ -53,3 +53,5 @@ cocoa = "0.24"
 core-graphics = "0.23"
 core-foundation = "0.9"
 videotoolbox = "0.18.0"
+apple-cf = "0.9.3"
+foreign-types-shared = "0.3.1"
