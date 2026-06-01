@@ -147,7 +147,7 @@ impl AudioStreamer {
         let config = device.default_output_config()
             .map_err(|e| format!("Failed to get default output config: {}", e))?;
             
-        let sample_rate = config.sample_rate().0;
+        let sample_rate: u32 = config.sample_rate().into();
         let channels = config.channels();
         
         println!("[Audio] WASAPI Loopback device: {}, sample_rate: {}, channels: {}", 

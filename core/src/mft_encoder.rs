@@ -116,6 +116,9 @@ impl WindowsHardwareEncoder {
     }
 }
 
+unsafe impl Send for WindowsHardwareEncoder {}
+unsafe impl Sync for WindowsHardwareEncoder {}
+
 impl VideoHardwareEncoder for WindowsHardwareEncoder {
     fn init(&mut self, params: CodecParams) -> Result<(), CoreError> {
         self.params = Some(params);
@@ -188,12 +191,12 @@ impl VideoHardwareEncoder for WindowsHardwareEncoder {
                     out_sample.AddBuffer(&out_buffer).ok();
 
                     let mut output_buffers = [MFT_OUTPUT_DATA_BUFFER {
-                        pSample: Some(out_sample.clone()),
+                        pSample: std::mem::ManuallyDrop::new(Some(out_sample.clone())),
                         ..Default::default()
                     }];
                     let mut status = 0;
                     if mft.ProcessOutput(0, &mut output_buffers, &mut status).is_ok() {
-                        if let Some(ref result_sample) = output_buffers[0].pSample {
+                        if let Some(ref result_sample) = *output_buffers[0].pSample {
                             if let Ok(out_buf) = result_sample.ConvertToContiguousBuffer() {
                                 let mut out_ptr: *mut u8 = std::ptr::null_mut();
                                 let mut out_len = 0u32;
