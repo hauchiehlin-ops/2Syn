@@ -1,6 +1,6 @@
 {
   "productName": "2syn_Client",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "identifier": "com.twosyn.app",
   "build": {
     "frontendDist": "../dist",
@@ -27,7 +27,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
     "icon": [
       "icons-client/32x32.png",
       "icons-client/128x128.png",

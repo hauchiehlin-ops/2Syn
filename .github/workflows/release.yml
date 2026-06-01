@@ -30,8 +30,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin, aarch64-apple-darwin
 
       - name: Install Frontend Dependencies
         working-directory: ./desktop

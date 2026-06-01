@@ -1,6 +1,6 @@
 {
   "productName": "2syn_Duel",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "identifier": "com.twosyn.app",
   "build": {
     "frontendDist": "../dist",
@@ -29,7 +29,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

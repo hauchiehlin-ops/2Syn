@@ -69,6 +69,7 @@ try {
   const buildType = 'release'; 
   const apkSourcePath = path.join(desktopDir, 'src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk');
   
+  if (fs.existsSync(apkSourcePath)) {
     const finalApkName = `2syn_${version}_Android_${isClient ? 'client' : 'host'}.apk`;
     const finalApkPath = path.join(__dirname, '..', finalApkName);
     fs.copyFileSync(apkSourcePath, finalApkPath);
