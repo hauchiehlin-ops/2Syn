@@ -69,11 +69,21 @@ try {
   const buildType = 'release'; 
   const apkSourcePath = path.join(desktopDir, 'src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk');
   
-  if (fs.existsSync(apkSourcePath)) {
     const finalApkName = `2syn_${version}_Android_${isClient ? 'client' : 'host'}.apk`;
     const finalApkPath = path.join(__dirname, '..', finalApkName);
     fs.copyFileSync(apkSourcePath, finalApkPath);
-    console.log(`\n✅ Successfully created: ${finalApkName}`);
+    console.log(`\n✅ Successfully created APK: ${finalApkName}`);
+
+    // Copy AAB for Google Play Store
+    const aabSourcePath = path.join(desktopDir, 'src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab');
+    if (fs.existsSync(aabSourcePath)) {
+      const finalAabName = `2syn_${version}_Android_${isClient ? 'client' : 'host'}.aab`;
+      const finalAabPath = path.join(__dirname, '..', finalAabName);
+      fs.copyFileSync(aabSourcePath, finalAabPath);
+      console.log(`✅ Successfully created AAB: ${finalAabName}`);
+    } else {
+      console.warn(`⚠️ Warning: AAB file not found at ${aabSourcePath}`);
+    }
   } else {
     console.error(`\n❌ Error: Built APK not found at ${apkSourcePath}`);
     // Might be in arm64-v8a instead if universal is disabled

@@ -104,5 +104,6 @@ jobs:
         with:
           files: |
             *.apk
+            *.aab
           draft: true
           prerelease: false
