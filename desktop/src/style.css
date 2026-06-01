@@ -53,6 +53,7 @@ input, textarea {
 html, body {
   height: 100%;
   width: 100%;
+  overscroll-behavior: none;
 }
 
 body {

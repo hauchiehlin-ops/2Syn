@@ -3420,9 +3420,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           payloadUp2[0] = 1; // Left click up
           sendInputPacket(buildInputPacket(0x03, payloadUp2));
           console.log("[Gesture] 智慧雙擊序列發送完成");
-        }, 15);
-      }, 50);
-    }, 15);
+        }, 60);
+      }, 60);
+    }, 60);
   };
   let initialPinchDistance = -1;
   let maxTouches = 0;
@@ -4290,8 +4290,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           const payloadUp = new Uint8Array(1);
           payloadUp[0] = 2; // Right click up
           sendInputPacket(buildInputPacket(0x03, payloadUp));
-          console.log("[Gesture] 雙指輕點，15ms 延遲發送右鍵釋送完成");
-        }, 15);
+          console.log("[Gesture] 雙指輕點，60ms 延遲發送右鍵釋送完成");
+        }, 60);
         
         console.log("[Gesture] 雙指輕點，觸發右鍵按下");
         
@@ -4381,7 +4381,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
               payloadUp[0] = 1;
               sendInputPacket(buildInputPacket(0x03, payloadUp));
               console.log("[Gesture-Direct] 單指輕點完成");
-            }, 15);
+            }, 60);
             
             lastTapTime = now;
             lastTapPos = { x: endX, y: endY };
@@ -4414,7 +4414,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
                   payloadUp[0] = 1;
                   sendInputPacket(buildInputPacket(0x03, payloadUp));
                   console.log("[Gesture-Trackpad] 單指輕點完成");
-                }, 15);
+                }, 60);
                 
                 lastTapTime = now;
                 lastTapPos = { x: endX, y: endY };
