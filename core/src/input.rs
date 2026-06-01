@@ -359,7 +359,11 @@ impl InputEvent {
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseDown { button } => {
-                    let current_point = CGEvent::new(source.clone()).unwrap().location();
+                    let event = CGEvent::new(source.clone());
+                    if event.is_err() {
+                        return Err(CoreError::SystemError("無法獲取當前滑鼠位置".to_string()));
+                    }
+                    let current_point = event.unwrap().location();
                     let (evt_type, cg_button) = match button {
                         MouseButton::Left => {
                             LEFT_BTN_DOWN.store(true, Ordering::Relaxed);
@@ -376,7 +380,11 @@ impl InputEvent {
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseUp { button } => {
-                    let current_point = CGEvent::new(source.clone()).unwrap().location();
+                    let event = CGEvent::new(source.clone());
+                    if event.is_err() {
+                        return Err(CoreError::SystemError("無法獲取當前滑鼠位置".to_string()));
+                    }
+                    let current_point = event.unwrap().location();
                     let (evt_type, cg_button) = match button {
                         MouseButton::Left => {
                             LEFT_BTN_DOWN.store(false, Ordering::Relaxed);
@@ -439,7 +447,11 @@ impl InputEvent {
                 }
                 InputEvent::MouseRelativeMove { dx, dy } => {
                     // 為了保留 macOS 的滑鼠加速度，我們取當前座標疊加 dx/dy 後注入，同時設定 DeltaX/Y
-                    let current_point = CGEvent::new(source.clone()).unwrap().location();
+                    let event = CGEvent::new(source.clone());
+                    if event.is_err() {
+                        return Err(CoreError::SystemError("無法獲取當前滑鼠位置".to_string()));
+                    }
+                    let current_point = event.unwrap().location();
                     let point = core_graphics::geometry::CGPoint::new(current_point.x + *dx as f64, current_point.y + *dy as f64);
                     
                     let mut event_type = CGEventType::MouseMoved;
@@ -502,7 +514,11 @@ impl InputEvent {
                     RIGHT_BTN_DOWN.store(false, Ordering::Relaxed);
 
                     // 釋放滑鼠按鍵
-                    let current_point = CGEvent::new(source.clone()).unwrap().location();
+                    let event = CGEvent::new(source.clone());
+                    if event.is_err() {
+                        return Err(CoreError::SystemError("無法獲取當前滑鼠位置".to_string()));
+                    }
+                    let current_point = event.unwrap().location();
                     if let Ok(event_lup) = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseUp, current_point, CGMouseButton::Left) {
                         event_lup.post(CGEventTapLocation::HID);
                     }
@@ -592,20 +608,8 @@ impl SecureInputPacket {
             )));
         }
         
-        // 2. 驗證時間戳記誤差是否在合理範圍內 (500 ms)
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-            
-        let diff = now_ms.abs_diff(self.timestamp_ms);
-        
-        if diff > 500 {
-            return Err(CoreError::NetworkError(format!(
-                "重放攻擊防禦：封包時間戳記過期，誤差達 {} ms",
-                diff
-            )));
-        }
+        // 2. 移除時間戳記嚴格驗證，因為客戶端與伺服器之間的系統時鐘可能不同步
+        // 僅透過 sequence_number 已經足夠防禦重放攻擊
         
         Ok(())
     }

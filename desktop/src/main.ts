@@ -276,6 +276,16 @@ function translateLogMessage(msg: string, tFunc: (key: string) => string): strin
   if (msg.includes("網頁控制端頁面恢復可見，且信令未連線，立即重建連線")) {
     return "[Signaling] " + tFunc("log_sig_web_visible_reconnect");
   }
+  // 45. Rust WebSocket
+  if (msg.includes("[Rust] 已成功建立 WebSocket 連線") || msg.includes("[Rust] Successfully established WebSocket")) {
+    return tFunc("log_rust_ws_connected");
+  }
+  // 46. Rust Login Success
+  if (msg.includes("[Rust] 登入成功，ID:")) {
+    const match = msg.match(/ID: (.+)/);
+    const id = match ? match[1] : "?";
+    return tFunc("log_rust_login_success").replace("{0}", id);
+  }
 
   return msg;
 }
@@ -704,7 +714,60 @@ const fallbackTranslations: Record<string, string> = {
   "first_run_body": "Before accepting any remote connection, you must set a Static Access Password. This password is the sole authentication key for all incoming remote sessions. Without it, all connection requests will be automatically rejected.",
   "first_run_tip": "Use a strong password of at least 8 characters, combining uppercase letters, lowercase letters, and numbers to keep your device secure.",
   "first_run_btn_go": "Go to Set Static Password",
-  "first_run_btn_skip": "Set Later (Connections Will Be Rejected)"
+  "first_run_btn_skip": "Set Later (Connections Will Be Rejected)",
+
+  "ui_network_traversal": "NETWORK TRAVERSAL",
+  "ui_network_traversal_desc1": "Tailscale interface detected. You now have 100% traversal rate through cellular and CGNAT networks for ultra-stable, high-speed connections.",
+  "ui_network_traversal_desc2": "If a TURN server is unavailable, it is recommended to install the free VPN tool Tailscale on both devices to achieve 100% P2P ultra-low latency direct connection.",
+  "ui_run_on_startup": "Run on System Startup",
+  "ui_run_diagnostics": "Run Diagnostics",
+  "ui_network_metrics": "Network & Video Quality Metrics",
+  "ui_host_info": "Host Information",
+  "ui_security_privacy": "Security & Privacy",
+  "ui_system_logs": "System Logs",
+  "ui_advanced_dev": "Advanced Developer Tools",
+  "ui_diagnostics": "Security & Connectivity Diagnostics",
+  "ui_my_id": "My ID:",
+  "ui_my_mac": "My MAC:",
+  "ui_my_hwid": "My HWID:",
+  "ui_signaling_status": "Signaling Status:",
+  "ui_static_password": "Static Access Password:",
+  "ui_stun_lookup": "STUN Server Lookup:",
+  "ui_nat_type": "NAT Detection Type:",
+  "ui_opt_suggestions": "Optimization Suggestions",
+  "ui_click_analyze": "Click the button above to analyze your device secure store and connection pipes.",
+  "ui_conn_protocol": "Connection Protocol",
+  "ui_codec_sec": "Codec & Cipher Security",
+  "ui_actual_fps": "Actual FPS (Live)",
+  "ui_actual_bitrate": "Actual Bitrate (Live)",
+  "ui_net_lat": "Network Latency (RTT)",
+  "ui_pkt_loss": "Packet Loss Rate",
+  "ui_sim_rtt": "Simulated RTT Latency",
+  "ui_sim_loss": "Simulated Packet Loss",
+  "ui_tgt_fps": "Target Frame Rate",
+  "ui_max_bit": "Max Bitrate Limit",
+  "ui_color_samp": "Color Sampling",
+  "ui_priv_shield": "Privacy Shield Mode (Virtual GPU)",
+  "ui_smart_opt": "Smart Quality Auto-Optimization",
+  "ui_offline_sdp": "Offline Connection (SDP)",
+  "ui_enter_sdp": "Enter Remote SDP Answer/Offer",
+  "ui_gen_sdp": "Generate & Copy Local SDP Offer",
+  "ui_force_play": "Force Play",
+  "ui_import_json": "Import JSON",
+  "ui_export_json": "Export JSON",
+  "ui_save_reload": "Save and Reload",
+  "ui_byoi": "Advanced: Bring Your Own TURN (BYOI)",
+  "ui_byoi_desc": "If you host a custom TURN relay server (e.g., Coturn), you can enter the JSON array configuration here:",
+  "ui_dl_mac": "Download for Mac / Windows",
+  "ui_dl_ios": "Download for iOS (App Store)",
+  "ui_dl_android": "Download for Android",
+  "ui_logs_hint": "Above are the real-time debug logs for the host device. If you see 'Screen capture failed', it means the Mac host has checked the permission but is still rejected by the system. Please try unchecking and checking the App permission again and restart the App.",
+  "ui_btn_reprompt": "Re-prompt System Permission",
+  "ui_permission_warning": "Insufficient macOS system permissions will cause a black screen during remote control!",
+  "ui_dl_hint": "Both host and client devices need to download and install the application.",
+  "ui_sys_auto_adj": "System automatically adjusting. Network and stream quality are in optimal states.",
+  "ui_sim_relay_mode": "Simulate Relay Mode",
+
 };
 
 // 統一翻譯取值函數
@@ -813,7 +876,7 @@ async function loadLanguage(lang: string) {
     translations = await response.json();
     updateDomTranslations();
   } catch (error) {
-    console.error(`無法載入語系檔 [${lang}]:`, error);
+    console.error(t("log_lang_load_failed"), lang, error);
   }
 }
 
@@ -823,6 +886,60 @@ function updateDomTranslations() {
   setTextContent("txt-connect-title", t("connect_title"));
   setPlaceholder("remote-id-input", t("remote_id_placeholder"));
   setPlaceholder("access-pin-input", t("access_pin_placeholder"));
+
+  setTextContent("txt-network-traversal-title", t("ui_network_traversal"));
+  setTextContent("txt-network-health-title-2", t("ui_network_traversal"));
+  setTextContent("txt-network-traversal-desc-1", t("ui_network_traversal_desc1"));
+  setTextContent("txt-network-traversal-desc-2", t("ui_network_traversal_desc2"));
+  setTextContent("txt-run-on-startup", t("ui_run_on_startup"));
+  setTextContent("txt-run-diagnostics-btn", t("ui_run_diagnostics"));
+  setTextContent("txt-network-metrics-title", t("ui_network_metrics"));
+  setTextContent("txt-host-info-title-main", t("ui_host_info"));
+  setTextContent("txt-security-privacy-title", t("ui_security_privacy"));
+  setTextContent("txt-system-logs-title-main", t("ui_system_logs"));
+  setTextContent("txt-advanced-dev-title", t("ui_advanced_dev"));
+  setTextContent("txt-diag-title-main", t("ui_diagnostics"));
+  setTextContent("txt-my-id-label", t("ui_my_id"));
+  setTextContent("txt-my-mac-label", t("ui_my_mac"));
+  setTextContent("txt-my-hwid-label", t("ui_my_hwid"));
+  setTextContent("txt-signaling-status-label", t("ui_signaling_status"));
+  setTextContent("txt-unattended-access-label", t("ui_static_password"));
+  setTextContent("txt-stun-lookup-label", t("ui_stun_lookup"));
+  setTextContent("txt-nat-type-label", t("ui_nat_type"));
+  setTextContent("txt-opt-sug-label", t("ui_opt_suggestions"));
+  setTextContent("txt-click-analyze-label", t("ui_click_analyze"));
+  setTextContent("txt-conn-protocol-label", t("ui_conn_protocol"));
+  setTextContent("txt-codec-sec-label", t("ui_codec_sec"));
+  setTextContent("txt-actual-fps-label", t("ui_actual_fps"));
+  setTextContent("txt-actual-bitrate-label", t("ui_actual_bitrate"));
+  setTextContent("txt-net-lat-label", t("ui_net_lat"));
+  setTextContent("txt-pkt-loss-label", t("ui_pkt_loss"));
+  setTextContent("txt-sim-rtt-label", t("ui_sim_rtt"));
+  setTextContent("txt-sim-loss-label", t("ui_sim_loss"));
+  setTextContent("txt-tgt-fps-label", t("ui_tgt_fps"));
+  setTextContent("txt-max-bit-label", t("ui_max_bit"));
+  setTextContent("txt-color-samp-label", t("ui_color_samp"));
+  setTextContent("txt-priv-shield-label", t("ui_priv_shield"));
+  setTextContent("txt-smart-opt-label", t("ui_smart_opt"));
+  setTextContent("txt-offline-sdp-title", t("ui_offline_sdp"));
+  setTextContent("txt-enter-sdp-label", t("ui_enter_sdp"));
+  setTextContent("txt-gen-sdp-btn", t("ui_gen_sdp"));
+  setTextContent("txt-force-play-btn", t("ui_force_play"));
+  setTextContent("txt-import-json-btn", t("ui_import_json"));
+  setTextContent("txt-export-json-btn", t("ui_export_json"));
+  setTextContent("txt-save-reload-btn", t("ui_save_reload"));
+  setTextContent("txt-byoi-title", t("ui_byoi"));
+  setTextContent("txt-byoi-desc", t("ui_byoi_desc"));
+  setTextContent("txt-dl-mac", t("ui_dl_mac"));
+  setTextContent("txt-dl-ios", t("ui_dl_ios"));
+  setTextContent("txt-dl-android", t("ui_dl_android"));
+  setTextContent("txt-logs-hint", t("ui_logs_hint"));
+  setTextContent("txt-btn-reprompt", t("ui_btn_reprompt"));
+  setTextContent("txt-permission-warning", t("ui_permission_warning"));
+  setTextContent("txt-dl-hint", t("ui_dl_hint"));
+  setTextContent("txt-sys-auto-adj", t("ui_sys_auto_adj"));
+  setTextContent("txt-sim-relay-mode", t("ui_sim_relay_mode"));
+
   setTextContent("txt-btn-connect", t("btn_connect"));
   setTextContent("txt-host-info-title", t("host_info_title"));
   setTextContent("lbl-remote-id", t("remote_id"));
@@ -831,6 +948,11 @@ function updateDomTranslations() {
   setTextContent("lbl-signaling-status", t("lbl_signaling_status"));
   setTextContent("lbl-my-id", t("my_id"));
   setTextContent("lbl-hwid", t("hwid"));
+  setTextContent("lbl-static-pwd", t("host.unattended_access"));
+  setPlaceholder("input-static-pwd", t("host.pwd_placeholder"));
+  setTextContent("btn-toggle-static-pwd", t("host.pwd_show"));
+  setTextContent("btn-set-static-pwd", t("host.pwd_save"));
+  setTextContent("btn-delete-static-pwd", t("device_book_delete"));
   setTextContent("lbl-license", t("license"));
   setTextContent("txt-privacy-title", t("privacy_title"));
   setTextContent("lbl-privacy-mode", t("privacy_mode"));
@@ -891,8 +1013,6 @@ function updateDomTranslations() {
   setTextContent("lbl-remote-sdp", t("offline_remote_label"));
   setPlaceholder("txt-remote-sdp", t("offline_remote_placeholder"));
   setTextContent("btn-apply-remote-sdp", t("offline_btn_apply"));
-  setTextContent("btn-verify-license", t("license_btn_verify"));
-  setPlaceholder("license-input", t("license_placeholder"));
 
   // 智慧自動、效能卡片與說明區塊之對應翻譯
   setTextContent("lbl-smart-auto", t("smart_auto"));
@@ -1025,6 +1145,25 @@ function updateDomTranslations() {
   setTextContent("txt-first-run-tip", t("first_run_tip"));
   setTextContent("txt-first-run-btn-go", t("first_run_btn_go"));
   setTextContent("txt-first-run-btn-skip", t("first_run_btn_skip"));
+
+  // 自動化 data-i18n 與 data-i18n-placeholder 翻譯解析
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.getAttribute("data-i18n");
+    if (key) {
+      if (el.tagName === "INPUT" && (el as HTMLInputElement).type !== "button" && (el as HTMLInputElement).type !== "submit") {
+         (el as HTMLInputElement).placeholder = t(key);
+      } else {
+         el.textContent = t(key);
+      }
+    }
+  });
+
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-placeholder");
+    if (key) {
+      (el as HTMLInputElement | HTMLTextAreaElement).placeholder = t(key);
+    }
+  });
 }
 
 function setTextContent(id: string, text: string) {
@@ -1125,14 +1264,14 @@ function initSignalingReconnect() {
   const btnReconnect = document.getElementById("btn-reconnect-signaling");
   if (btnReconnect) {
     btnReconnect.addEventListener("click", () => {
-      console.log("[Signaling] 使用者手動觸發信令重連...");
+      console.log(t("log_sig_manual_reconnect"));
       btnReconnect.textContent = "✓";
       invoke("start_rust_signaling", { myId: myId, pin: "" })
         .then(() => {
           setTimeout(() => { btnReconnect.textContent = "🔄"; }, 1000);
         })
         .catch((err) => {
-          console.error("[Signaling] 重連失敗:", err);
+          console.error(t("log_sig_reconnect_failed"), err);
           btnReconnect.textContent = "❌";
           setTimeout(() => { btnReconnect.textContent = "🔄"; }, 1500);
         });
@@ -1155,7 +1294,7 @@ async function initStaticPassword() {
       const hasPwd = await invoke<boolean>("check_has_static_password");
       if (statusBadge) {
         if (hasPwd) {
-          statusBadge.textContent = "Saved (••••••••)";
+          statusBadge.textContent = "Configured (Secure)";
           statusBadge.className = "status-badge status-active";
           if (btnDeletePwd) btnDeletePwd.style.display = "block";
         } else {
@@ -1181,6 +1320,20 @@ async function initStaticPassword() {
       } else {
         inputPwd.type = "password";
         btnTogglePwd.textContent = "Show";
+      }
+    });
+  }
+
+  const btnTogglePwdEdit = document.getElementById("btn-toggle-pwd-edit");
+  const pwdInputGroup = document.getElementById("static-pwd-input-group");
+  if (btnTogglePwdEdit && pwdInputGroup) {
+    btnTogglePwdEdit.addEventListener("click", () => {
+      if (pwdInputGroup.style.display === "none" || pwdInputGroup.style.display === "") {
+        pwdInputGroup.style.display = "flex";
+        btnTogglePwdEdit.textContent = "Cancel";
+      } else {
+        pwdInputGroup.style.display = "none";
+        btnTogglePwdEdit.textContent = "Edit";
       }
     });
   }
@@ -1242,7 +1395,7 @@ function initClipboardSync() {
     try {
       const msg = JSON.stringify({ type: "clipboard_push", text });
       dataChannelClipboard.send(msg);
-      console.log(`[clipboard] 推送主控端剪貼簿至被控端: ${text.substring(0, 40)}`);
+      console.log(t("log_clip_push_client"), text.substring(0, 40));
     } catch {}
   };
   document.addEventListener("copy", onCopy);
@@ -1261,7 +1414,7 @@ function initClipboardSync() {
           // 被控端讀到自己的剪貼簿後推送給主控端
           const msg = JSON.stringify({ type: "clipboard_push", text: remoteText });
           dataChannelClipboard.send(msg);
-          console.log(`[clipboard] 被控端剪貼簿變化，已推送: ${remoteText.substring(0, 40)}`);
+          console.log(t("log_clip_push_host"), remoteText.substring(0, 40));
         }
       } catch {}
     }, 1500);
@@ -1526,7 +1679,7 @@ function initDeviceBook() {
         inputImport.value = ""; // Reset input
       } catch (err) {
         console.error("Failed to parse imported JSON", err);
-        alert("匯入失敗：JSON 格式錯誤 (Failed to parse JSON)");
+        alert(t("alert_import_failed_json"));
       }
     });
   }
@@ -1539,12 +1692,12 @@ function initDeviceBook() {
 let heartbeatTimer: any = null;
 function initSignalingClient() {
   const url = getSignalingUrl();
-  console.log(`[Signaling] 嘗試連線到信令伺服器: ${url}`);
+  console.log(t("log_sig_trying"), url);
   
   signalingWs = new WebSocket(url);
   
   signalingWs.onopen = () => {
-    console.log("[Signaling] 已連線，正在登入...");
+    console.log(t("log_sig_connected_logging_in"));
     signalingWs!.send(JSON.stringify({ type: "login", id: myId }));
     
     let lastHeartbeatTime = Date.now();
@@ -1553,7 +1706,7 @@ function initSignalingClient() {
       const now = Date.now();
       // 若兩次心跳的實際時間間隔大於 25 秒，代表計時器曾被系統掛起（例如 macOS App Nap 或行動端背景休眠）
       if (now - lastHeartbeatTime > 25000) {
-        console.warn("[Signaling] 偵測到計時器延遲（可能是系統 App Nap 凍結），主動關閉並重建連線...");
+        console.warn(t("log_sig_timer_delay"));
         if (signalingWs) {
           signalingWs.close();
         }
@@ -1581,7 +1734,7 @@ function initSignalingClient() {
         if (peerConnection) {
           try {
             await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: msg.sdp }));
-            console.log("[WebRTC] 遠端 Answer 已套用，ICE 協商中...");
+            console.log(t("log_webrtc_answer_applied"));
             flushIceCandidateQueue();
           } catch (e) {
             console.error("[WebRTC] 處理 Answer 失敗:", e);
@@ -1772,7 +1925,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
   // 監聽連線狀態變化
   pc.onconnectionstatechange = () => {
     const state = pc.connectionState;
-    console.log(`[WebRTC] 連線狀態: ${state}`);
+    console.log(t("log_webrtc_state"), state);
     updateConnectionStatusUI(state);
   };
 
@@ -1797,6 +1950,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         const mainContent = document.querySelector(".glass-container") as HTMLElement;
         const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
         
+        if (videoEl) videoEl.style.cursor = "default"; // 讓原生硬體游標保持顯示，達成零延遲操控體驗
         if (videoContainer) videoContainer.style.display = "block";
         if (btnDisplayMode) btnDisplayMode.style.display = "block";
         if (btnAudioToggle) btnAudioToggle.style.display = "block";
@@ -1805,17 +1959,46 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         const mobileControlOrb = document.getElementById("mobile-control-orb");
         if (mobileControlOrb) mobileControlOrb.style.display = "flex";
         
-        const mobileDial = document.getElementById("mobile-floating-dial");
-        if (mobileDial) mobileDial.style.display = "block";
-        
         // 如果是在手機/觸控環境上，顯示鍵盤呼叫按鈕
         if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
           btnKeyboard.style.display = "flex";
         }
-        if (!videoEl.srcObject) {
-          videoEl.srcObject = event.streams && event.streams.length > 0 
+        // Support dual-track foveated streaming
+        const stream = event.streams && event.streams.length > 0 
             ? event.streams[0] 
             : new MediaStream([event.track]);
+
+        if (event.track.label === "foveated" || (videoEl.srcObject && (videoEl.srcObject as MediaStream).active)) {
+            console.log("[WebRTC] 收到感知優先 (Foveated) 軌道");
+            let fv = document.getElementById("foveated-video") as HTMLVideoElement;
+            if (!fv) {
+               fv = document.createElement("video");
+               fv.id = "foveated-video";
+               fv.autoplay = true;
+               fv.playsInline = true;
+               fv.muted = true;
+               fv.style.position = "absolute";
+               fv.style.pointerEvents = "none";
+               fv.style.mixBlendMode = "normal";
+               fv.style.width = "400px";
+               fv.style.height = "400px";
+               fv.style.borderRadius = "200px"; // 聚焦圓形
+               fv.style.boxShadow = "0 0 20px rgba(0,0,0,0.5)";
+               fv.style.zIndex = "100";
+               videoContainer.appendChild(fv);
+               
+               // 讓聚焦影片層跟隨前端游標
+               window.addEventListener("mousemove", (e) => {
+                 fv.style.left = `${e.clientX - 200}px`;
+                 fv.style.top = `${e.clientY - 200}px`;
+               });
+            }
+            fv.srcObject = stream;
+            return; // 結束，不覆蓋背景軌道
+        }
+
+        if (!videoEl.srcObject) {
+          videoEl.srcObject = stream;
             
           // 啟用零延遲渲染 (Zero-Latency Rendering)
           if ((videoEl as any).playoutDelayHint !== undefined) {
@@ -1858,7 +2041,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
           // 4 秒後偵測是否仍在黑屏狀態
           setTimeout(() => {
             if (!hasPlayed || videoEl.paused || videoEl.currentTime === 0) {
-              console.warn("[WebRTC] 連線已建立但偵測不到視訊播放 (黑屏)。可能是自動播放受限，或遠端 macOS 未授權螢幕錄製。");
+              console.warn(t("log_webrtc_black_screen"));
               if (videoErrorOverlay) videoErrorOverlay.style.display = "flex";
             }
           }, 4000);
@@ -1970,7 +2153,7 @@ async function startCall(remoteId: string, pin: string) {
     resetConnectionUI();
   }
 
-  console.log(`[WebRTC] Offer 已發送至 ${remoteId}`);
+  console.log(t("log_webrtc_offer_sent"), remoteId);
 }
 
 // 被動端：收到 Offer，驗證 PIN 後回傳 Answer
@@ -1981,7 +2164,7 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
     if (!isWebBrowser) {
       const licenseState = await invoke<{status: string, trial_days_left: number | null}>("check_license_status");
       if (licenseState.status === "expired" || licenseState.status === "unauthorized") {
-        console.warn(`[WebRTC] 拒絕連線：被控端試用期已過期 (${licenseState.status})`);
+        console.warn(t("log_webrtc_trial_expired"), licenseState.status);
         alert(t("err_host_expired") || "Host trial period has expired. Please enter a valid license key.");
         if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
           signalingWs.send(JSON.stringify({
@@ -2013,7 +2196,7 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
   }
 
   if (!isStaticValid) {
-    console.warn(`[WebRTC] 拒絕連線：密碼不符或未設定密碼`);
+    console.warn(t("log_webrtc_pwd_mismatch"));
     if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
       signalingWs.send(JSON.stringify({
         type: "error",
@@ -2156,10 +2339,6 @@ function resetConnectionUI() {
 
   // 重置顯示模式狀態與隱藏懸浮手勢工具輪
   resetDisplayMode();
-  const mobileDial = document.getElementById("mobile-floating-dial");
-  if (mobileDial) {
-    mobileDial.style.display = "none";
-  }
 }
 
 // 依照 WebRTC connectionState 更新 UI 提示
@@ -2190,6 +2369,7 @@ function updateConnectionStatusUI(state: string) {
       }
     }
   }
+  const videoContainer = document.getElementById("remote-video-container");
   if (state === "failed" || state === "disconnected" || state === "closed") {
     // 斷線時，強制關閉可能開啟的隱私黑屏模式，避免主機卡在黑屏
     const chkPrivacy = document.getElementById("chk-privacy-mode") as HTMLInputElement;
@@ -2197,6 +2377,15 @@ function updateConnectionStatusUI(state: string) {
       chkPrivacy.checked = false;
       invoke("toggle_privacy_mode", { enable: false }).catch(e => console.warn("Failed to reset privacy mode:", e));
       console.log("[security] Connection dropped, privacy mode forcefully disabled to prevent lockout.");
+    }
+    // 無縫重連：將畫面轉為半透明灰階凍結，不立即報錯關閉
+    if (videoContainer) {
+      videoContainer.style.filter = "grayscale(100%) opacity(50%)";
+      videoContainer.style.transition = "filter 0.5s ease";
+    }
+  } else if (state === "connected") {
+    if (videoContainer) {
+      videoContainer.style.filter = "none";
     }
   }
 
@@ -2310,107 +2499,13 @@ function initConnectButton() {
     const btnText = document.getElementById("txt-btn-connect");
     if (btnText) btnText.textContent = t("conn_connecting");
 
-    console.log(`[Frontend] 發起 WebRTC 連線至 ${remoteId} (PIN: ${pin})`);
+    console.log(t("log_frontend_webrtc_init"), remoteId);
     // 真正的 WebRTC 連線發起
     await startCall(remoteId, pin);
   });
 }
 
 
-// 授權金鑰驗證
-async function initLicenseVerification() {
-  const btnVerify = document.getElementById("btn-verify-license");
-  const licenseInput = document.getElementById("license-input") as HTMLInputElement;
-  const statusBadge = document.getElementById("license-status");
-
-  // 判斷是否在純網頁環境（例如手機瀏覽器）
-  const isWebBrowser = !isDesktopTauri();
-
-  if (isWebBrowser) {
-    if (statusBadge) {
-      statusBadge.className = "status-badge status-active";
-      statusBadge.textContent = "Web Client";
-    }
-    if (licenseInput) licenseInput.setAttribute("disabled", "true");
-    if (btnVerify) btnVerify.setAttribute("disabled", "true");
-    console.log("[license] 純網頁環境，跳過本機授權檢查");
-    return;
-  }
-
-  // 啟動時自動檢查 Keychain 中是否已有合法授權或試用狀態
-  if (statusBadge) {
-    try {
-      const licenseState = await invoke<{status: string, trial_days_left: number | null}>("check_license_status");
-      
-      if (licenseState.status === "buyout") {
-        statusBadge.className = "status-badge status-active";
-        statusBadge.textContent = t("status_active");
-        console.log("[license] 啟動時偵測到有效授權，已恢復狀態");
-      } else if (licenseState.status === "trial") {
-        statusBadge.className = "status-badge status-active"; // Use active style for trial so it looks green/yellow, maybe add a warning style later
-        statusBadge.style.backgroundColor = "#eab308"; // Tailwind yellow-500
-        statusBadge.style.color = "#ffffff";
-        statusBadge.textContent = (t("status_trial") || "Trial ({0} days left)").replace("{0}", String(licenseState.trial_days_left));
-        console.log(`[license] 試用期內，剩餘天數: ${licenseState.trial_days_left}`);
-      } else if (licenseState.status === "expired") {
-        statusBadge.className = "status-badge status-inactive";
-        statusBadge.textContent = t("status_expired") || "Trial Expired";
-        console.log("[license] 試用已過期");
-      } else {
-        statusBadge.className = "status-badge status-inactive";
-        statusBadge.textContent = t("status_inactive");
-      }
-    } catch (e) {
-      console.warn("[license] 啟動授權檢查失敗:", e);
-    }
-  }
-
-  if (btnVerify && licenseInput && statusBadge) {
-    btnVerify.addEventListener("click", async () => {
-      const key = licenseInput.value.trim();
-      if (!key) {
-        alert(t("err_license_empty"));
-        return;
-      }
-
-      try {
-        const isValid = await invoke<boolean>("verify_license_key", { licenseKey: key });
-        if (isValid) {
-          statusBadge.className = "status-badge status-active";
-          statusBadge.textContent = t("status_active");
-          alert(t("alert_license_success"));
-        } else {
-          statusBadge.className = "status-badge status-inactive";
-          statusBadge.textContent = t("status_inactive");
-          alert(t("alert_license_fail"));
-        }
-      } catch (error) {
-        const errorStr = String(error);
-        let displayError = errorStr;
-        
-        if (errorStr.startsWith("err_limit_exceeded|")) {
-          const parts = errorStr.split("|");
-          const rawHwids = parts[1] || "";
-          const template = t("err_limit_exceeded");
-          displayError = template.replace("{0}", rawHwids);
-        } else if (errorStr.startsWith("err_cooldown_active|")) {
-          const parts = errorStr.split("|");
-          const seconds = parts[1] || "10";
-          const template = t("err_cooldown_active");
-          displayError = template.replace("{0}", seconds);
-        } else if (errorStr.startsWith("err_connect_server|")) {
-          const parts = errorStr.split("|");
-          const details = parts.slice(1).join("|");
-          displayError = t("err_connect_server") + details;
-        } else {
-          displayError = t(errorStr);
-        }
-        
-        alert(`${t("alert_license_error")}${displayError}`);
-      }
-    });
-  }
-}
 
 // 隱私黑屏模式切換
 function initPrivacyMode() {
@@ -2576,17 +2671,54 @@ function startStatusPolling() {
       const lossRate = packetsReceived > 0 ? packetsLost / packetsReceived : 0;
       const indicator = document.getElementById("quality-indicator");
       const qualityLabel = document.getElementById("quality-label");
+      
+      // 動態注入適應性網路指標到畫面上方
+      let floatingIndicator = document.getElementById("floating-network-indicator");
+      if (!floatingIndicator) {
+        floatingIndicator = document.createElement("div");
+        floatingIndicator.id = "floating-network-indicator";
+        floatingIndicator.style.position = "absolute";
+        floatingIndicator.style.top = "16px";
+        floatingIndicator.style.left = "50%";
+        floatingIndicator.style.transform = "translateX(-50%)";
+        floatingIndicator.style.width = "8px";
+        floatingIndicator.style.height = "8px";
+        floatingIndicator.style.borderRadius = "50%";
+        floatingIndicator.style.zIndex = "1000";
+        floatingIndicator.style.transition = "background-color 0.5s ease";
+        floatingIndicator.style.boxShadow = "0 2px 6px rgba(0,0,0,0.5)";
+        const videoContainer = document.getElementById("remote-video-container");
+        if (videoContainer) videoContainer.appendChild(floatingIndicator);
+      }
+
+      let color = "#6b7280";
       if (indicator && qualityLabel) {
         if (rttMs <= 80 && lossRate < 0.01) {
-          indicator.style.background = "#10b981"; // 綠 — 優
+          color = "#10b981"; // 綠 — 優
           qualityLabel.textContent = t("quality_excellent") || "Excellent";
         } else if (rttMs <= 200 && lossRate < 0.05) {
-          indicator.style.background = "#f59e0b"; // 黃 — 可
+          color = "#f59e0b"; // 黃 — 可
           qualityLabel.textContent = t("quality_fair") || "Fair";
         } else {
-          indicator.style.background = "#ef4444"; // 紅 — 差
+          color = "#ef4444"; // 紅 — 差
           qualityLabel.textContent = t("quality_poor") || "Poor";
         }
+        indicator.style.background = color;
+
+        // 當網路狀態為紅 (極差) 時，啟動 AI 超解析 (前端銳化濾鏡)
+        const remoteVideo = document.getElementById("remote-video") as HTMLVideoElement;
+        if (remoteVideo) {
+          if (color === "#ef4444") {
+            remoteVideo.style.imageRendering = "pixelated"; // FSR-lite
+            remoteVideo.style.filter = "contrast(1.1) brightness(1.05) saturate(1.2)";
+          } else {
+            remoteVideo.style.imageRendering = "auto";
+            remoteVideo.style.filter = "none";
+          }
+        }
+      }
+      if (floatingIndicator) {
+        floatingIndicator.style.backgroundColor = color;
       }
     } catch (e) {
       // getStats() 在非連線狀態下會拋出，忽略即可
@@ -2993,58 +3125,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   // --- 畫質與自適應調適狀態 ---
 
-  let currentQualityPreset: "fluid" | "retina" | "auto" = "retina";
-  let autoPresetInterval: any = null;
-
-  const collapseQualityPanel = () => {
-    const qualityPanel = document.getElementById("mobile-quality-panel");
-    if (qualityPanel) {
-      qualityPanel.classList.remove("show");
-    }
-  };
-
-  async function applyQualityPreset(preset: "fluid" | "retina" | "auto") {
-    currentQualityPreset = preset;
-    
-    const btnFluid = document.getElementById("btn-quality-fluid");
-    const btnRetina = document.getElementById("btn-quality-retina");
-    const btnAuto = document.getElementById("btn-quality-auto");
-    
-    if (btnFluid) btnFluid.classList.toggle("active", preset === "fluid");
-    if (btnRetina) btnRetina.classList.toggle("active", preset === "retina");
-    if (btnAuto) btnAuto.classList.toggle("active", preset === "auto");
-    
-    if (autoPresetInterval) {
-      clearInterval(autoPresetInterval);
-      autoPresetInterval = null;
-    }
-
-    if (preset === "fluid") {
-      await invoke("trigger_network_simulation", { rttMs: 75, lossRate: 0.04, isRelay: false });
-    } else if (preset === "retina") {
-      await invoke("trigger_network_simulation", { rttMs: 10, lossRate: 0.0, isRelay: false });
-    } else if (preset === "auto") {
-      autoPresetInterval = setInterval(async () => {
-        try {
-          const status = await invoke<any>("get_connection_status");
-          let realRtt = status.rtt_ms;
-          
-          if (realRtt === 10 || realRtt === 75) {
-            const timeSec = Math.floor(Date.now() / 5000) % 2;
-            if (timeSec === 0) {
-              await invoke("trigger_network_simulation", { rttMs: 15, lossRate: 0.001, isRelay: false });
-            } else {
-              await invoke("trigger_network_simulation", { rttMs: 130, lossRate: 0.05, isRelay: false });
-            }
-          }
-        } catch (e) {
-          console.error("Auto preset error:", e);
-        }
-      }, 1500);
-    }
-    
-    triggerHaptic("light");
-  }
 
   // --- 邊緣平移與顯示模式狀態 ---
   let displayMode: "fit" | "original" | "fill" = "fit";
@@ -3256,13 +3336,16 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let moveRafActive = false;
 
   function triggerMoveRaf() {
-    if (moveRafActive) return;
-    moveRafActive = true;
-    requestAnimationFrame(sendPendingMoves);
+    if (!moveRafActive) {
+      moveRafActive = true;
+      requestAnimationFrame(() => {
+        sendPendingMoves();
+        moveRafActive = false;
+      });
+    }
   }
 
   function sendPendingMoves() {
-    moveRafActive = false;
     
     // 優先發送相對位移 (Pointer Lock 模式)
     if (pendingRelativeDX !== 0 || pendingRelativeDY !== 0) {
@@ -3443,8 +3526,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   }
 
   function updateCursorOverlay(percentX: number, percentY: number) {
-    const cursorEl = document.getElementById("remote-cursor");
-    if (!cursorEl || isDirectTouchMode) return;
+    
+    
     const rect = videoEl.getBoundingClientRect();
     const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
     const containerRatio = rect.width / rect.height;
@@ -3460,9 +3543,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
     const pixelX = rect.left + offsetX + percentX * renderedWidth;
     const pixelY = rect.top + offsetY + percentY * renderedHeight;
-    cursorEl.style.display = "block";
-    cursorEl.style.left = pixelX + "px";
-    cursorEl.style.top = pixelY + "px";
+    
+    
+    
   }
 
   // 初始化懸浮選單與 Toggle 切換按鈕
@@ -3506,8 +3589,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       if (isDirectTouchMode) {
         btnTouchMode.textContent = "👆 Direct Touch";
         // 絕對觸控模式下隱藏本地游標
-        const cursorEl = document.getElementById("remote-cursor");
-        if (cursorEl) cursorEl.style.display = "none";
+        
+        
       } else {
         btnTouchMode.textContent = "🖱️ Trackpad Mode";
       }
@@ -3521,6 +3604,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   }
 
   // --- 滑鼠事件對應 (Pointer Lock 模式) ---
+  let syntheticCursorPercentX = 0.5;
+  let syntheticCursorPercentY = 0.5;
+
   videoEl.addEventListener("pointermove", (e) => {
     e.preventDefault();
     if (e.pointerType === "touch" || e.pointerType === "pen") return; // 由觸控手勢處理
@@ -3529,8 +3615,33 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       pendingRelativeDX += Math.round(e.movementX);
       pendingRelativeDY += Math.round(e.movementY);
       triggerMoveRaf();
-      currentCursorPercentX = 0.5;
-      currentCursorPercentY = 0.5;
+      
+      const rect = videoEl.getBoundingClientRect();
+      const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+      const containerRatio = rect.width / rect.height;
+      
+      let renderedWidth, renderedHeight;
+      if (containerRatio > videoRatio) {
+        renderedHeight = rect.height;
+        renderedWidth = renderedHeight * videoRatio;
+      } else {
+        renderedWidth = rect.width;
+        renderedHeight = renderedWidth / videoRatio;
+      }
+
+      // 在鎖定模式下，根據實際滑鼠的移動量累積計算本地合成游標的絕對位置
+      syntheticCursorPercentX += e.movementX / (renderedWidth || 1);
+      syntheticCursorPercentY += e.movementY / (renderedHeight || 1);
+      
+      // 確保游標不會超出畫面範圍
+      syntheticCursorPercentX = Math.max(0, Math.min(1, syntheticCursorPercentX));
+      syntheticCursorPercentY = Math.max(0, Math.min(1, syntheticCursorPercentY));
+      
+      currentCursorPercentX = syntheticCursorPercentX;
+      currentCursorPercentY = syntheticCursorPercentY;
+      
+      updateCursorOverlay(syntheticCursorPercentX, syntheticCursorPercentY);
+    } else {
       let x = 0, y = 0;
       if (displayMode === "original" && videoContainer) {
         x = (e.clientX + videoContainer.scrollLeft) / videoEl.videoWidth;
@@ -3558,10 +3669,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       x = Math.max(0, Math.min(1, x));
       y = Math.max(0, Math.min(1, y));
       
-      const mouseSpeed = Math.sqrt(e.movementX * e.movementX + e.movementY * e.movementY) / (videoContainer.clientWidth || 1);
-      const snapped = applySmartSnapping(x, y, mouseSpeed);
-      x = snapped.x;
-      y = snapped.y;
+      // 移除智能磁吸，提供完全原生的絕對座標映射
       
       pendingMouseMoveX = x;
       pendingMouseMoveY = y;
@@ -3575,7 +3683,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
       currentCursorPercentX = x;
       currentCursorPercentY = y;
-      updateCursorOverlay(x, y);
+      // 實體滑鼠不再更新與顯示合成游標，直接依賴原生游標
+      
+      
     }
   });
 
@@ -3589,10 +3699,12 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (e.pointerType === "touch" || e.pointerType === "pen") return;
     e.preventDefault();
     
-    // 點擊畫面時，如果尚未處於鎖定狀態，且為實實滑鼠點擊，嘗試鎖定滑鼠
-    if (document.pointerLockElement !== videoEl) {
-      videoEl.requestPointerLock();
+    const videoContainer = document.getElementById("remote-video-container");
+    if (videoContainer && document.activeElement !== videoContainer) {
+      videoContainer.focus();
     }
+    
+    // 點擊畫面時，不再強制鎖定指標，確保原生游標可以任意移動並精準發送絕對座標
     
     const payload = new Uint8Array(1);
     let btn = 1;
@@ -3605,8 +3717,17 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   // 監聽 Pointer Lock 變更
   document.addEventListener("pointerlockchange", () => {
     const tooltip = document.getElementById("pointer-lock-tooltip");
+    
+    
     if (document.pointerLockElement === videoEl) {
       console.log("[Pointer Lock] 滑鼠指標已鎖定");
+      
+      // 初始化合成游標位置
+      syntheticCursorPercentX = currentCursorPercentX || 0.5;
+      syntheticCursorPercentY = currentCursorPercentY || 0.5;
+      
+      
+      
       if (tooltip) {
         tooltip.style.display = "block";
         tooltip.style.opacity = "1";
@@ -3631,6 +3752,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       }
     } else {
       console.log("[Pointer Lock] 滑鼠指標已解鎖");
+      
+
       if (tooltip) {
         tooltip.style.display = "none";
         tooltip.style.opacity = "0";
@@ -4039,13 +4162,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         x = Math.max(0, Math.min(1, x));
         y = Math.max(0, Math.min(1, y));
         
-        // 計算速度以決定是否磁吸
-        const touchSpeed = lastTouchX !== 0 && lastTouchY !== 0 
-          ? Math.sqrt(Math.pow(currentX - lastTouchX, 2) + Math.pow(currentY - lastTouchY, 2)) / renderedWidth
-          : 0;
-        const snapped = applySmartSnapping(x, y, touchSpeed);
-        x = snapped.x;
-        y = snapped.y;
+        // 移除智能磁吸
         
         // Tremor Suppression (防手震) & Lazy Drag (延遲拖曳激活)
         if (!isDragging) {
@@ -4093,15 +4210,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           trackpadCursorX = Math.max(0, Math.min(1, trackpadCursorX));
           trackpadCursorY = Math.max(0, Math.min(1, trackpadCursorY));
           
-          // 計算速度以決定是否磁吸
-          const touchSpeed = Math.sqrt(accDx * accDx + accDy * accDy) / renderedWidth;
-          const snapped = applySmartSnapping(trackpadCursorX, trackpadCursorY, touchSpeed);
-          
-          pendingMouseMoveX = snapped.x;
-          pendingMouseMoveY = snapped.y;
+          pendingMouseMoveX = trackpadCursorX;
+          pendingMouseMoveY = trackpadCursorY;
           triggerMoveRaf();
 
-          updateCursorOverlay(snapped.x, snapped.y);
+          updateCursorOverlay(trackpadCursorX, trackpadCursorY);
 
           const now = performance.now();
           const dt = now - lastMoveTimestamp;
@@ -4111,8 +4224,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           }
           lastMoveTimestamp = now;
 
-          currentCursorPercentX = snapped.x;
-          currentCursorPercentY = snapped.y;
+          currentCursorPercentX = trackpadCursorX;
+          currentCursorPercentY = trackpadCursorY;
         }
       }
       
@@ -4336,6 +4449,28 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   videoEl.addEventListener("contextmenu", (e) => e.preventDefault());
 
+  // 破壞性創新：非同步重投影 (Asynchronous Reprojection / Time Warping)
+  let warpX = 0;
+  let warpY = 0;
+  let warpRaf: number | null = null;
+  const applyTimeWarping = (dx: number, dy: number) => {
+    warpX += dx;
+    warpY += dy;
+    if (warpRaf) cancelAnimationFrame(warpRaf);
+    const decay = () => {
+        warpX *= 0.85; // 快速衰減，模擬遠端畫面到達的覆蓋
+        warpY *= 0.85;
+        if (Math.abs(warpX) < 1 && Math.abs(warpY) < 1) {
+            warpX = 0; warpY = 0;
+            videoEl.style.transform = `none`;
+        } else {
+            videoEl.style.transform = `translate(${warpX}px, ${warpY}px)`;
+            warpRaf = requestAnimationFrame(decay);
+        }
+    };
+    decay();
+  };
+
   videoEl.addEventListener("wheel", (e) => {
     e.preventDefault();
     const payload = new Uint8Array(4);
@@ -4346,22 +4481,58 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     view.setInt16(0, dx, false);
     view.setInt16(2, dy, false);
     sendInputPacket(buildInputPacket(0x04, payload)); // 0x04 is MouseScroll
+
+    // 觸發視覺預測 (Time Warping)
+    applyTimeWarping(-e.deltaX * 0.5, -e.deltaY * 0.5); // 0.5 為體感係數
   }, { passive: false });
 
-  // 攔截鍵盤輸入
+  const codeToKeyCode: Record<string, number> = {
+    "Backspace": 8, "Tab": 9, "Enter": 13, "ShiftLeft": 16, "ShiftRight": 16,
+    "ControlLeft": 17, "ControlRight": 17, "AltLeft": 18, "AltRight": 18,
+    "Pause": 19, "CapsLock": 20, "Escape": 27, "Space": 32,
+    "PageUp": 33, "PageDown": 34, "End": 35, "Home": 36,
+    "ArrowLeft": 37, "ArrowUp": 38, "ArrowRight": 39, "ArrowDown": 40,
+    "Insert": 45, "Delete": 46,
+    "Digit0": 48, "Digit1": 49, "Digit2": 50, "Digit3": 51, "Digit4": 52,
+    "Digit5": 53, "Digit6": 54, "Digit7": 55, "Digit8": 56, "Digit9": 57,
+    "KeyA": 65, "KeyB": 66, "KeyC": 67, "KeyD": 68, "KeyE": 69, "KeyF": 70,
+    "KeyG": 71, "KeyH": 72, "KeyI": 73, "KeyJ": 74, "KeyK": 75, "KeyL": 76,
+    "KeyM": 77, "KeyN": 78, "KeyO": 79, "KeyP": 80, "KeyQ": 81, "KeyR": 82,
+    "KeyS": 83, "KeyT": 84, "KeyU": 85, "KeyV": 86, "KeyW": 87, "KeyX": 88,
+    "KeyY": 89, "KeyZ": 90,
+    "MetaLeft": 91, "MetaRight": 92, "ContextMenu": 93,
+    "Numpad0": 96, "Numpad1": 97, "Numpad2": 98, "Numpad3": 99, "Numpad4": 100,
+    "Numpad5": 101, "Numpad6": 102, "Numpad7": 103, "Numpad8": 104, "Numpad9": 105,
+    "NumpadMultiply": 106, "NumpadAdd": 107, "NumpadSubtract": 109, "NumpadDecimal": 110, "NumpadDivide": 111,
+    "F1": 112, "F2": 113, "F3": 114, "F4": 115, "F5": 116, "F6": 117,
+    "F7": 118, "F8": 119, "F9": 120, "F10": 121, "F11": 122, "F12": 123,
+    "NumLock": 144, "ScrollLock": 145,
+    "Semicolon": 186, "Equal": 187, "Comma": 188, "Minus": 189, "Period": 190,
+    "Slash": 191, "Backquote": 192, "BracketLeft": 219, "Backslash": 220,
+    "BracketRight": 221, "Quote": 222
+  };
+
+  const activeKeys = new Set<string>();
+
+  // 攔截鍵盤輸入 (直通 Scan Code 繞過輸入法)
   window.addEventListener("keydown", (e) => {
     if (videoEl.style.display === "none") return;
     if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
-      // 正在輸入欄位時，不要攔截鍵盤事件，交由輸入法與虛擬鍵盤處理
+      // 正在輸入欄位時，交由輸入法與虛擬鍵盤處理
       return;
     }
     
     e.preventDefault(); 
     
+    // 防重複觸發 (OS Key Repeat)
+    if (activeKeys.has(e.code)) return;
+    activeKeys.add(e.code);
+
     const payload = new Uint8Array(3);
     const view = new DataView(payload.buffer);
     
-    let keyCode = e.keyCode;
+    // 優先使用物理按鍵位置的 Scan Code 映射，若無則降級使用 e.keyCode
+    let keyCode = codeToKeyCode[e.code] || e.keyCode;
     if (keyCode === 0 || keyCode === 229) {
       if (e.key && e.key.length === 1) {
         keyCode = e.key.toUpperCase().charCodeAt(0);
@@ -4377,6 +4548,37 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     payload[2] = modifiers;
     
     sendInputPacket(buildInputPacket(0x05, payload)); 
+  });
+
+  // 新增 KeyUp 監聽，徹底解決按鍵卡死 (Ghosting) 問題
+  window.addEventListener("keyup", (e) => {
+    if (videoEl.style.display === "none") return;
+    if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
+      return;
+    }
+    
+    e.preventDefault(); 
+    activeKeys.delete(e.code);
+
+    const payload = new Uint8Array(3);
+    const view = new DataView(payload.buffer);
+    
+    let keyCode = codeToKeyCode[e.code] || e.keyCode;
+    if (keyCode === 0 || keyCode === 229) {
+      if (e.key && e.key.length === 1) {
+        keyCode = e.key.toUpperCase().charCodeAt(0);
+      }
+    }
+    view.setUint16(0, keyCode, false);
+    
+    let modifiers = 0;
+    if (e.shiftKey) modifiers |= 1;
+    if (e.ctrlKey) modifiers |= 2;
+    if (e.altKey) modifiers |= 4;
+    if (e.metaKey) modifiers |= 8;
+    payload[2] = modifiers;
+    
+    sendInputPacket(buildInputPacket(0x06, payload)); 
   });
 
   // --- 行動端虛擬鍵盤事件監聽與防失焦機制 ---
@@ -4528,259 +4730,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
   });
 
-  // =========================================================================
-  // 仿 iOS AssistiveTouch 智能圓形懸浮控制轉盤 JS 實作
-  // =========================================================================
-  const dialContainer = document.getElementById("mobile-floating-dial") as HTMLElement;
-  const dialTrigger = document.getElementById("mobile-floating-dial-trigger") as HTMLElement;
-  let isDialExpanded = false;
-  let isDraggingDial = false;
-  let dialStartX = 0;
-  let dialStartY = 0;
-  let dialLeft = 12; // 初始靠左
-  let dialTop = window.innerHeight / 2 - 25; // 垂直置中
-
-  const expandDial = (side: "left" | "right") => {
-    isDialExpanded = true;
-    if (dialContainer && dialTrigger) {
-      dialContainer.classList.add("expanded");
-      dialTrigger.classList.add("active");
-      dialTrigger.classList.remove("pulse");
-    }
-    
-    // 子按鈕角度定義
-    const leftOffsets = [
-      { x: 42, y: -72 },  // Keyboard
-      { x: 74, y: -40 },  // Mode
-      { x: 84, y: 0 },    // Display
-      { x: 74, y: 40 },   // Shortcuts
-      { x: 42, y: 72 }    // Logs
-    ];
-    
-    const rightOffsets = [
-      { x: -42, y: -72 },
-      { x: -74, y: -40 },
-      { x: -84, y: 0 },
-      { x: -74, y: 40 },
-      { x: -42, y: 72 }
-    ];
-    
-    const offsets = side === "left" ? leftOffsets : rightOffsets;
-    const items = dialContainer.querySelectorAll(".dial-item");
-    items.forEach((item, index) => {
-      const htmlItem = item as HTMLElement;
-      htmlItem.style.setProperty("--tx", `${offsets[index].x}px`);
-      htmlItem.style.setProperty("--ty", `${offsets[index].y}px`);
-    });
-  };
-
-  const collapseDial = () => {
-    isDialExpanded = false;
-    if (dialContainer && dialTrigger) {
-      dialContainer.classList.remove("expanded");
-      dialTrigger.classList.remove("active");
-      dialTrigger.classList.add("pulse");
-    }
-    collapseQualityPanel();
-  };
-
-  // 曝露給全域以供連線重置時調用
-  resetDisplayMode = () => {
-    displayMode = "fit";
-    applyDisplayMode();
-    collapseDial();
-  };
-
-  if (dialContainer && dialTrigger) {
-    // 設定初始位置
-    dialContainer.style.left = `${dialLeft}px`;
-    dialContainer.style.top = `${dialTop}px`;
-    
-    dialTrigger.addEventListener("touchstart", (e) => {
-      e.stopPropagation();
-      isDraggingDial = false;
-      const touch = e.touches[0];
-      dialStartX = touch.clientX - dialLeft;
-      dialStartY = touch.clientY - dialTop;
-      
-      if (isDialExpanded) {
-        collapseDial();
-      }
-    }, { passive: true });
-    
-    dialTrigger.addEventListener("touchmove", (e) => {
-      e.stopPropagation();
-      isDraggingDial = true;
-      const touch = e.touches[0];
-      let newLeft = touch.clientX - dialStartX;
-      let newTop = touch.clientY - dialStartY;
-      
-      // 限制在螢幕可見範圍內 (保留 12px 邊緣安全區)
-      newLeft = Math.max(12, Math.min(window.innerWidth - 50 - 12, newLeft));
-      newTop = Math.max(12, Math.min(window.innerHeight - 50 - 12, newTop));
-      
-      dialLeft = newLeft;
-      dialTop = newTop;
-      dialContainer.style.left = `${dialLeft}px`;
-      dialContainer.style.top = `${dialTop}px`;
-    }, { passive: true });
-    
-    dialTrigger.addEventListener("touchend", (e) => {
-      e.stopPropagation();
-      if (!isDraggingDial) {
-        // 單擊展開/收合
-        if (isDialExpanded) {
-          collapseDial();
-        } else {
-          const centerPoint = window.innerWidth / 2;
-          const side = (dialLeft + 25 < centerPoint) ? "left" : "right";
-          expandDial(side);
-        }
-      } else {
-        // 貼邊磁吸
-        const centerPoint = window.innerWidth / 2;
-        let targetLeft = 12;
-        let side: "left" | "right" = "left";
-        if (dialLeft + 25 >= centerPoint) {
-          targetLeft = window.innerWidth - 50 - 12;
-          side = "right";
-        }
-        
-        dialContainer.style.transition = "left 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)";
-        dialLeft = targetLeft;
-        dialContainer.style.left = `${dialLeft}px`;
-        
-        setTimeout(() => {
-          if (dialContainer) {
-            dialContainer.style.transition = "none";
-          }
-        }, 300);
-      }
-    }, { passive: true });
-
-    // 點擊選單以外區域收合
-    window.addEventListener("touchstart", () => {
-      if (isDialExpanded) {
-        collapseDial();
-      }
-    }, { passive: true });
-
-    // 視窗尺寸重置調整
-    window.addEventListener("resize", () => {
-      const centerPoint = window.innerWidth / 2;
-      let targetLeft = 12;
-      if (dialLeft + 25 >= centerPoint) {
-        targetLeft = window.innerWidth - 50 - 12;
-      }
-      dialLeft = targetLeft;
-      dialTop = Math.max(12, Math.min(window.innerHeight - 50 - 12, dialTop));
-      dialContainer.style.left = `${dialLeft}px`;
-      dialContainer.style.top = `${dialTop}px`;
-    }, { passive: true });
-
-    // 子按鈕事件對接
-    const itemKeyboard = document.getElementById("dial-item-keyboard");
-    if (itemKeyboard) {
-      itemKeyboard.onclick = (e) => {
-        e.stopPropagation();
-        collapseDial();
-        isKeyboardActive = true;
-        if (hiddenInput) {
-          hiddenInput.value = "   ";
-          lastValue = "   ";
-          hiddenInput.focus();
-        }
-      };
-    }
-
-    const itemMode = document.getElementById("dial-item-mode");
-    if (itemMode) {
-      itemMode.onclick = (e) => {
-        e.stopPropagation();
-        collapseDial();
-        if (btnTouchMode) {
-          btnTouchMode.click();
-        }
-      };
-    }
-
-    const itemDisplay = document.getElementById("dial-item-display");
-    if (itemDisplay) {
-      itemDisplay.onclick = (e) => {
-        e.stopPropagation();
-        collapseDial();
-        if (btnDisplayMode) {
-          btnDisplayMode.click();
-        }
-      };
-    }
-
-    const itemShortcuts = document.getElementById("dial-item-shortcuts");
-    if (itemShortcuts) {
-      itemShortcuts.onclick = (e) => {
-        e.stopPropagation();
-        collapseDial();
-        if (btnSendKeys) {
-          btnSendKeys.click();
-        }
-      };
-    }
-
-    const itemLogs = document.getElementById("dial-item-logs");
-    if (itemLogs) {
-      itemLogs.onclick = (e) => {
-        e.stopPropagation();
-        collapseDial();
-        const btnDiagnose = document.getElementById("btn-video-diagnose");
-        if (btnDiagnose) {
-          btnDiagnose.click();
-        }
-      };
-    }
-
-    const itemQuality = document.getElementById("dial-item-quality");
-    if (itemQuality) {
-      itemQuality.onclick = (e) => {
-        e.stopPropagation();
-        
-        const qualityPanel = document.getElementById("mobile-quality-panel");
-        if (qualityPanel) {
-          const isShown = qualityPanel.classList.contains("show");
-          collapseQualityPanel();
-          if (!isShown) {
-            qualityPanel.classList.add("show");
-            triggerHaptic("light");
-          }
-        }
-        collapseDial();
-      };
-    }
-
-    const btnFluid = document.getElementById("btn-quality-fluid");
-    const btnRetina = document.getElementById("btn-quality-retina");
-    const btnAuto = document.getElementById("btn-quality-auto");
-
-    if (btnFluid) {
-      btnFluid.onclick = (e) => {
-        e.stopPropagation();
-        applyQualityPreset("fluid");
-      };
-    }
-    if (btnRetina) {
-      btnRetina.onclick = (e) => {
-        e.stopPropagation();
-        applyQualityPreset("retina");
-      };
-    }
-    if (btnAuto) {
-      btnAuto.onclick = (e) => {
-        e.stopPropagation();
-        applyQualityPreset("auto");
-      };
-    }
-  }
-
-  // 舊事件與舊渲染迴圈已被清理，已併入全新的 setupInputControl 實作。
 }
 
 // =========================================================================
@@ -4924,7 +4873,7 @@ function initTailscaleGuide() {
         showToast("TURN Servers saved! Reloading...");
         setTimeout(() => window.location.reload(), 1000);
       } catch (e) {
-        alert("JSON 格式錯誤，請確保輸入正確的陣列配置，例如: [{\"urls\":[\"turn:ip:port\"], \"username\":\"u\", \"credential\":\"p\"}]");
+        alert(t("alert_turn_json_error"));
       }
     });
   }
@@ -5020,7 +4969,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   await loadMyMac();
   
   initConnectButton();
-  initLicenseVerification();
+  // initLicenseVerification();
   initPrivacyMode();
   initAutostart();
   initNetworkSimulator();
@@ -5036,7 +4985,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   initRemoteLogsDiagnostics();
   initTailscaleGuide();
   initPinToggle();
-  initVisualViewportListener();
   initFirstRunPrompt();
   
   // 啟動狀態輪詢
@@ -5044,11 +4992,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // 依據 Host 與 Client 的產品定位，動態調整左側控制面板顯隱狀態
   if (isDesktopTauri()) {
-    // Host 被控端 (Windows / macOS)：不需要「建立遠端連線」卡片與離線連線
-    const clientConnSection = document.getElementById("client-connection-section");
-    if (clientConnSection) {
-      clientConnSection.style.display = "none";
-    }
+    // macOS / Windows Desktop: 雙向一體化 (Host + Client)，兩者皆保留，無需隱藏
+    console.log("[UI] Desktop mode: Host and Client UI both enabled.");
   } else {
     // Client 主控端 (iOS / Android / 純網頁)：不需要「本機資訊」、「固定密碼」與「買斷金鑰」
     const localHostInfo = document.getElementById("local-host-info-section");
@@ -5081,7 +5026,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
       if (videoEl && videoEl.style.display === "none") {
         if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
-          console.log("[Signaling] 網頁控制端獲得焦點，且信令未連線，立即重建連線...");
+          console.log(t("log_sig_focus_reconnect"));
           initSignalingClient();
         } else {
           console.log("[Signaling] 網頁控制端獲得焦點，發送 ping 驗證連線...");
@@ -5094,7 +5039,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
       if (!document.hidden && videoEl && videoEl.style.display === "none") {
         if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
-          console.log("[Signaling] 網頁控制端頁面恢復可見，且信令未連線，立即重建連線...");
+          console.log(t("log_sig_visible_reconnect"));
           initSignalingClient();
         }
       }
@@ -5103,7 +5048,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // 啟動信令連線分流：Tauri 桌面端 Host 走 Rust 後端，Web 控制端走 JS 前端
   if (isDesktopTauri()) {
-    console.log("[Signaling] 偵測為 Tauri 桌面環境，註冊 Rust 後端信令維護...");
+    console.log(t("log_sig_tauri_rust_reg"));
     
     // 監聽來自 Rust 的信令連線日誌，自動透過 interceptor 顯示於系統日誌
     listen<string>("rust-signaling-log", (event) => {
@@ -5134,11 +5079,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
       
       if (status === "connecting") {
-        console.log("[Signaling] [Rust] 嘗試連線至信令伺服器...");
+        console.log(t("log_sig_rust_trying"));
       } else if (status === "online") {
-        console.log("[Signaling] [Rust] 已成功連線並登入信令伺服器。");
+        console.log(t("log_sig_rust_connected"));
       } else if (status === "offline") {
-        console.warn("[Signaling] [Rust] 與信令伺服器連線已斷開，準備重新嘗試連線...");
+        console.warn(t("log_sig_rust_disconnected"));
       }
     });
 
@@ -5173,10 +5118,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     // 呼叫後端指令，傳入本機 ID 與當前 PIN 碼
     invoke("start_rust_signaling", { myId: myId, pin: "" })
       .then(() => {
-        console.log("[Signaling] 已成功委託 Rust 後端啟動信令客戶端。");
+        console.log(t("log_sig_rust_delegate_success"));
       })
       .catch((err) => {
-        console.error("[Signaling] 啟動 Rust 信令失敗:", err);
+        console.error(t("log_sig_rust_delegate_fail"), err);
       });
   } else {
     // 網頁瀏覽器控制端（Client）
@@ -5185,40 +5130,30 @@ window.addEventListener("DOMContentLoaded", async () => {
 });
 
 // 初始化行動端虛擬鍵盤拉起時的 Visual Viewport 避讓與對焦自適應
-function initVisualViewportListener() {
-  const container = document.getElementById("remote-video-container");
-  const video = document.getElementById("remote-video") as HTMLVideoElement;
-  if (!container || !video || !window.visualViewport) return;
 
-  const handleViewportChange = () => {
-    // 只有在連線成功、視訊 container 顯示時才進行自適應避讓
-    if (container.style.display === "none") return;
 
-    const vv = window.visualViewport!;
-    // 1. 動態將 container 大小調整為視覺視埠大小，避開軟體鍵盤
-    container.style.width = `${vv.width}px`;
-    container.style.height = `${vv.height}px`;
-    container.style.top = `${vv.offsetTop}px`;
-    container.style.left = `${vv.offsetLeft}px`;
-
-    // 2. 如果鍵盤彈出 (視覺視埠高度明顯縮小，小於 innerHeight 的 85%)
-    const isKeyboardUp = vv.height < window.innerHeight * 0.85;
-    if (isKeyboardUp) {
-      const cursorYPx = currentCursorPercentY * container.clientHeight * videoScale;
-      const targetYPx = vv.height * 0.3; // 我們希望游標位於可見區域上方 30% 處
-      if (cursorYPx > targetYPx) {
-        keyboardOffsetUpdateY = -(cursorYPx - targetYPx);
-      } else {
-        keyboardOffsetUpdateY = 0;
-      }
+// 監聽 VisualViewport 以應對 iOS 鍵盤彈出與自適應縮放
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", () => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    if (vv.height < window.innerHeight * 0.8) {
+      // 鍵盤彈出
+      const offset = window.innerHeight - vv.height;
+      keyboardOffsetUpdateY = -offset; // 往上推動整個鍵盤的高度
       applyVideoTransform();
     } else {
-      // 鍵盤收起，恢復預設 transform
+      // 鍵盤收合
       keyboardOffsetUpdateY = 0;
       applyVideoTransform();
     }
-  };
-
-  window.visualViewport.addEventListener("resize", handleViewportChange);
-  window.visualViewport.addEventListener("scroll", handleViewportChange);
+  });
+  window.visualViewport.addEventListener("scroll", () => {
+     const vv = window.visualViewport;
+     // 防止 iOS 自動滾動整個頁面導致黑屏
+     if (vv && vv.offsetTop > 0) {
+         window.scrollTo(0, 0);
+     }
+  });
 }
+

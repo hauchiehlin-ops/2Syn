@@ -32,9 +32,13 @@ pub enum FrameBuffer {
     #[cfg(target_os = "windows")]
     D3D11Texture(*mut std::ffi::c_void),
     
-    /// macOS CoreVideo 紋理指標 (零拷貝專用)
+    /// macOS/iOS CVPixelBuffer 指標 (零拷貝專用)
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     CVPixelBuffer(*mut std::ffi::c_void),
+
+    /// macOS/iOS IOSurface 指標 (零拷貝專用)
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    IOSurface(*mut std::ffi::c_void),
 }
 
 /// 跨平台硬體畫面擷取 (Screen Capture) 介面
@@ -51,8 +55,8 @@ pub trait VideoHardwareEncoder: Send + Sync {
     /// 初始化編碼器
     fn init(&mut self, params: CodecParams) -> Result<(), CoreError>;
 
-    /// 動態調整編碼位元率與畫面更新率
-    fn reconfigure(&mut self, bitrate_kbps: u32, fps: u32) -> Result<(), CoreError>;
+    /// 動態調整編碼位元率與畫面更新率與解析度
+    fn reconfigure(&mut self, bitrate_kbps: u32, fps: u32, width: u32, height: u32) -> Result<(), CoreError>;
 
     /// 強制輸出 I-Frame (IDR 關鍵影格)
     fn force_intra_frame(&mut self) -> Result<(), CoreError>;
@@ -157,6 +161,7 @@ pub struct AppleHardwareEncoder {
     params: Option<CodecParams>,
     session: Option<CompressionSession>,
     frame_count: i64,
+    surface: Option<IOSurface>,
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -168,7 +173,7 @@ impl Default for AppleHardwareEncoder {
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 impl AppleHardwareEncoder {
-    pub fn new() -> Self { Self { params: None, session: None, frame_count: 0 } }
+    pub fn new() -> Self { Self { params: None, session: None, frame_count: 0, surface: None } }
     
     fn recreate_session(&mut self, width: u32, height: u32) -> Result<(), CoreError> {
         let codec = match self.params.as_ref().map(|p| p.codec_type).unwrap_or(VideoCodecType::H264) {
@@ -176,10 +181,20 @@ impl AppleHardwareEncoder {
             VideoCodecType::H265 => videotoolbox::Codec::HEVC,
             _ => videotoolbox::Codec::H264, // 預設使用 H.264
         };
-        let builder = CompressionSession::builder(width as i32, height as i32, codec);
+        let builder = CompressionSession::builder(width as i32, height as i32, codec)
+            .with_max_keyframe_interval(30); // 每秒強制產生一個關鍵影格，避免網路掉包導致永久卡死
         if let Ok(session) = builder.build() {
             // 可在此進一步設定 bit rate (例如 session.set_average_bitrate(...))
             self.session = Some(session);
+            // 同時快取並建立對應寬高之 IOSurface 緩衝區
+            // 注意：bytes_per_row 必須設為 0 讓 macOS 自動選擇最佳對齊長度（通常是 64 或 256 的倍數）
+            // 否則如果傳入 width*4，在非對齊的解析度下，VideoToolbox 讀取時會發生 GPU OutOfBounds，導致整台 Mac 死機！
+            self.surface = IOSurface::create(
+                width as usize,
+                height as usize,
+                u32::from_be_bytes(*b"BGRA"),
+                0
+            );
             Ok(())
         } else {
             Err(CoreError::HardwareCodecError("建立 VTCompressionSession 失敗".to_string()))
@@ -197,14 +212,14 @@ impl VideoHardwareEncoder for AppleHardwareEncoder {
         Ok(())
     }
 
-    fn reconfigure(&mut self, bitrate_kbps: u32, fps: u32) -> Result<(), CoreError> {
+    fn reconfigure(&mut self, bitrate_kbps: u32, fps: u32, target_width: u32, target_height: u32) -> Result<(), CoreError> {
         if let Some(ref mut p) = self.params {
             p.bitrate_kbps = bitrate_kbps;
             p.fps = fps;
+            p.width = target_width;
+            p.height = target_height;
             // 重新建立 Session 來套用新參數 (因 videotoolbox-rs 缺乏動態 set_property 的 safe 封裝)
-            let w = p.width;
-            let h = p.height;
-            self.recreate_session(w, h)?;
+            self.recreate_session(target_width, target_height)?;
             Ok(())
         } else {
             Err(CoreError::HardwareCodecError("編碼器未初始化".to_string()))
@@ -217,33 +232,65 @@ impl VideoHardwareEncoder for AppleHardwareEncoder {
     }
 
     fn encode_rgba_frame(&mut self, rgba_frame: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
-        if let Some(ref mut p) = self.params {
-            if p.width != width || p.height != height {
-                p.width = width;
-                p.height = height;
-                self.recreate_session(width, height)?;
-            }
-        }
+        let (encode_w, encode_h) = if let Some(ref p) = self.params {
+            (p.width, p.height)
+        } else {
+            (width, height)
+        };
+        crate::debug_log!("CODEC", "encode_rgba_frame start input_w={} input_h={} encode_w={} encode_h={}", width, height, encode_w, encode_h);
         
         if let Some(ref session) = self.session {
-            // 建立 IOSurface (使用 32BGRA 格式，CoreGraphics 預設較友善此格式，且 VideoToolbox 可硬體轉換)
-            // 'BGRA' = 0x42475241
-            // 這裡假定 xcap 傳遞進來的是 RGBA。
-            let surface = IOSurface::create(
-                width as usize, 
-                height as usize, 
-                u32::from_be_bytes(*b"RGBA"),
-                (width * 4) as usize
-            ).ok_or_else(|| CoreError::HardwareCodecError("IOSurface 建立失敗".into()))?;
+            // 取得快取的 IOSurface
+            let surface = self.surface.as_ref().ok_or_else(|| {
+                CoreError::HardwareCodecError("IOSurface 緩衝區不存在".into())
+            })?;
             
             if let Ok(mut guard) = surface.lock_read_write() {
+                let dest_bpr = surface.bytes_per_row();
                 if let Some(dest) = guard.as_slice_mut() {
-                    let len = std::cmp::min(dest.len(), rgba_frame.len());
-                    dest[..len].copy_from_slice(&rgba_frame[..len]);
+                    if width == encode_w && height == encode_h {
+                        // 不能直接 flat copy，必須根據 dest_bpr 逐行拷貝以避開對齊的 Padding
+                        let src_bpr = width as usize * 4;
+                        for row in 0..height as usize {
+                            let dest_row_start = row * dest_bpr;
+                            let src_row_start = row * src_bpr;
+                            let row_len = src_bpr.min(dest_bpr);
+                            if src_row_start + row_len <= rgba_frame.len() && dest_row_start + row_len <= dest.len() {
+                                dest[dest_row_start..dest_row_start + row_len].copy_from_slice(&rgba_frame[src_row_start..src_row_start + row_len]);
+                            }
+                        }
+                    } else {
+                        // 零記憶體分配 Nearest 縮放
+                        let scale_x = width as f32 / encode_w as f32;
+                        let scale_y = height as f32 / encode_h as f32;
+                        
+                        for row in 0..encode_h {
+                            let input_row = ((row as f32 * scale_y) as u32).min(height - 1);
+                            let dest_row_offset = row as usize * dest_bpr; // 使用正確的 destination row stride
+                            let src_row_offset = input_row as usize * width as usize * 4;
+                            
+                            for col in 0..encode_w {
+                                let input_col = ((col as f32 * scale_x) as u32).min(width - 1);
+                                  let dest_offset = dest_row_offset + col as usize * 4;
+                                  let src_offset = src_row_offset + input_col as usize * 4;
+                                  
+                                  if src_offset + 3 < rgba_frame.len() && dest_offset + 3 < dest.len() {
+                                      dest[dest_offset] = rgba_frame[src_offset];         // B
+                                      dest[dest_offset + 1] = rgba_frame[src_offset + 1]; // G
+                                      dest[dest_offset + 2] = rgba_frame[src_offset + 2]; // R
+                                      dest[dest_offset + 3] = rgba_frame[src_offset + 3]; // A
+                                  }
+                            }
+                        }
+                    }
                 }
             }
             
-            match session.encode(&surface, (self.frame_count, 30)) {
+            crate::debug_log!("CODEC", "Before VTCompressionSession::encode frame_count={}", self.frame_count);
+            let encode_res = session.encode(surface, (self.frame_count, 30));
+            crate::debug_log!("CODEC", "After VTCompressionSession::encode result={}", encode_res.is_ok());
+            
+            match encode_res {
                 Ok(encoded_frame) => {
                     self.frame_count += 1;
                     Ok(encoded_frame.data)
@@ -256,11 +303,94 @@ impl VideoHardwareEncoder for AppleHardwareEncoder {
     }
 
     fn encode_frame_zero_copy(&mut self, gpu_texture: &FrameBuffer) -> Result<Vec<u8>, CoreError> {
-        if let FrameBuffer::CVPixelBuffer(_pixel_buffer_ptr) = gpu_texture {
-            // VideoToolbox 零拷貝編碼核心邏輯：
-            // 1. 將 CVPixelBufferRef 直接傳遞給 VTCompressionSessionEncodeFrame
-            // 2. 這使 OS 能夠直接從 GPU FrameBuffer 記憶體壓縮，避開記憶體拷貝
-            Ok(vec![0x00, 0x00, 0x00, 0x01, 0x25])
+        if let FrameBuffer::IOSurface(iosurface_ptr) = gpu_texture {
+            if let Some(ref session) = self.session {
+                // 將指標轉換回 apple_cf::iosurface::IOSurface
+                // 因為我們借用這個指標，所以使用 ManuallyDrop 避免提早被釋放 (減少 ref count)
+                if let Some(surface_val) = apple_cf::iosurface::IOSurface::from_raw(*iosurface_ptr) {
+                    let surface_wrapper = std::mem::ManuallyDrop::new(surface_val);
+                    
+                    crate::debug_log!("CODEC", "Before VTCompressionSession::encode (Zero-Copy)");
+                    let encode_res = session.encode(&surface_wrapper, (self.frame_count, 30));
+                    crate::debug_log!("CODEC", "After VTCompressionSession::encode (Zero-Copy) result={}", encode_res.is_ok());
+                    
+                    match encode_res {
+                        Ok(encoded_frame) => {
+                            self.frame_count += 1;
+                            
+                            // 轉換 AVCC 至 Annex B，並在 Keyframe 插入 SPS/PPS
+                            let mut out = Vec::with_capacity(encoded_frame.data.len() + 100);
+                            let mut is_keyframe = false;
+                            
+                            let mut offset = 0;
+                            while offset + 4 <= encoded_frame.data.len() {
+                                let nalu_len = u32::from_be_bytes(
+                                    encoded_frame.data[offset..offset + 4].try_into().unwrap()
+                                ) as usize;
+                                
+                                if offset + 4 + nalu_len > encoded_frame.data.len() {
+                                    break;
+                                }
+                                
+                                let nalu_type = encoded_frame.data[offset + 4] & 0x1F;
+                                if nalu_type == 5 {
+                                    is_keyframe = true;
+                                }
+                                
+                                out.extend_from_slice(&[0, 0, 0, 1]);
+                                out.extend_from_slice(&encoded_frame.data[offset + 4 .. offset + 4 + nalu_len]);
+                                
+                                offset += 4 + nalu_len;
+                            }
+                            
+                            if is_keyframe {
+                                if let Some(cm_buf) = encoded_frame.cm_sample_buffer() {
+                                    if let Some(format_desc) = cm_buf.format_description() {
+                                        extern "C" {
+                                            fn CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                                                videoDesc: *const std::ffi::c_void,
+                                                parameterSetIndex: usize,
+                                                parameterSetPointerOut: *mut *const u8,
+                                                parameterSetSizeOut: *mut usize,
+                                                parameterSetCountOut: *mut usize,
+                                                NALUnitHeaderLengthOut: *mut std::ffi::c_int,
+                                            ) -> i32;
+                                        }
+                                        
+                                        let mut final_out = Vec::with_capacity(out.len() + 100);
+                                        let format_ptr = format_desc.as_ptr() as *const std::ffi::c_void;
+                                        let mut count = 0;
+                                        let mut dummy_len = 0;
+                                        
+                                        for i in 0..2 { // 0: SPS, 1: PPS
+                                            let mut ptr: *const u8 = std::ptr::null();
+                                            let mut size: usize = 0;
+                                            let status = unsafe {
+                                                CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                                                    format_ptr, i, &mut ptr, &mut size, &mut count, &mut dummy_len
+                                                )
+                                            };
+                                            if status == 0 && !ptr.is_null() && size > 0 {
+                                                final_out.extend_from_slice(&[0, 0, 0, 1]);
+                                                final_out.extend_from_slice(unsafe { std::slice::from_raw_parts(ptr, size) });
+                                            }
+                                        }
+                                        final_out.extend_from_slice(&out);
+                                        return Ok(final_out);
+                                    }
+                                }
+                            }
+                            
+                            Ok(out)
+                        }
+                        Err(e) => Err(CoreError::HardwareCodecError(format!("零拷貝編碼失敗: {:?}", e))),
+                    }
+                } else {
+                    Err(CoreError::HardwareCodecError("無效的 IOSurface 指標".to_string()))
+                }
+            } else {
+                Err(CoreError::HardwareCodecError("VTCompressionSession 不存在".to_string()))
+            }
         } else {
             Err(CoreError::HardwareCodecError("不支援的編碼紋理類型".to_string()))
         }
@@ -311,7 +441,7 @@ impl CaptureCodecFactory {
         struct DummyEncoder;
         impl VideoHardwareEncoder for DummyEncoder {
             fn init(&mut self, _params: CodecParams) -> Result<(), CoreError> { Ok(()) }
-            fn reconfigure(&mut self, _bitrate_kbps: u32, _fps: u32) -> Result<(), CoreError> { Ok(()) }
+            fn reconfigure(&mut self, _bitrate_kbps: u32, _fps: u32, _w: u32, _h: u32) -> Result<(), CoreError> { Ok(()) }
             fn force_intra_frame(&mut self) -> Result<(), CoreError> { Ok(()) }
             fn encode_rgba_frame(&mut self, _f: &[u8], _w: u32, _h: u32) -> Result<Vec<u8>, CoreError> { Ok(vec![]) }
             fn encode_frame_zero_copy(&mut self, _tex: &FrameBuffer) -> Result<Vec<u8>, CoreError> { Ok(vec![]) }

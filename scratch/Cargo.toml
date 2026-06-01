@@ -1,0 +1,9 @@
+[package]
+name = "test_capscreen"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+capscreen_macos = "0.1.3"

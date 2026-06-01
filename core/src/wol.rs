@@ -39,9 +39,18 @@ pub async fn wake_on_lan(mac_str: &str) -> Result<(), String> {
 
 /// 取得本機的 MAC 地址
 pub fn get_local_mac_address() -> Result<String, String> {
-    match mac_address::get_mac_address() {
-        Ok(Some(ma)) => Ok(ma.to_string().to_uppercase()),
-        Ok(None) => Err("無法找到 MAC 地址".to_string()),
-        Err(e) => Err(format!("取得 MAC 地址失敗: {}", e)),
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        match mac_address::get_mac_address() {
+            Ok(Some(ma)) => Ok(ma.to_string().to_uppercase()),
+            Ok(None) => Err("無法找到 MAC 地址".to_string()),
+            Err(e) => Err(format!("取得 MAC 地址失敗: {}", e)),
+        }
+    }
+
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        // 行動端因系統安全隱私沙盒限制，一律傳回標準虛擬 MAC 地址
+        Ok("02:00:00:00:00:00".to_string())
     }
 }

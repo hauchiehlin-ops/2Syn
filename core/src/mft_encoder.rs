@@ -122,7 +122,7 @@ impl VideoHardwareEncoder for WindowsHardwareEncoder {
         Ok(())
     }
 
-    fn reconfigure(&mut self, bitrate_kbps: u32, fps: u32) -> Result<(), CoreError> {
+    fn reconfigure(&mut self, bitrate_kbps: u32, fps: u32, _target_width: u32, _target_height: u32) -> Result<(), CoreError> {
         if let Some(ref mut p) = self.params {
             p.bitrate_kbps = bitrate_kbps;
             p.fps = fps;

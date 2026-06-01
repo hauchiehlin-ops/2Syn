@@ -317,16 +317,27 @@ async fn handle_remote_offer_as_host(
         .await
         .map_err(|e| e.to_string())?;
 
+    syn_core::debug_log!("TAURI", "Adding video track");
     // 加入視訊軌道並啟動擷取迴圈
     let video_track = session.add_video_track().await.map_err(|e| e.to_string())?;
-    let streamer = syn_core::video::VideoStreamer::new(video_track).map_err(|e| e.to_string())?;
+    syn_core::debug_log!("TAURI", "Creating VideoStreamer");
+    let mut streamer = syn_core::video::VideoStreamer::new(video_track).map_err(|e| e.to_string())?;
+    syn_core::debug_log!("TAURI", "VideoStreamer created");
 
     // 加入音訊軌道並啟動擷取迴圈 (P1-A)
+    syn_core::debug_log!("TAURI", "Adding audio track");
     let audio_track = session.add_audio_track().await.map_err(|e| e.to_string())?;
+    syn_core::debug_log!("TAURI", "Creating AudioStreamer");
     let audio_streamer =
         syn_core::audio::AudioStreamer::new(audio_track).map_err(|e| e.to_string())?;
+    syn_core::debug_log!("TAURI", "AudioStreamer created");
+    use tauri::Manager;
+    let app_state = app_handle.state::<AppState>();
+    let active_webrtc = app_state.has_active_webrtc.clone();
+    let active_webrtc_audio = active_webrtc.clone();
+    
     tokio::spawn(async move {
-        if let Err(e) = audio_streamer.start().await {
+        if let Err(e) = audio_streamer.start(active_webrtc_audio).await {
             eprintln!("[Audio] Failed to start audio streamer: {}", e);
         }
     });
@@ -339,7 +350,6 @@ async fn handle_remote_offer_as_host(
         }
     });
 
-    use tauri::Manager;
     let state = app_handle.state::<AppState>();
     let config_rx = state.connection_manager.subscribe();
 
@@ -360,9 +370,13 @@ async fn handle_remote_offer_as_host(
         session.get_peer_connection(),
     );
 
+    let active_webrtc = app_state.has_active_webrtc.clone();
+    syn_core::debug_log!("TAURI", "Starting video capture loop");
+    
     streamer
-        .start_capture_loop(Some(status_tx), config_rx, monitor_rx)
+        .start_capture_loop(Some(status_tx), config_rx, monitor_rx, active_webrtc)
         .await;
+    syn_core::debug_log!("TAURI", "Video capture loop started");
 
     let pc = session.get_peer_connection();
 
@@ -416,10 +430,7 @@ async fn handle_remote_offer_as_host(
             let app = app_clone2.clone();
             Box::pin(async move {
                 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
-                let active = matches!(
-                    state_val,
-                    RTCPeerConnectionState::Connected | RTCPeerConnectionState::Connecting
-                );
+                let active = matches!(state_val, RTCPeerConnectionState::Connected);
                 let app_state = app.state::<AppState>();
                 app_state
                     .has_active_webrtc
@@ -1096,8 +1107,8 @@ async fn trigger_network_simulation(
 mod permissions;
 
 #[tauri::command]
-fn check_macos_permissions() -> bool {
-    permissions::check_and_request_permissions()
+async fn check_macos_permissions(window: tauri::Window) -> Result<bool, String> {
+    Ok(permissions::check_and_request_permissions(&window))
 }
 
 /// 接收來自前端 WebRTC Data Channel 的二進位輸入封包並執行（被控端）
@@ -1154,6 +1165,11 @@ async fn wake_device(mac: String) -> Result<(), String> {
 #[tauri::command]
 fn get_local_mac_address() -> Result<String, String> {
     syn_core::wol::get_local_mac_address()
+}
+
+#[tauri::command]
+fn get_app_product_name(app: tauri::AppHandle) -> String {
+    app.config().product_name.clone().unwrap_or_else(|| "2syn Host".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1235,7 +1251,8 @@ pub fn run() {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             write_clipboard,
             wake_device,
-            get_local_mac_address
+            get_local_mac_address,
+            get_app_product_name
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 應用程序執行時發生錯誤");

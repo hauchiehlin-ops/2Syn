@@ -1,0 +1,74 @@
+[1780154737005] [TAURI] Adding video track
+[1780154737011] [TAURI] Creating VideoStreamer
+[1780154737094] [TAURI] VideoStreamer created
+[1780154737098] [TAURI] Adding audio track
+[1780154737103] [TAURI] Creating AudioStreamer
+[1780154737107] [TAURI] AudioStreamer created
+[1780154737111] [TAURI] Starting video capture loop
+[1780154737114] [TAURI] Video capture loop started
+[1780154737342] [AUDIO] macOS audio sample_count=1 active=false
+[1780154737526] [VIDEO] Start CGDisplay capture display_id=2
+[1780154737575] [VIDEO] CGDisplay captured w=3840 h=2160 bytes_per_row=15360
+[1780154737588] [VIDEO] Before encoder.encode_rgba_frame frame_count=1 bytes_len=33177600 w=3840 h=2160
+[1780154737592] [CODEC] encode_rgba_frame start input_w=3840 input_h=2160 encode_w=1920 encode_h=1080
+[1780154737630] [CODEC] Before VTCompressionSession::encode frame_count=0
+[1780155207948] [TAURI] Adding video track
+[1780155207955] [TAURI] Creating VideoStreamer
+[1780155208037] [TAURI] VideoStreamer created
+[1780155208041] [TAURI] Adding audio track
+[1780155208046] [TAURI] Creating AudioStreamer
+[1780155208051] [TAURI] AudioStreamer created
+[1780155208055] [TAURI] Starting video capture loop
+[1780155208059] [TAURI] Video capture loop started (SKIPPED FOR DEBUG)
+[1780155208289] [AUDIO] macOS audio sample_count=1 active=false
+[1780155292095] [TAURI] Adding video track
+[1780155292099] [TAURI] Creating VideoStreamer
+[1780155292169] [TAURI] VideoStreamer created
+[1780155292174] [TAURI] Adding audio track
+[1780155292177] [TAURI] Creating AudioStreamer
+[1780155292181] [TAURI] AudioStreamer created
+[1780155292185] [TAURI] Starting video capture loop
+[1780155292187] [TAURI] Video capture loop started (SKIPPED FOR DEBUG)
+[1780155292308] [AUDIO] macOS audio sample_count=1 active=false
+[1780155482572] [TAURI] Adding video track
+[1780155482578] [TAURI] Creating VideoStreamer
+[1780155482645] [TAURI] VideoStreamer created
+[1780155482649] [TAURI] Adding audio track
+[1780155482652] [TAURI] Creating AudioStreamer
+[1780155482655] [TAURI] AudioStreamer created
+[1780155482658] [TAURI] Starting video capture loop
+[1780155482661] [TAURI] Video capture loop started (SKIPPED FOR DEBUG)
+[1780155482772] [AUDIO] macOS audio sample_count=1 active=false
+[1780155731019] [TAURI] Adding video track
+[1780155731025] [TAURI] Creating VideoStreamer
+[1780155731092] [TAURI] VideoStreamer created
+[1780155731096] [TAURI] Adding audio track
+[1780155731101] [TAURI] Creating AudioStreamer
+[1780155731104] [TAURI] AudioStreamer created
+[1780155731107] [TAURI] Starting video capture loop
+[1780155731110] [TAURI] Video capture loop started (SKIPPED FOR DEBUG)
+[1780155731225] [AUDIO] macOS audio sample_count=1 active=false
+[1780156204612] [TAURI] Adding video track
+[1780156204618] [TAURI] Creating VideoStreamer
+[1780156204686] [TAURI] VideoStreamer created
+[1780156204689] [TAURI] Adding audio track
+[1780156204694] [TAURI] Creating AudioStreamer
+[1780156204698] [TAURI] AudioStreamer created
+[1780156204702] [TAURI] Starting video capture loop
+[1780156204705] [TAURI] Video capture loop started
+[1780156204829] [AUDIO] macOS audio sample_count=1 active=false
+[1780156205615] [VIDEO] Before encoder.encode_rgba_frame frame_count=1 bytes_len=33177600 w=3840 h=2160
+[1780156205620] [CODEC] encode_rgba_frame start input_w=3840 input_h=2160 encode_w=1920 encode_h=1080
+[1780156205655] [CODEC] Before VTCompressionSession::encode frame_count=0
+[1780158333818] [TAURI] Adding video track
+[1780158333824] [TAURI] Creating VideoStreamer
+[1780158333916] [TAURI] VideoStreamer created
+[1780158333919] [TAURI] Adding audio track
+[1780158333924] [TAURI] Creating AudioStreamer
+[1780158333928] [TAURI] AudioStreamer created
+[1780158333932] [TAURI] Starting video capture loop
+[1780158333935] [TAURI] Video capture loop started
+[1780158334145] [AUDIO] macOS audio sample_count=1 active=false
+[1780158334842] [VIDEO] Before encoder.encode_rgba_frame frame_count=1 bytes_len=33177600 w=3840 h=2160
+[1780158334845] [CODEC] encode_rgba_frame start input_w=3840 input_h=2160 encode_w=1920 encode_h=1080
+[1780158334877] [CODEC] Before VTCompressionSession::encode frame_count=0

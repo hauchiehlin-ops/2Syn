@@ -37,14 +37,18 @@ pub struct QualityConfig {
     pub target_fps: u32,
     pub color_format: ColorFormat,
     pub bitrate_limit_kbps: u32,
+    pub target_width: u32,
+    pub target_height: u32,
 }
 
 impl Default for QualityConfig {
     fn default() -> Self {
         Self {
-            target_fps: 144,
-            color_format: ColorFormat::Yuv444,
-            bitrate_limit_kbps: 50_000, // 預設 50 Mbps
+            target_fps: 60,
+            color_format: ColorFormat::Yuv420,
+            bitrate_limit_kbps: 8_000, // 預設 8 Mbps
+            target_width: 1920, // 預設 1080p
+            target_height: 1080,
         }
     }
 }
@@ -102,6 +106,8 @@ impl ConnectionManager {
         if new_config.target_fps != current_c.target_fps
             || new_config.color_format != current_c.color_format
             || new_config.bitrate_limit_kbps != current_c.bitrate_limit_kbps
+            || new_config.target_width != current_c.target_width
+            || new_config.target_height != current_c.target_height
         {
             *current_c = new_config.clone();
             let _ = self.config_tx.send(new_config);
@@ -118,6 +124,8 @@ impl ConnectionManager {
             config.target_fps = 30;
             config.bitrate_limit_kbps = 2000; // 降低頻寬以適應中繼
             config.color_format = ColorFormat::Yuv420;
+            config.target_width = 1280;
+            config.target_height = 720;
         }
 
         // 2. 基於網路指標 (ABR: Adaptive Bitrate) 的動態調整
@@ -125,13 +133,19 @@ impl ConnectionManager {
         if metrics.rtt_ms > 150 || metrics.packet_loss_rate > 0.05 {
             config.target_fps = 30;
             config.bitrate_limit_kbps = 1000;
+            config.target_width = 854;
+            config.target_height = 480;
         } else if metrics.rtt_ms > 80 || metrics.packet_loss_rate > 0.01 {
             config.target_fps = 60;
             config.bitrate_limit_kbps = 3000;
+            config.target_width = 1280;
+            config.target_height = 720;
         } else {
             // 網路暢通，提升至最高畫質
             config.target_fps = 60;
             config.bitrate_limit_kbps = 8000;
+            config.target_width = 1920;
+            config.target_height = 1080;
         }
 
         config
@@ -251,6 +265,25 @@ impl WebRtcSession {
             .map_err(|e| CoreError::NetworkError(format!("無法加入視訊軌道: {}", e)))?;
 
         Ok(video_track)
+    }
+
+    /// 加入第二條「感知優先 (Foveated)」視訊串流軌道，用於游標周圍的高畫質疊加
+    pub async fn add_foveated_video_track(&self) -> Result<Arc<TrackLocalStaticSample>, CoreError> {
+        let foveated_track = Arc::new(TrackLocalStaticSample::new(
+            RTCRtpCodecCapability {
+                mime_type: "video/H264".to_owned(),
+                ..Default::default()
+            },
+            "foveated".to_owned(),
+            "webrtc-rs".to_owned(),
+        ));
+
+        self.peer_connection
+            .add_track(Arc::clone(&foveated_track) as Arc<dyn TrackLocal + Send + Sync>)
+            .await
+            .map_err(|e| CoreError::NetworkError(format!("無法加入 Foveated 視訊軌道: {}", e)))?;
+
+        Ok(foveated_track)
     }
 
     /// 加入本機系統音訊擷取的音訊串流軌道
@@ -392,6 +425,9 @@ impl WebRtcSession {
         data_channel.on_open(Box::new(move || {
             let dc = Arc::clone(&dc_clone_for_open);
             Box::pin(async move {
+                // [FIX] xcap::Monitor::all() 呼叫了底層 macOS API (NSScreen/CGDisplay)
+                // 若在 WebRTC 的背景執行緒中呼叫，會直接導致 WindowServer 瞬間死鎖 (Mac 死機)
+                /*
                 let monitors = xcap::Monitor::all().unwrap_or_default();
                 let mut monitor_list = Vec::new();
                 for (i, m) in monitors.iter().enumerate() {
@@ -409,6 +445,8 @@ impl WebRtcSession {
                 if let Ok(json_str) = serde_json::to_string(&msg) {
                     let _ = dc.send_text(json_str).await;
                 }
+                */
+                println!("[SystemControl] DataChannel opened (Monitor detection temporarily disabled to prevent crash)");
             })
         }));
 

@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="hsl(220, 80%, 96%)">
-  <meta name="description" content="2syn — Secure WebRTC remote desktop with end-to-end encryption.">
+  <meta name="description" content="2syn_Duel — Secure WebRTC remote desktop with end-to-end encryption.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>2syn Remote Desktop</title>
+  <title>2syn_Duel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
@@ -16,7 +16,7 @@
 </head>
 <body>
   <!-- Remote Video Container (Hidden until connected) -->
-  <div id="remote-video-container" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden; z-index: 100; background: #000; touch-action: none;">
+  <div id="remote-video-container" tabindex="0" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden; z-index: 100; background: #000; touch-action: none; outline: none;">
     <video id="remote-video" autoplay playsinline muted style="display: block; width: 100%; height: 100%; object-fit: contain; transform-origin: center center; touch-action: none;"></video>
     <div id="pointer-lock-tooltip" style="display: none; position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 110; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); color: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; pointer-events: none; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: opacity 0.3s ease;">
       Pointer locked. Press ESC to exit.
@@ -26,7 +26,7 @@
       <span style="font-weight: 600; color: #fca5a5; text-align: center;" id="txt-video-error-title">⚠️ No Video Stream Detected</span>
       <span style="font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.4; display: block;" id="txt-video-error-desc">If the remote device is macOS, please ensure "Screen Recording" and "Accessibility" permissions are granted in System Settings.</span>
       <div style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; justify-content: center;">
-        <button id="btn-video-retry-play" style="background: var(--accent-color, #3b82f6); border: none; color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Force Play</button>
+        <button id="btn-video-retry-play" style="background: var(--accent-color, #3b82f6); border: none; color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;"><span id="txt-force-play-btn">Force Play</span></button>
         <button id="btn-video-diagnose" style="background: #10b981; border: none; color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Diagnose Host</button>
         <button id="btn-video-error-close" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Dismiss</button>
     </div>
@@ -35,6 +35,7 @@
       <span style="font-size: 9px; opacity: 0.5; display: block; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Input Preview</span>
       <span id="keyboard-preview-text"></span>
     </div>
+  </div>
   </div>
   <!-- 行動端磨砂玻璃懸浮控制面板 -->
   <div id="mobile-control-orb" style="display: none; position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1100; flex-direction: column; align-items: center; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);">
@@ -64,69 +65,10 @@
     </div>
   </div>
   
-  <!-- 虛擬滑鼠游標 (給觸控或隱藏游標時對位用) -->
-  <div id="remote-cursor" style="display: none; position: fixed; pointer-events: none; z-index: 105; width: 12px; height: 12px; transform: translate(-2px, -1px);">
-    <svg width="100%" height="100%" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));">
-      <path d="M4 2 L4 22 L11 15 L16 23 L18 22 L13 14 L20 13 Z" fill="black" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
-    </svg>
-  </div>
-
   <button id="btn-mobile-keyboard" style="display: none; position: fixed; bottom: 20px; right: 20px; z-index: 110; background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.4); border-radius: 50%; width: 50px; height: 50px; font-size: 24px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;">⌨️</button>
 
-  <!-- 仿 iOS AssistiveTouch 智能圓形懸浮控制轉盤 -->
-  <div id="mobile-floating-dial" class="floating-dial-container" style="display: none;">
-    <!-- 圓形放射子選單項目 -->
-    <button class="dial-item" id="dial-item-keyboard" title="Keyboard">
-      <span class="dial-icon">⌨️</span>
-      <span class="dial-label">Keyboard</span>
-    </button>
-    <button class="dial-item" id="dial-item-mode" title="Touch Mode">
-      <span class="dial-icon">🎯</span>
-      <span class="dial-label">Mode</span>
-    </button>
-    <button class="dial-item" id="dial-item-display" title="Display Mode">
-      <span class="dial-icon">🔍</span>
-      <span class="dial-label">Display</span>
-    </button>
-    <button class="dial-item" id="dial-item-shortcuts" title="Shortcuts">
-      <span class="dial-icon">⚡</span>
-      <span class="dial-label">Shortcuts</span>
-    </button>
-    <button class="dial-item" id="dial-item-logs" title="Diagnostic Logs">
-      <span class="dial-icon">⚙️</span>
-      <span class="dial-label">Logs</span>
-    </button>
-    <button class="dial-item" id="dial-item-quality" title="Quality Presets">
-      <span class="dial-icon">🎬</span>
-      <span class="dial-label">Quality</span>
-    </button>
-    
-    <!-- 懸浮球本體 (Trigger) -->
-    <div id="mobile-floating-dial-trigger" class="dial-trigger pulse">
-      <div class="dial-trigger-inner"></div>
-    </div>
-  </div>
 
-  <!-- 畫質自適應調適面板 -->
-  <div id="mobile-quality-panel" class="quality-panel-container" style="display: none;">
-    <div class="quality-panel-title">🎬 Stream Quality</div>
-    <div class="quality-btn-group">
-      <button class="quality-btn" id="btn-quality-fluid" data-preset="fluid">
-        <div class="quality-btn-name">Fluid</div>
-        <div class="quality-btn-info">120fps / 4:2:0 / 6M</div>
-      </button>
-      <button class="quality-btn active" id="btn-quality-retina" data-preset="retina">
-        <div class="quality-btn-name">Retina</div>
-        <div class="quality-btn-info">60fps / 4:4:4 / 18M</div>
-      </button>
-      <button class="quality-btn" id="btn-quality-auto" data-preset="auto">
-        <div class="quality-btn-name">Auto</div>
-        <div class="quality-btn-info">Adaptive RTT</div>
-      </button>
-    </div>
-  </div>
-
-  <textarea id="hidden-keyboard-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="position: fixed; top: -100px; left: 0; opacity: 0.01; width: 1px; height: 1px; border: none; padding: 0; margin: 0; pointer-events: auto; z-index: 1000;"></textarea>
+  <textarea id="hidden-keyboard-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.01; width: 1px; height: 1px; border: none; padding: 0; margin: 0; pointer-events: none; z-index: 1000;"></textarea>
 
   <!-- 景深霓虹背景光暈球 -->
   <div class="orb orb-1"></div>
@@ -138,10 +80,10 @@
     <header class="app-header">
       <div class="logo">
         <span class="logo-symbol">⚡</span>
-        <span class="logo-text">2syn</span>
+        <span class="logo-text">2syn_Duel</span>
       </div>
       <div class="header-actions">
-        <button id="btn-show-help" class="help-trigger-btn" title="Help & Privacy">❔</button>
+        <button id="btn-show-help" class="help-trigger-btn" title="Help & Privacy">🛟</button>
         <select id="language-select" class="language-dropdown">
           <option value="zh-TW">繁體中文</option>
           <option value="zh-CN">简体中文</option>
@@ -176,8 +118,8 @@
             <p id="device-book-empty-msg" style="font-size: 12px; color: var(--text-secondary); text-align: center; padding: 12px 0; display: none;">尚未儲存任何裝置</p>
             
             <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
-              <button id="btn-import-device-book" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">Import JSON</button>
-              <button id="btn-export-device-book" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">Export JSON</button>
+              <button id="btn-import-device-book" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;"><span id="txt-import-json-btn">Import JSON</span></button>
+              <button id="btn-export-device-book" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;"><span id="txt-export-json-btn">Export JSON</span></button>
             </div>
             <input type="file" id="input-import-device-book" accept=".json" style="display: none;" />
           </div>
@@ -191,7 +133,7 @@
             <div class="input-group">
               <label for="remote-id-input">
                 <span id="lbl-remote-id">Remote Device ID</span>
-                <button class="btn-info" data-help="remote-id" type="button">ⓘ</button>
+                <button class="btn-info" data-help="remote-id" type="button">💡</button>
               </label>
               <div id="help-remote-id" class="help-block"></div>
               <input type="text" id="remote-id-input" name="remote-id" placeholder="Enter 9-digit Device ID" autocomplete="username" maxlength="11">
@@ -200,7 +142,7 @@
             <div class="input-group">
               <label for="access-pin-input">
                 <span id="lbl-access-pin">Access PIN</span>
-                <button class="btn-info" data-help="access-pin" type="button">ⓘ</button>
+                <button class="btn-info" data-help="access-pin" type="button">💡</button>
               </label>
               <div id="help-access-pin" class="help-block"></div>
               <div style="position: relative; display: flex; align-items: center; width: 100%;">
@@ -218,8 +160,8 @@
           <div class="offline-sdp-section">
             <div class="toggle-row">
               <span style="font-weight: 600; font-size: 13px; display: inline-flex; align-items: center;">
-                <span id="lbl-offline-mode">Offline Connection (SDP)</span>
-                <button class="btn-info" data-help="offline-sdp" type="button">ⓘ</button>
+                <span id="lbl-offline-mode"><span id="txt-offline-sdp-title">Offline Connection (SDP)</span></span>
+                <button class="btn-info" data-help="offline-sdp" type="button">💡</button>
               </span>
               <label class="switch">
                 <input type="checkbox" id="chk-offline-sdp-mode">
@@ -228,10 +170,10 @@
             </div>
             <div id="help-offline-sdp" class="help-block"></div>
             <div id="offline-sdp-panel" class="offline-panel-hidden" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px;">
-              <button id="btn-gen-local-sdp" class="btn-secondary">Generate & Copy Local SDP Offer</button>
+              <button id="btn-gen-local-sdp" class="btn-secondary"><span id="txt-gen-sdp-btn">Generate & Copy Local SDP Offer</span></button>
               <textarea id="txt-local-sdp" readonly placeholder="Local SDP will be generated here" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 6px; border-radius: 6px; height: 70px; resize: none;"></textarea>
               
-              <label for="txt-remote-sdp" id="lbl-remote-sdp" style="font-size: 11px; color: var(--text-muted);">Enter Remote SDP Answer/Offer</label>
+              <label for="txt-remote-sdp" id="lbl-remote-sdp" style="font-size: 11px; color: var(--text-muted);"><span id="txt-enter-sdp-label">Enter Remote SDP Answer/Offer</span></label>
               <textarea id="txt-remote-sdp" placeholder="Paste Remote SDP here" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 6px; border-radius: 6px; height: 70px; resize: none;"></textarea>
               <button id="btn-apply-remote-sdp" class="btn-primary" style="padding: 8px;">Establish Connection</button>
             </div>
@@ -245,33 +187,33 @@
           <!-- macOS Permission Warning Banner -->
           <div id="permission-warning-banner" class="alert-banner-mac" style="display: none;">
             <span class="warning-icon">⚠️</span>
-            <span id="txt-permission-warning" style="flex: 1;">macOS 系統權限不足，將導致遠端控制黑屏！</span>
+            <span id="txt-permission-warning" style="flex: 1;"><span id="txt-permission-warning">macOS 系統權限不足，將導致遠端控制黑屏！</span></span>
             <button id="btn-fix-permissions" class="btn-fix-perm" type="button">如何解決</button>
           </div>
-          <h3 id="txt-host-info-title">Host Information</h3>
+          <h3 id="txt-host-info-title"><span id="txt-host-info-title-main">Host Information</span></h3>
           <div class="info-row">
-            <span id="lbl-signaling-status">Signaling Status:</span>
+            <span id="lbl-signaling-status"><span id="txt-signaling-status-label">Signaling Status:</span></span>
             <div class="val-with-copy">
               <span id="val-signaling-status" class="status-badge status-inactive" style="margin-top: 0;">Offline</span>
               <button class="btn-copy" id="btn-reconnect-signaling" type="button" title="Reconnect Signaling">🔄</button>
             </div>
           </div>
           <div class="info-row">
-            <span id="lbl-my-id">My ID:</span>
+            <span id="lbl-my-id"><span id="txt-my-id-label">My ID:</span></span>
             <div class="val-with-copy">
               <span id="val-my-id" class="code-text">Loading...</span>
               <button class="btn-copy" id="btn-copy-id" type="button" title="Copy">📋</button>
             </div>
           </div>
           <div class="info-row">
-            <span id="lbl-my-mac">My MAC:</span>
+            <span id="lbl-my-mac"><span id="txt-my-mac-label">My MAC:</span></span>
             <div class="val-with-copy">
               <span id="val-my-mac" class="code-text">Loading...</span>
               <button class="btn-copy" id="btn-copy-mac" type="button" title="Copy">📋</button>
             </div>
           </div>
           <div class="info-row">
-            <span id="lbl-hwid">My HWID:</span>
+            <span id="lbl-hwid"><span id="txt-my-hwid-label">My HWID:</span></span>
             <div class="val-with-copy">
               <span id="val-hwid" class="code-text truncate">Loading...</span>
               <button class="btn-copy" id="btn-copy-hwid" type="button" title="Copy">📋</button>
@@ -279,7 +221,7 @@
           </div>
           <div class="info-row" style="flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); width: 100%;">
             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-              <span id="lbl-static-pwd" style="font-size: 13px; font-weight: 500;">Static Access Password:</span>
+              <span id="lbl-static-pwd" style="font-size: 13px; font-weight: 500;"><span id="txt-unattended-access-label">Static Access Password:</span></span>
               <span id="static-pwd-status-badge" class="status-badge status-inactive" style="margin-top: 0;">Not Set</span>
             </div>
             <div style="position: relative; display: flex; width: 100%; gap: 6px;">
@@ -292,25 +234,14 @@
             </div>
           </div>
           
-          <div class="input-group license-group">
-            <label for="license-input">
-              <span id="lbl-license">Buyout License Key</span>
-              <button class="btn-info" data-help="license" type="button">ⓘ</button>
-            </label>
-            <div id="help-license" class="help-block"></div>
-            <div class="input-with-button">
-              <input type="password" id="license-input" placeholder="Enter license key">
-              <button id="btn-verify-license" class="btn-secondary">Verify</button>
-            </div>
-            <span id="license-status" class="status-badge status-inactive">Unauthorized</span>
-          </div>
+
         </div>
 
         <div class="separator"></div>
         
         <!-- 網路體質自動診斷 -->
         <div class="network-health-section" style="margin-bottom: 24px;">
-          <h3 id="txt-network-health-title" style="font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: 8px;">Network Traversal</h3>
+          <h3 id="txt-network-health-title" style="font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: 8px;"><span id="txt-network-health-title-2">Network Traversal</span></h3>
           <div style="display: flex; align-items: center; justify-content: space-between;">
             <div style="display: flex; align-items: center; gap: 8px;">
               <span id="network-health-indicator" style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: var(--text-muted);"></span>
@@ -327,11 +258,11 @@
 
         <!-- 隱私功能 -->
         <div class="privacy-control">
-          <h3 id="txt-privacy-title">Security & Privacy</h3>
+          <h3 id="txt-privacy-title"><span id="txt-security-privacy-title">Security & Privacy</span></h3>
           <div class="toggle-row">
             <span style="display: inline-flex; align-items: center;">
-              <span id="lbl-privacy-mode">Privacy Shield Mode (Virtual GPU)</span>
-              <button class="btn-info" data-help="privacy" type="button">ⓘ</button>
+              <span id="lbl-privacy-mode"><span id="txt-priv-shield-label">Privacy Shield Mode (Virtual GPU)</span></span>
+              <button class="btn-info" data-help="privacy" type="button">💡</button>
             </span>
             <label class="switch">
               <input type="checkbox" id="chk-privacy-mode">
@@ -341,7 +272,7 @@
           
           <div class="toggle-row host-only" style="margin-top: 10px;">
             <span style="display: inline-flex; align-items: center;">
-              <span id="lbl-autostart">Run on System Startup</span>
+              <span id="lbl-autostart"><span id="txt-run-on-startup">Run on System Startup</span></span>
             </span>
             <label class="switch">
               <input type="checkbox" id="chk-autostart">
@@ -357,47 +288,47 @@
         
         <!-- 即時狀態面板 -->
         <div class="status-panel glass-panel">
-          <h2 id="txt-monitor-title">Network & Video Quality Metrics</h2>
+          <h2 id="txt-monitor-title"><span id="txt-network-metrics-title">Network & Video Quality Metrics</span></h2>
           
           <div class="metrics-grid">
             <div class="metric-card">
-              <span class="metric-label" id="lbl-metric-fps">Target Frame Rate</span>
+              <span class="metric-label" id="lbl-metric-fps"><span id="txt-tgt-fps-label">Target Frame Rate</span></span>
               <span class="metric-value" id="val-metric-fps">-- fps</span>
             </div>
             <div class="metric-card">
-              <span class="metric-label" id="lbl-metric-color">Color Sampling</span>
+              <span class="metric-label" id="lbl-metric-color"><span id="txt-color-samp-label">Color Sampling</span></span>
               <span class="metric-value" id="val-metric-color">--</span>
             </div>
             <div class="metric-card">
-              <span class="metric-label" id="lbl-metric-bitrate">Max Bitrate Limit</span>
+              <span class="metric-label" id="lbl-metric-bitrate"><span id="txt-max-bit-label">Max Bitrate Limit</span></span>
               <span class="metric-value" id="val-metric-bitrate">-- Mbps</span>
             </div>
 
             <!-- 即時性能指標 -->
             <div class="metric-card">
-              <span class="metric-label" id="lbl-metric-rtt">Network Latency (RTT)</span>
+              <span class="metric-label" id="lbl-metric-rtt"><span id="txt-net-lat-label">Network Latency (RTT)</span></span>
               <span class="metric-value" id="val-metric-rtt">-- ms</span>
             </div>
             <div class="metric-card">
-              <span class="metric-label" id="lbl-metric-loss">Packet Loss Rate</span>
+              <span class="metric-label" id="lbl-metric-loss"><span id="txt-pkt-loss-label">Packet Loss Rate</span></span>
               <span class="metric-value" id="val-metric-loss">--%</span>
             </div>
             <div class="metric-card">
-              <span class="metric-label" id="lbl-metric-protocol">Connection Protocol</span>
+              <span class="metric-label" id="lbl-metric-protocol"><span id="txt-conn-protocol-label">Connection Protocol</span></span>
               <span class="metric-value" id="val-metric-protocol">--</span>
             </div>
             <div class="metric-card">
-              <span class="metric-label" id="lbl-metric-encryption">Codec & Cipher Security</span>
+              <span class="metric-label" id="lbl-metric-encryption"><span id="txt-codec-sec-label">Codec & Cipher Security</span></span>
               <span class="metric-value" id="val-metric-encryption">--</span>
             </div>
 
             <!-- WebRTC getStats() 真實指標 -->
             <div class="metric-card">
-              <span class="metric-label" id="lbl-metric-actual-fps">Actual FPS (Live)</span>
+              <span class="metric-label" id="lbl-metric-actual-fps"><span id="txt-actual-fps-label">Actual FPS (Live)</span></span>
               <span class="metric-value" id="val-metric-actual-fps">-- fps</span>
             </div>
             <div class="metric-card">
-              <span class="metric-label" id="lbl-metric-actual-bitrate">Actual Bitrate (Live)</span>
+              <span class="metric-label" id="lbl-metric-actual-bitrate"><span id="txt-actual-bitrate-label">Actual Bitrate (Live)</span></span>
               <span class="metric-value" id="val-metric-actual-bitrate">-- Mbps</span>
             </div>
             <div class="metric-card" style="grid-column: span 1;">
@@ -414,8 +345,8 @@
         <div class="management-panel glass-panel">
           <div class="toggle-row" style="margin-bottom: 8px;">
             <span style="font-weight: 600; font-size: 14px; display: inline-flex; align-items: center;">
-              <span id="lbl-smart-auto">Smart Quality Auto-Optimization</span>
-              <button class="btn-info" data-help="smart-auto" type="button">ⓘ</button>
+              <span id="lbl-smart-auto"><span id="txt-smart-opt-label">Smart Quality Auto-Optimization</span></span>
+              <button class="btn-info" data-help="smart-auto" type="button">💡</button>
             </span>
             <label class="switch">
               <input type="checkbox" id="chk-smart-auto" checked>
@@ -427,7 +358,7 @@
           <!-- 自動引導狀態指示 -->
           <div id="auto-status-indicator" class="auto-indicator">
             <span class="pulse-dot"></span>
-            <span id="txt-auto-active">System automatically adjusting. Network and stream quality are in optimal states.</span>
+            <span id="txt-auto-active"><span id="txt-sys-auto-adj">System automatically adjusting. Network and stream quality are in optimal states.</span></span>
           </div>
 
           <!-- 可摺疊的開發者模擬器 -->
@@ -438,8 +369,8 @@
               <div class="range-group">
                 <div class="range-header">
                   <label for="range-rtt" style="display: inline-flex; align-items: center;">
-                    <span id="lbl-sim-rtt">Simulated RTT Latency</span>
-                    <button class="btn-info" data-help="sim-rtt" type="button">ⓘ</button>
+                    <span id="lbl-sim-rtt"><span id="txt-sim-rtt-label">Simulated RTT Latency</span></span>
+                    <button class="btn-info" data-help="sim-rtt" type="button">💡</button>
                   </label>
                   <span id="val-sim-rtt">10 ms</span>
                 </div>
@@ -450,8 +381,8 @@
               <div class="range-group">
                 <div class="range-header">
                   <label for="range-loss" style="display: inline-flex; align-items: center;">
-                    <span id="lbl-sim-loss">Simulated Packet Loss</span>
-                    <button class="btn-info" data-help="sim-loss" type="button">ⓘ</button>
+                    <span id="lbl-sim-loss"><span id="txt-sim-loss-label">Simulated Packet Loss</span></span>
+                    <button class="btn-info" data-help="sim-loss" type="button">💡</button>
                   </label>
                   <span id="val-sim-loss">0%</span>
                 </div>
@@ -461,8 +392,8 @@
      
               <div class="toggle-row">
                 <span style="display: inline-flex; align-items: center;">
-                  <span id="lbl-sim-relay">Simulate Relay Mode</span>
-                  <button class="btn-info" data-help="sim-relay" type="button">ⓘ</button>
+                  <span id="lbl-sim-relay"><span id="txt-sim-relay-mode">Simulate Relay Mode</span></span>
+                  <button class="btn-info" data-help="sim-relay" type="button">💡</button>
                 </span>
                 <label class="switch">
                   <input type="checkbox" id="chk-sim-relay">
@@ -478,28 +409,28 @@
 
         <!-- System Debug Console (Moved inside monitor-panel) -->
         <div class="diagnostic-panel glass-panel" style="flex: none; min-height: 250px; display: flex; flex-direction: column; overflow: hidden;">
-          <h2 id="txt-system-logs-title" style="margin-bottom: 8px;">System Logs</h2>
+          <h2 id="txt-system-logs-title" style="margin-bottom: 8px;"><span id="txt-system-logs-title-main">System Logs</span></h2>
           <div id="debug-overlay" style="flex: 1; background: rgba(0,0,0,0.85); color: #0f0; font-family: monospace; font-size: 10px; overflow-y: auto; padding: 8px; border-radius: 6px; display: flex; flex-direction: column; gap: 2px;"></div>
         </div>
 
         <!-- 自我診斷面板 -->
         <div class="diagnostic-panel glass-panel">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h2 id="txt-diag-title" style="margin-bottom: 0;">Security & Connectivity Diagnostics</h2>
-            <button id="btn-run-diagnostic" class="btn-secondary" style="padding: 4px 10px; font-size: 11px;">Run Diagnostics</button>
+            <h2 id="txt-diag-title" style="margin-bottom: 0;"><span id="txt-diag-title-main">Security & Connectivity Diagnostics</span></h2>
+            <button id="btn-run-diagnostic" class="btn-secondary" style="padding: 4px 10px; font-size: 11px;"><span id="txt-run-diagnostics-btn">Run Diagnostics</span></button>
           </div>
           <div class="info-row" style="margin-bottom: 8px; font-size: 12px;">
-            <span id="lbl-diag-dns">STUN Server Lookup:</span>
+            <span id="lbl-diag-dns"><span id="txt-stun-lookup-label">STUN Server Lookup:</span></span>
             <span id="val-diag-dns" class="code-text" style="color: var(--text-muted);">--</span>
           </div>
           <div class="info-row" style="margin-bottom: 8px; font-size: 12px;">
-            <span id="lbl-diag-nat">NAT Detection Type:</span>
+            <span id="lbl-diag-nat"><span id="txt-nat-type-label">NAT Detection Type:</span></span>
             <span id="val-diag-nat" class="code-text" style="color: var(--text-muted);">--</span>
           </div>
           <div class="separator" style="margin: 8px 0;"></div>
           <div style="display: flex; flex-direction: column; gap: 4px;">
-            <span id="lbl-diag-suggest" style="font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Optimization Suggestions</span>
-            <p id="val-diag-suggest" style="font-size: 12px; color: var(--color-primary); line-height: 1.4;">Click the button above to analyze your device secure store and connection pipes.</p>
+            <span id="lbl-diag-suggest" style="font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;"><span id="txt-opt-sug-label">Optimization Suggestions</span></span>
+            <p id="val-diag-suggest" style="font-size: 12px; color: var(--color-primary); line-height: 1.4;"><span id="txt-click-analyze-label">Click the button above to analyze your device secure store and connection pipes.</span></p>
           </div>
         </div>
       </section>
@@ -508,6 +439,8 @@
   </div>
 
   <!-- Help & Privacy Modal -->
+  
+
   <div id="help-modal" class="modal-overlay" style="display: none;">
     <div class="modal-content help-modal-content glass-panel">
       <!-- 標頭 -->
@@ -539,15 +472,15 @@
         <button id="btn-close-perm" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-main);">&times;</button>
       </div>
       <div style="font-size: 13px; line-height: 1.6; color: var(--text-main);">
-        <p id="txt-perm-modal-desc" style="margin-top: 0; margin-bottom: 12px;">由於 macOS 的安全性機制，2syn 需要「螢幕錄製」與「輔助使用」權限才能進行遠端畫面串流與模擬輸入操作。請依循以下步驟進行設定：</p>
+        <p id="txt-perm-modal-desc" style="margin-top: 0; margin-bottom: 12px;">由於 macOS 的安全性機制，2syn_Duel 需要「螢幕錄製」與「輔助使用」權限才能進行遠端畫面串流與模擬輸入操作。請依循以下步驟進行設定：</p>
         <ol style="padding-left: 20px; margin-bottom: 20px; margin-top: 0; display: flex; flex-direction: column; gap: 6px;">
           <li id="txt-perm-modal-step-1">打開您的 Mac **「系統設定」**。</li>
           <li id="txt-perm-modal-step-2">前往 **「隱私權與安全性」**。</li>
-          <li id="txt-perm-modal-step-3">在 **「螢幕與系統音訊錄製」** 項目中，勾選並啟用 **2syn**。</li>
-          <li id="txt-perm-modal-step-4">在 **「輔助使用」** 項目中，勾選並啟用 **2syn**。</li>
-          <li id="txt-perm-modal-step-5">設定完成後，**請重新啟動 2syn 應用程式**以套用變更。</li>
+          <li id="txt-perm-modal-step-3">在 **「螢幕與系統音訊錄製」** 項目中，勾選並啟用 **2syn_Duel**。</li>
+          <li id="txt-perm-modal-step-4">在 **「輔助使用」** 項目中，勾選並啟用 **2syn_Duel**。</li>
+          <li id="txt-perm-modal-step-5">設定完成後，**請重新啟動 2syn_Duel 應用程式**以套用變更。</li>
         </ol>
-        <button id="btn-perm-modal-trigger" style="width: 100%; background: var(--accent-color, #3b82f6); border: none; color: white; border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; box-shadow: 0 4px 10px rgba(59, 130, 246, 0.3);">重新發起系統授權提示</button>
+        <button id="btn-perm-modal-trigger" style="width: 100%; background: var(--accent-color, #3b82f6); border: none; color: white; border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; box-shadow: 0 4px 10px rgba(59, 130, 246, 0.3);"><span id="txt-btn-reprompt">重新發起系統授權提示</span></button>
       </div>
     </div>
   </div>
@@ -579,21 +512,21 @@
         
         <!-- TURN Server Setting Section -->
         <div style="background: rgba(0,0,0,0.05); border-radius: 8px; padding: 12px;">
-          <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">進階：自攜 TURN 伺服器 (BYOI)</h4>
-          <p style="margin: 0 0 8px 0; font-size: 12px;">若您有自架 Coturn 等中繼伺服器，可在此輸入 JSON 陣列格式配置：</p>
+          <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;"><span id="txt-byoi-title">進階：自攜 TURN 伺服器 (BYOI)</span></h4>
+          <p style="margin: 0 0 8px 0; font-size: 12px;"><span id="txt-byoi-desc">若您有自架 Coturn 等中繼伺服器，可在此輸入 JSON 陣列格式配置：</span></p>
           <textarea id="ta-custom-turn" rows="3" style="width: 100%; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 4px; padding: 6px; font-family: monospace; font-size: 11px; margin-bottom: 8px;" placeholder='[{"urls":["turn:ip:3478"],"username":"...","credential":"..."}]'></textarea>
-          <button id="btn-save-turn" class="btn-primary" style="padding: 4px 10px; font-size: 12px;">儲存並重新載入</button>
+          <button id="btn-save-turn" class="btn-primary" style="padding: 4px 10px; font-size: 12px;"><span id="txt-save-reload-btn">儲存並重新載入</span></button>
         </div>
 
-        <p id="txt-ts-guide-desc" style="margin-top: 8px; border-top: 1px solid var(--panel-border); padding-top: 12px;">若不具備 TURN 伺服器，建議在雙端安裝免費的安全虛擬局域網工具 Tailscale，以 100% 實現 P2P 超低延遲直連。</p>
+        <p id="txt-ts-guide-desc" style="margin-top: 8px; border-top: 1px solid var(--panel-border); padding-top: 12px;"><span id="txt-network-traversal-desc-2">若不具備 TURN 伺服器，建議在雙端安裝免費的安全虛擬局域網工具 Tailscale，以 100% 實現 P2P 超低延遲直連。</span></p>
         
         <div style="border-left: 3px solid var(--accent-color, #3b82f6); padding-left: 10px; margin-bottom: 8px;">
           <h4 id="txt-ts-step-1-title" style="margin: 0 0 4px 0; font-size: 14px; font-weight: 600;">步驟一：下載與安裝</h4>
-          <p id="txt-ts-step-1-desc" style="margin: 0;">被控端與主控端設備均需下載安裝。</p>
+          <p id="txt-ts-step-1-desc" style="margin: 0;"><span id="txt-dl-hint">被控端與主控端設備均需下載安裝。</span></p>
           <div style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap;">
-            <a href="https://tailscale.com/download" target="_blank" class="btn-secondary" style="padding: 4px 8px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; color: var(--text-main);" id="lnk-ts-download-mac">Mac / Windows 下載</a>
-            <a href="https://apps.apple.com/app/tailscale/id1475387142" target="_blank" class="btn-secondary" style="padding: 4px 8px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; color: var(--text-main);" id="lnk-ts-download-ios">iOS 下載 (App Store)</a>
-            <a href="https://play.google.com/store/apps/details?id=com.tailscale.ipn" target="_blank" class="btn-secondary" style="padding: 4px 8px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; color: var(--text-main);" id="lnk-ts-download-android">Android 下載</a>
+            <a href="https://tailscale.com/download" target="_blank" class="btn-secondary" style="padding: 4px 8px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; color: var(--text-main);" id="lnk-ts-download-mac"><span id="txt-dl-mac">Mac / Windows 下載</span></a>
+            <a href="https://apps.apple.com/app/tailscale/id1475387142" target="_blank" class="btn-secondary" style="padding: 4px 8px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; color: var(--text-main);" id="lnk-ts-download-ios"><span id="txt-dl-ios">iOS 下載 (App Store)</span></a>
+            <a href="https://play.google.com/store/apps/details?id=com.tailscale.ipn" target="_blank" class="btn-secondary" style="padding: 4px 8px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; color: var(--text-main);" id="lnk-ts-download-android"><span id="txt-dl-android">Android 下載</span></a>
           </div>
         </div>
 
@@ -608,7 +541,7 @@
         </div>
         
         <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 10px; font-size: 12px; color: #10b981; line-height: 1.4;" id="txt-ts-step-4-desc">
-          💡 完成後，Mac 端的 2syn 燈號會自動變為綠色，手機端即可透過 2syn 順利發起超低延遲直連，不再有連線失敗與黑屏問題。
+          💡 完成後，Mac 端的 2syn_Duel 燈號會自動變為綠色，手機端即可透過 2syn_Duel 順利發起超低延遲直連，不再有連線失敗與黑屏問題。
         </div>
       </div>
     </div>
@@ -620,7 +553,7 @@
       <!-- Header -->
       <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; text-align: center;">
         <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 28px; margin-bottom: 4px;">🔐</div>
-        <h2 id="txt-first-run-title" style="margin: 0; font-size: 20px; font-weight: 700; color: var(--text-main, #f0f4ff); line-height: 1.3;">歡迎使用 2syn — 設定安全金鑰</h2>
+        <h2 id="txt-first-run-title" style="margin: 0; font-size: 20px; font-weight: 700; color: var(--text-main, #f0f4ff); line-height: 1.3;">歡迎使用 2syn_Duel — 設定安全金鑰</h2>
         <p id="txt-first-run-subtitle" style="margin: 0; font-size: 13px; color: rgba(160,180,220,0.8); line-height: 1.5;">首次啟動必讀</p>
       </div>
       <!-- Content -->

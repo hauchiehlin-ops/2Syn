@@ -45,3 +45,15 @@ AR_aarch64_linux_android = "/Users/barretlin/Library/Android/sdk/ndk/28.2.136763
 AR_armv7_linux_androideabi = "/Users/barretlin/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
 AR_x86_64_linux_android = "/Users/barretlin/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
 AR_i686_linux_android = "/Users/barretlin/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
+
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C", "link-args=-Wl,-rpath,/usr/lib/swift",
+    "-C", "link-args=-Wl,-rpath,@loader_path/../Frameworks"
+]
+
+[target.x86_64-apple-darwin]
+rustflags = [
+    "-C", "link-args=-Wl,-rpath,/usr/lib/swift",
+    "-C", "link-args=-Wl,-rpath,@loader_path/../Frameworks"
+]

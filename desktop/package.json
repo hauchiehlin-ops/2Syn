@@ -1,13 +1,28 @@
 {
   "name": "syn-desktop-ui",
   "private": true,
-  "version": "2.3.0",
+  "version": "3.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:build:host": "tauri build",
+    "tauri:build:client": "tauri build --config src-tauri/tauri.client.conf.json",
+    "tauri:build:ios:host": "tauri ios build",
+    "tauri:build:ios:client": "tauri ios build --config src-tauri/tauri.client.conf.json",
+    "tauri:build:ios:client:appstore": "tauri ios build --config src-tauri/tauri.client.conf.json --export-method app-store-connect",
+    "tauri:build:ios:client:release": "node ../scripts/build-ios-client.js",
+    "tauri:build:android:host": "node ../scripts/build-android-apps.js --host",
+    "tauri:build:android:client": "node ../scripts/build-android-apps.js --client",
+    "tauri:dev:ios:host": "tauri ios dev",
+    "tauri:dev:ios:client": "tauri ios dev --config src-tauri/tauri.client.conf.json",
+    "tauri:dev:android:host": "tauri android dev",
+    "tauri:dev:android:client": "tauri android dev --config src-tauri/tauri.client.conf.json",
+    "bump:patch": "node ../scripts/bump-version.js patch",
+    "bump:minor": "node ../scripts/bump-version.js minor",
+    "bump:major": "node ../scripts/bump-version.js major"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

@@ -42,3 +42,4 @@ pub mod file_transfer;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod audio;
 pub mod wol;
+pub mod debug_log;

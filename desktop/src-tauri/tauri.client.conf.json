@@ -1,0 +1,45 @@
+{
+  "productName": "2syn_Client",
+  "version": "3.2.1",
+  "identifier": "com.twosyn.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "2syn Client",
+        "width": 1024,
+        "height": 700,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "devtools": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons-client/32x32.png",
+      "icons-client/128x128.png",
+      "icons-client/128x128@2x.png",
+      "icons-client/icon.icns",
+      "icons-client/icon.ico"
+    ],
+    "iOS": {
+      "developmentTeam": "6UJ8GS752W",
+      "infoPlist": "Info.ios.plist"
+    }
+  }
+}

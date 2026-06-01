@@ -28,10 +28,10 @@ impl AudioStreamer {
         })
     }
 
-    pub async fn start(&self) -> Result<(), String> {
+    pub async fn start(&self, active_webrtc: Arc<std::sync::atomic::AtomicBool>) -> Result<(), String> {
         #[cfg(target_os = "macos")]
         {
-            self.start_macos().await
+            self.start_macos(active_webrtc).await
         }
         
         #[cfg(target_os = "windows")]
@@ -46,11 +46,11 @@ impl AudioStreamer {
     }
 
     #[cfg(target_os = "macos")]
-    async fn start_macos(&self) -> Result<(), String> {
+    async fn start_macos(&self, active_webrtc: Arc<std::sync::atomic::AtomicBool>) -> Result<(), String> {
         use screencapturekit::async_api::{AsyncSCShareableContent, AsyncSCStream};
         use screencapturekit::stream::content_filter::SCContentFilter;
         use screencapturekit::stream::output_type::SCStreamOutputType;
-        use screencapturekit::cm::CMSampleBufferExt;
+        use std::sync::atomic::Ordering;
 
         println!("[Audio] Starting macOS audio capture via ScreenCaptureKit...");
         
@@ -61,9 +61,8 @@ impl AudioStreamer {
         let displays = content.displays();
         let display = displays.first().ok_or("No displays found")?;
         
-        let filter = SCContentFilter::create()
-            .with_display(display)
-            .with_excluding_windows(&[])
+        let filter = SCContentFilter::builder()
+            .display(display)
             .build();
             
         let mut config = SCStreamConfiguration::new();
@@ -86,43 +85,53 @@ impl AudioStreamer {
         let frame_size = 960; // 20ms at 48kHz
         let samples_per_frame = frame_size * 2; // Stereo
         
-        loop {
-            if let Some(sample) = stream.next().await {
-                if let Some(audio_buffer_list) = sample.audio_buffer_list() {
-                    for buffer in audio_buffer_list.iter() {
-                        let data = buffer.data();
-                        // Assume f32 interleaved for ScreenCaptureKit default
-                        // In SCStream, CoreAudio typically returns 32-bit float PCM
-                        let floats = unsafe {
-                            std::slice::from_raw_parts(
-                                data.as_ptr() as *const f32,
-                                data.len() / 4
-                            )
-                        };
-                        
-                        for &f in floats {
-                            // Convert f32 to i16
-                            let s = (f * 32767.0).clamp(-32768.0, 32767.0) as i16;
-                            pcm_buffer.push(s);
-                        }
-                    }
-                }
-                
-                // Encode if we have enough samples
-                while pcm_buffer.len() >= samples_per_frame {
-                    let chunk: Vec<i16> = pcm_buffer.drain(..samples_per_frame).collect();
-                    let mut encoder = self.encoder.lock().await;
-                    if let Ok(opus_data) = encoder.encode_vec(&chunk, 4000) {
-                        let sample = Sample {
-                            data: opus_data.into(),
-                            duration: Duration::from_millis(20),
-                            ..Default::default()
-                        };
-                        let _ = self.track.write_sample(&sample).await;
+        let mut sample_count: u64 = 0;
+        while let Some(sample) = stream.next().await {
+            sample_count += 1;
+            if sample_count % 100 == 1 {
+                crate::debug_log!("AUDIO", "macOS audio sample_count={} active={}", sample_count, active_webrtc.load(Ordering::SeqCst));
+            }
+            // 若連線不活躍，則直接丟棄音訊，防止 ScreenCaptureKit 內部緩衝區積壓導致記憶體洩漏與 CPU 暴衝
+            if !active_webrtc.load(Ordering::SeqCst) {
+                continue;
+            }
+
+            if let Some(audio_buffer_list) = sample.audio_buffer_list() {
+                for buffer in audio_buffer_list.iter() {
+                    let data = buffer.data();
+                    // Assume f32 interleaved for ScreenCaptureKit default
+                    // In SCStream, CoreAudio typically returns 32-bit float PCM
+                    let floats = unsafe {
+                        std::slice::from_raw_parts(
+                            data.as_ptr() as *const f32,
+                            data.len() / 4
+                        )
+                    };
+                    
+                    for &f in floats {
+                        // Convert f32 to i16
+                        let s = (f * 32767.0).clamp(-32768.0, 32767.0) as i16;
+                        pcm_buffer.push(s);
                     }
                 }
             }
+            
+            // Encode if we have enough samples
+            while pcm_buffer.len() >= samples_per_frame {
+                let chunk: Vec<i16> = pcm_buffer.drain(..samples_per_frame).collect();
+                let mut encoder = self.encoder.lock().await;
+                if let Ok(opus_data) = encoder.encode_vec(&chunk, 4000) {
+                    let sample = Sample {
+                        data: opus_data.into(),
+                        duration: Duration::from_millis(20),
+                        ..Default::default()
+                    };
+                    let _ = self.track.write_sample(&sample).await;
+                }
+            }
         }
+        println!("[Audio] ScreenCaptureKit stream ended, exiting audio loop.");
+        Ok(())
     }
 
     #[cfg(target_os = "windows")]
