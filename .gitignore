@@ -9,9 +9,7 @@ target/
 
 # Tauri
 src-tauri/target/
-src-tauri/gen/
 desktop/src-tauri/target/
-desktop/src-tauri/gen/
 
 # macOS
 .DS_Store
