@@ -1,6 +1,6 @@
 [package]
 name = "syn-core"
-version = "3.2.2"
+version = "3.2.3"
 edition = "2021"
 
 [dependencies]
@@ -29,9 +29,6 @@ openh264 = "0.9.3"
 rayon = "1.8"
 opus = "0.3.1"
 cpal = "0.17.3"
-core-graphics = "0.23"
-foreign-types-shared = "0.3.1"
-apple-cf = "0.9.3"
 
 [target.'cfg(all(not(target_os = "macos"), not(any(target_os = "ios", target_os = "android"))))'.dependencies]
 xcap = "0.9.6"

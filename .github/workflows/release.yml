@@ -28,6 +28,9 @@ jobs:
         with:
           node-version: 20
 
+      - name: Install Compatible CMake (for audiopus_sys)
+        run: pipx install cmake==3.26.0
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -79,6 +82,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Install Compatible CMake (for audiopus_sys)
+        run: pipx install cmake==3.26.0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
