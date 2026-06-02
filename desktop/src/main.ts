@@ -4939,8 +4939,12 @@ function initPinToggle() {
 // =========================================================================
 window.addEventListener("DOMContentLoaded", async () => {
   const versionLabel = document.getElementById("app-version-label");
-  if (versionLabel && pkg.version) {
-    versionLabel.textContent = `v${pkg.version}`;
+  if (pkg.version) {
+    if (versionLabel) {
+      versionLabel.textContent = `v${pkg.version}`;
+    }
+    // 同步更新網頁標題，讓 Mac/Windows 原生視窗的標題列也能顯示版本號
+    document.title = `2syn_Duel v${pkg.version}`;
   }
   setupFileTransferDropZone(() => dataChannelFileTransfer);
   initDeviceBook();
