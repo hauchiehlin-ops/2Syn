@@ -3150,7 +3150,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
   const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
   const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
-  const hiddenInput = document.getElementById("hidden-keyboard-input") as HTMLTextAreaElement;
+  const keyboardBar = document.getElementById("mobile-keyboard-bar") as HTMLDivElement;
+  const mobileKeyboardInput = document.getElementById("mobile-keyboard-input") as HTMLInputElement;
+  const btnKeyboardSend = document.getElementById("btn-mobile-keyboard-send") as HTMLButtonElement;
   let isKeyboardActive = false;
   let lastBackspaceTime = 0;
   let isComposing = false;
@@ -4629,110 +4631,83 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   const handleEnter = () => {
     sendKeyStroke(13);
-    if (hiddenInput) {
-      hiddenInput.value = "   ";
-    }
-    lastValue = "   ";
   };
 
-  if (btnKeyboard && hiddenInput) {
+  // --- 行動端 Keyboard Bar 邏輯 ---
+  if (btnKeyboard && keyboardBar && mobileKeyboardInput && btnKeyboardSend) {
     btnKeyboard.addEventListener("click", (e) => {
       e.stopPropagation();
       isKeyboardActive = true;
-      hiddenInput.value = "   ";
-      lastValue = "   ";
-      hiddenInput.focus();
+      keyboardBar.style.display = "flex";
+      mobileKeyboardInput.value = "";
+      mobileKeyboardInput.focus();
     });
 
-    hiddenInput.addEventListener("blur", () => {
-      isKeyboardActive = false;
-      hiddenInput.value = "";
-      lastValue = "";
+    const sendText = () => {
+      const val = mobileKeyboardInput.value;
+      if (val.length > 0) {
+        const encoder = new TextEncoder();
+        const payload = encoder.encode(val);
+        sendInputPacket(buildInputPacket(0x08, payload)); // 0x08 is String Packet
+        mobileKeyboardInput.value = "";
+      }
+    };
+
+    btnKeyboardSend.addEventListener("click", () => {
+      sendText();
     });
 
-    hiddenInput.addEventListener("compositionstart", () => {
-      isComposing = true;
-      const previewBox = document.getElementById("keyboard-preview-box");
-      if (previewBox) {
-        previewBox.style.display = "block";
-        const previewText = document.getElementById("keyboard-preview-text");
-        if (previewText) previewText.textContent = "";
+    mobileKeyboardInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        sendText();
       }
     });
 
-    hiddenInput.addEventListener("compositionupdate", (e: any) => {
-      const previewBox = document.getElementById("keyboard-preview-box");
-      const previewText = document.getElementById("keyboard-preview-text");
-      const container = document.getElementById("remote-video-container");
-      if (previewBox && previewText && container && e.data) {
-        previewText.textContent = e.data;
-        // 定位在全域游標百分比 Y 與 X 上方 55 像素，置中對齊
-        const posX = currentCursorPercentX * container.clientWidth;
-        const posY = currentCursorPercentY * container.clientHeight - 55;
-        previewBox.style.left = `${posX}px`;
-        previewBox.style.top = `${posY}px`;
-        previewBox.style.transform = "translateX(-50%)";
-      }
-    });
-
-    hiddenInput.addEventListener("compositionend", () => {
-      isComposing = false;
-      const previewBox = document.getElementById("keyboard-preview-box");
-      if (previewBox) previewBox.style.display = "none";
-      // 延遲以確保某些行動端瀏覽器在 compositionend 觸發時 value 已完全寫入
+    mobileKeyboardInput.addEventListener("blur", () => {
+      // 延遲隱藏，避免點擊發送按鈕時立即隱藏
       setTimeout(() => {
-        const val = hiddenInput.value;
-        const cleanVal = val.startsWith("   ") ? val.slice(3) : val;
-        if (cleanVal.length > 0) {
-          const encoder = new TextEncoder();
-          const payload = encoder.encode(cleanVal);
-          sendInputPacket(buildInputPacket(0x08, payload));
+        if (document.activeElement !== mobileKeyboardInput) {
+          isKeyboardActive = false;
+          keyboardBar.style.display = "none";
         }
-        hiddenInput.value = "   ";
-        lastValue = "   ";
-      }, 10);
+      }, 100);
     });
+  }
 
-    hiddenInput.addEventListener("input", (e: Event) => {
-      if (isComposing) return;
-
-      const currentValue = hiddenInput.value;
-
-      // 1. 偵測換行 (Enter 鍵)
-      if (currentValue.includes("\n") || currentValue.includes("\r")) {
-        handleEnter();
-        return;
-      }
-
-      // 2. 當長度少於預置的 3 個空格時，判定為 Backspace 刪除
-      if (currentValue.length < 3) {
-        const deleteCount = 3 - currentValue.length;
-        for (let i = 0; i < deleteCount; i++) {
-          sendKeyStroke(8);
+  // Visual Viewport 自適應邏輯 (對齊 Chrome 遠端桌面)
+  if (window.visualViewport) {
+    const onViewportChange = () => {
+      const vv = window.visualViewport;
+      if (!vv) return;
+      
+      const container = document.getElementById("remote-video-container");
+      if (container) {
+        // 將視訊容器的高度限制在視口內，防止被鍵盤遮擋
+        container.style.height = `${vv.height}px`;
+        
+        if (isKeyboardActive && keyboardBar.style.display !== "none") {
+          // 讓工具列貼齊視口底部 (尤其在 iOS 上需要計算 offset)
+          keyboardBar.style.bottom = `${window.innerHeight - vv.height - vv.offsetTop}px`;
+        } else {
+          keyboardBar.style.bottom = "0px";
         }
-        hiddenInput.value = "   ";
-        lastValue = "   ";
-        return;
       }
-
-      // 3. 當長度大於 3 個空格時，判定為正常輸入字元或中文貼上，提取增量
-      if (currentValue.length > 3) {
-        const added = currentValue.slice(3);
-        if (added.length > 0) {
-          const encoder = new TextEncoder();
-          const payload = encoder.encode(added);
-          sendInputPacket(buildInputPacket(0x08, payload));
-        }
-        hiddenInput.value = "   ";
-        lastValue = "   ";
-      }
-    });
+      
+      // 確保畫面捲動置頂，防止 iOS 將 body 往上推
+      window.scrollTo(0, 0);
+    };
+    
+    window.visualViewport.addEventListener("resize", onViewportChange);
+    window.visualViewport.addEventListener("scroll", onViewportChange);
+    // 初始化呼叫
+    onViewportChange();
   }
 
   // 點擊視訊畫面時的防失焦重新 Focus 處理
   videoEl.addEventListener("click", () => {
-    if (isKeyboardActive && hiddenInput && document.activeElement !== hiddenInput) {
-      hiddenInput.focus();
+    if (isKeyboardActive && mobileKeyboardInput && document.activeElement !== mobileKeyboardInput) {
+      isKeyboardActive = false;
+      keyboardBar.style.display = "none";
     }
   });
 
