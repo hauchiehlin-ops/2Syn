@@ -1,6 +1,6 @@
 {
   "productName": "2syn_Duel",
-  "version": "3.2.16",
+  "version": "3.3.0",
   "identifier": "com.twosyn.app",
   "build": {
     "frontendDist": "../dist",

@@ -3287,21 +3287,38 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     const loop = () => {
       if (!videoContainer) return;
       
-      const edgeThreshold = 0.08; // 游標接近邊緣 8%
+      const rect = videoEl.getBoundingClientRect();
+      const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+      const containerRatio = rect.width / rect.height;
+      let renderedWidth: number, renderedHeight: number, offsetX = 0, offsetY = 0;
+      if (containerRatio > videoRatio) {
+        renderedHeight = rect.height;
+        renderedWidth = renderedHeight * videoRatio;
+        offsetX = (rect.width - renderedWidth) / 2;
+      } else {
+        renderedWidth = rect.width;
+        renderedHeight = renderedWidth / videoRatio;
+        offsetY = (rect.height - renderedHeight) / 2;
+      }
+      const pixelX = rect.left + offsetX + currentCursorPercentX * renderedWidth;
+      const pixelY = rect.top + offsetY + currentCursorPercentY * renderedHeight;
+
+      const edgeThresholdX = window.innerWidth * 0.08;
+      const edgeThresholdY = window.innerHeight * 0.08;
       const panSpeed = 15;       // 平移速度 (px/frame)
       
       let dx = 0;
       let dy = 0;
       
-      if (currentCursorPercentX < edgeThreshold) {
+      if (pixelX < edgeThresholdX) {
         dx = -panSpeed;
-      } else if (currentCursorPercentX > 1.0 - edgeThreshold) {
+      } else if (pixelX > window.innerWidth - edgeThresholdX) {
         dx = panSpeed;
       }
       
-      if (currentCursorPercentY < edgeThreshold) {
+      if (pixelY < edgeThresholdY) {
         dy = -panSpeed;
-      } else if (currentCursorPercentY > 1.0 - edgeThreshold) {
+      } else if (pixelY > window.innerHeight - edgeThresholdY) {
         dy = panSpeed;
       }
       
@@ -3493,7 +3510,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let scrollVy = 0;
   let lastScrollTimestamp = 0;
   let scrollMomentumRafId: number | null = null;
-  const SCROLL_DECAY = 0.92;
+  const SCROLL_DECAY = 0.95;
   const SCROLL_MIN_VELOCITY = 0.1;
 
   function startScrollMomentum() {
@@ -4029,7 +4046,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         // Direct Touch 模式：不在此立即發送 MouseDown，而是採取 Lazy Drag 延遲拖曳
         isDragging = false;
       } else {
-        if (now - lastTapTime < 300) {
+        if (now - lastTapTime < 350) {
           // 雙擊拖曳
           isDragging = true;
           const payload = new Uint8Array(1);
@@ -4193,7 +4210,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         // Tremor Suppression (防手震) & Lazy Drag (延遲拖曳激活)
         if (!isDragging) {
           const startDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
-          if (startDist > 10 || Date.now() - touchStartTime > 200) {
+          if (startDist > 20 || Date.now() - touchStartTime > 200) {
             isDragging = true;
             // 首次啟動拖曳：先發送滑鼠移動到起點，再發送滑鼠按下
             let startPctX = (touchStartPos.x - rect.left - offsetX) / renderedWidth;
@@ -4348,7 +4365,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           // 直控模式單指輕觸 -> 左鍵點擊 (15ms 延遲確保雙平台相容)
           // 智慧雙擊判定
           const tapDist = Math.sqrt(Math.pow(endX - lastTapPos.x, 2) + Math.pow(endY - lastTapPos.y, 2));
-          if (now - lastTapTime < 300 && tapDist < 15) {
+          if (now - lastTapTime < 350 && tapDist < 35) {
             // 智慧雙擊序列
             sendDoubleClickSequence();
             lastTapTime = 0;
@@ -4404,9 +4421,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           // 軌跡板模式單指輕觸 -> 左鍵點擊 (降低延遲至20ms，放寬點擊判定至450ms)
           if (touchStartTime > 0 && now - touchStartTime < 450 && maxTouches === 1) {
             const dist = Math.sqrt(Math.pow(endX - touchStartPos.x, 2) + Math.pow(endY - touchStartPos.y, 2));
-            if (dist < 20) {
+            if (dist < 35) {
               const tapDist = Math.sqrt(Math.pow(endX - lastTapPos.x, 2) + Math.pow(endY - lastTapPos.y, 2));
-              if (now - lastTapTime < 300 && tapDist < 15) {
+              if (now - lastTapTime < 350 && tapDist < 35) {
                 // 智慧雙擊序列
                 sendDoubleClickSequence();
                 lastTapTime = 0;
@@ -4937,12 +4954,8 @@ function initPinToggle() {
 // =========================================================================
 // 應用程式初始化入口點
 // =========================================================================
-window.addEventListener("DOMContentLoaded", async () => {
-  const versionLabel = document.getElementById("app-version-label");
+async function initializeApp() {
   if (pkg.version) {
-    if (versionLabel) {
-      versionLabel.textContent = `v${pkg.version}`;
-    }
     // 同步更新網頁標題，讓 Mac/Windows 原生視窗的標題列也能顯示版本號
     document.title = `2syn_Duel v${pkg.version}`;
   }
@@ -5211,5 +5224,12 @@ if (window.visualViewport) {
          window.scrollTo(0, 0);
      }
   });
+}
+
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeApp);
+} else {
+  initializeApp();
 }
 
