@@ -4723,14 +4723,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         // 只有在鍵盤開啟時才動態縮放高度，避免 iOS 上觸發 layout shift 導致 touchcancel 吃掉點擊事件
         if (isKeyboardActive || document.activeElement === mobileKeyboardInput) {
           container.style.height = `${vv.height}px`;
-          
-          if (keyboardBar.style.display !== "none") {
-            // 讓工具列貼齊視口底部 (尤其在 iOS 上需要計算 offset)
-            keyboardBar.style.bottom = `${window.innerHeight - vv.height - vv.offsetTop}px`;
-          }
         } else {
           container.style.height = `100vh`;
-          keyboardBar.style.bottom = "0px";
         }
       }
       
