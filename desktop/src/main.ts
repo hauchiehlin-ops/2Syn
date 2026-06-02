@@ -5182,7 +5182,7 @@ async function initializeApp() {
     // 網頁瀏覽器控制端（Client）
     initSignalingClient();
   }
-});
+}
 
 // 初始化行動端虛擬鍵盤拉起時的 Visual Viewport 避讓與對焦自適應
 

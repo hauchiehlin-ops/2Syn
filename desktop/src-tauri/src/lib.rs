@@ -320,8 +320,11 @@ async fn handle_remote_offer_as_host(
     syn_core::debug_log!("TAURI", "Adding video track");
     // 加入視訊軌道並啟動擷取迴圈
     let video_track = session.add_video_track().await.map_err(|e| e.to_string())?;
+    syn_core::debug_log!("TAURI", "Adding foveated video track");
+    let foveated_track = session.add_foveated_video_track().await.ok(); // 如果失敗就當作 None
+
     syn_core::debug_log!("TAURI", "Creating VideoStreamer");
-    let mut streamer = syn_core::video::VideoStreamer::new(video_track).map_err(|e| e.to_string())?;
+    let mut streamer = syn_core::video::VideoStreamer::new(video_track, foveated_track).map_err(|e| e.to_string())?;
     syn_core::debug_log!("TAURI", "VideoStreamer created");
 
     // 加入音訊軌道並啟動擷取迴圈 (P1-A)
