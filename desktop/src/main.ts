@@ -3,6 +3,7 @@ import { setupFileTransferDropZone } from "./file_transfer";
 import { I18N_HELP_DOCS } from "./help_i18n";
 import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
+import pkg from "../package.json";
 
 function isDesktopTauri(): boolean {
   if (!isTauri()) return false;
@@ -4894,6 +4895,10 @@ function initPinToggle() {
 // 應用程式初始化入口點
 // =========================================================================
 window.addEventListener("DOMContentLoaded", async () => {
+  const versionLabel = document.getElementById("app-version-label");
+  if (versionLabel && pkg.version) {
+    versionLabel.textContent = `v${pkg.version}`;
+  }
   setupFileTransferDropZone(() => dataChannelFileTransfer);
   initDeviceBook();
 
