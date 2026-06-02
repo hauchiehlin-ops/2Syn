@@ -4629,21 +4629,31 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   // --- 行動端 Keyboard Bar 邏輯 ---
   if (btnKeyboard && keyboardBar && mobileKeyboardInput && btnKeyboardSend) {
+    let isResetting = false;
+    let previousValueLength = 0;
+
+    const resetInput = () => {
+      isResetting = true;
+      mobileKeyboardInput.value = "\u200B";
+      previousValueLength = 1;
+      setTimeout(() => isResetting = false, 10);
+    };
+
     btnKeyboard.addEventListener("click", (e) => {
       e.stopPropagation();
       isKeyboardActive = true;
       keyboardBar.style.display = "flex";
-      mobileKeyboardInput.value = "";
+      resetInput();
       mobileKeyboardInput.focus();
     });
 
     const sendText = () => {
-      const val = mobileKeyboardInput.value;
+      const val = mobileKeyboardInput.value.replace(/\u200B/g, "");
       if (val.length > 0) {
         const encoder = new TextEncoder();
         const payload = encoder.encode(val);
         sendInputPacket(buildInputPacket(0x08, payload)); // 0x08 is String Packet
-        mobileKeyboardInput.value = "";
+        resetInput();
       }
     };
 
@@ -4651,9 +4661,34 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       sendText();
     });
 
+    mobileKeyboardInput.addEventListener("input", (e: Event) => {
+      if (isResetting) return;
+      
+      const val = mobileKeyboardInput.value;
+      if (val === "") {
+        // ZWS was deleted. If previous length was 1, it means user hit Backspace on an "empty" field.
+        if (previousValueLength === 1) {
+          sendKeyStroke(8);
+        }
+        resetInput();
+      } else if (!val.includes("\u200B")) {
+        isResetting = true;
+        mobileKeyboardInput.value = "\u200B" + val;
+        previousValueLength = mobileKeyboardInput.value.length;
+        setTimeout(() => isResetting = false, 10);
+      } else {
+        previousValueLength = val.length;
+      }
+    });
+
     mobileKeyboardInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         sendText();
+      } else if (e.key === "Backspace") {
+        if (mobileKeyboardInput.value === "\u200B" || mobileKeyboardInput.value === "") {
+          e.preventDefault();
+          sendKeyStroke(8);
+        }
       }
     });
 
