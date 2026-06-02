@@ -1968,8 +1968,9 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         const stream = event.streams && event.streams.length > 0 
             ? event.streams[0] 
             : new MediaStream([event.track]);
+        const isFoveated = event.track.id === "foveated" || event.track.label === "foveated";
 
-        if (event.track.label === "foveated" || (videoEl.srcObject && (videoEl.srcObject as MediaStream).active)) {
+        if (isFoveated) {
             console.log("[WebRTC] 收到感知優先 (Foveated) 軌道");
             let fv = document.getElementById("foveated-video") as HTMLVideoElement;
             if (!fv) {
