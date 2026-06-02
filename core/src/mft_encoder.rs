@@ -30,17 +30,21 @@ struct RgbaToI420 {
 }
 
 impl RgbaToI420 {
-    fn new(rgba: &[u8], width: usize, height: usize) -> Self {
-        // 強制對齊為偶數，避免 UV 平面計算溢位
-        let aligned_w = width & !1;
-        let aligned_h = height & !1;
+    fn new(rgba: &[u8], src_width: usize, src_height: usize, target_width: usize, target_height: usize) -> Self {
+        let aligned_w = target_width & !1;
+        let aligned_h = target_height & !1;
         let mut y_plane = vec![0u8; aligned_w * aligned_h];
         let mut u_plane = vec![0u8; (aligned_w / 2) * (aligned_h / 2)];
         let mut v_plane = vec![0u8; (aligned_w / 2) * (aligned_h / 2)];
 
+        let scale_x = src_width as f32 / aligned_w as f32;
+        let scale_y = src_height as f32 / aligned_h as f32;
+
         y_plane.par_chunks_exact_mut(aligned_w).enumerate().for_each(|(j, y_row)| {
+            let src_j = ((j as f32 * scale_y) as usize).min(src_height - 1);
             for i in 0..aligned_w {
-                let idx = (j * width + i) * 4;
+                let src_i = ((i as f32 * scale_x) as usize).min(src_width - 1);
+                let idx = (src_j * src_width + src_i) * 4;
                 let r = rgba[idx] as i32;
                 let g = rgba[idx + 1] as i32;
                 let b = rgba[idx + 2] as i32;
@@ -51,9 +55,11 @@ impl RgbaToI420 {
         let uv_width = aligned_w / 2;
         u_plane.par_chunks_exact_mut(uv_width).zip(v_plane.par_chunks_exact_mut(uv_width)).enumerate().for_each(|(u_j, (u_row, v_row))| {
             let j = u_j * 2;
+            let src_j = ((j as f32 * scale_y) as usize).min(src_height - 1);
             for u_i in 0..uv_width {
                 let i = u_i * 2;
-                let idx = (j * width + i) * 4;
+                let src_i = ((i as f32 * scale_x) as usize).min(src_width - 1);
+                let idx = (src_j * src_width + src_i) * 4;
                 let r = rgba[idx] as i32;
                 let g = rgba[idx + 1] as i32;
                 let b = rgba[idx + 2] as i32;
@@ -125,11 +131,17 @@ impl VideoHardwareEncoder for WindowsHardwareEncoder {
         Ok(())
     }
 
-    fn reconfigure(&mut self, bitrate_kbps: u32, fps: u32, _target_width: u32, _target_height: u32) -> Result<(), CoreError> {
+    fn reconfigure(&mut self, bitrate_kbps: u32, fps: u32, target_width: u32, target_height: u32) -> Result<(), CoreError> {
         if let Some(ref mut p) = self.params {
             p.bitrate_kbps = bitrate_kbps;
             p.fps = fps;
-            // 未來可在這裡動態調整 MFT 的 ICodecAPI 屬性
+            p.width = target_width;
+            p.height = target_height;
+            // 觸發 MFT 重建
+            #[cfg(target_os = "windows")]
+            {
+                self.mft = None;
+            }
             Ok(())
         } else {
             Err(CoreError::HardwareCodecError("編碼器未初始化".to_string()))
@@ -141,18 +153,20 @@ impl VideoHardwareEncoder for WindowsHardwareEncoder {
         Ok(())
     }
 
-    fn encode_rgba_frame(&mut self, rgba_frame: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
-        // 先將 rgba 轉為 I420
-        let i420 = RgbaToI420::new(rgba_frame, width as usize, height as usize);
-        
+    fn encode_rgba_frame(&mut self, rgba_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
         #[cfg(target_os = "windows")]
         {
+            let target_w = self.params.as_ref().map(|p| p.width).unwrap_or(width);
+            let target_h = self.params.as_ref().map(|p| p.height).unwrap_or(height);
+
             if self.mft.is_none() {
-                self.setup_mft(width, height)?;
+                self.setup_mft(target_w, target_h)?;
             }
             
             unsafe {
                 if let Some(mft) = &self.mft {
+                    // 將 RGBA 轉換為 I420，同時支援縮放
+                    let i420 = RgbaToI420::new(rgba_data, width as usize, height as usize, target_w as usize, target_h as usize);
                     // 1. 建立 MFMemoryBuffer
                     let len = i420.y.len() + i420.u.len() + i420.v.len();
                     let buffer: IMFMediaBuffer = MFCreateMemoryBuffer(len as u32)

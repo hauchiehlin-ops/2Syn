@@ -19,10 +19,12 @@ use crate::codec::{VideoHardwareEncoder, CaptureCodecFactory, CodecParams, Video
 pub struct VideoStreamer {
     track: Arc<TrackLocalStaticSample>,
     encoder: Arc<Mutex<Box<dyn VideoHardwareEncoder + Send + Sync>>>,
+    foveated_track: Option<Arc<TrackLocalStaticSample>>,
+    foveated_encoder: Option<Arc<Mutex<Box<dyn VideoHardwareEncoder + Send + Sync>>>>,
 }
 
 impl VideoStreamer {
-    pub fn new(track: Arc<TrackLocalStaticSample>) -> Result<Self, String> {
+    pub fn new(track: Arc<TrackLocalStaticSample>, foveated_track: Option<Arc<TrackLocalStaticSample>>) -> Result<Self, String> {
         let mut encoder = CaptureCodecFactory::create_encoder();
         
         let params = CodecParams {
@@ -46,9 +48,35 @@ impl VideoStreamer {
             encoder.init(params).map_err(|e| format!("Failed to init encoder: {:?}", e))?;
         }
         
+        let mut foveated_encoder: Option<Arc<Mutex<Box<dyn VideoHardwareEncoder + Send + Sync>>>> = None;
+        if foveated_track.is_some() {
+            let mut fe = CaptureCodecFactory::create_encoder();
+            let f_params = CodecParams {
+                width: 400,
+                height: 400,
+                bitrate_kbps: 4000,
+                fps: 60,
+                codec_type: VideoCodecType::H264,
+            };
+            #[cfg(target_os = "macos")]
+            {
+                let init_res: Result<(), String> = objc::rc::autoreleasepool(|| {
+                    fe.init(f_params).map_err(|e| format!("Failed to init foveated encoder: {:?}", e))
+                });
+                init_res?;
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                fe.init(f_params).map_err(|e| format!("Failed to init foveated encoder: {:?}", e))?;
+            }
+            foveated_encoder = Some(Arc::new(Mutex::new(fe)));
+        }
+
         Ok(Self {
             track,
             encoder: Arc::new(Mutex::new(encoder)),
+            foveated_track,
+            foveated_encoder,
         })
     }
 
@@ -80,6 +108,24 @@ impl VideoStreamer {
                 }
             }
         });
+
+        // 第二軌道（感知優先）發送通道與任務
+        let (foveated_tx, mut foveated_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
+        let foveated_track_arc = self.foveated_track.clone();
+        tokio::spawn(async move {
+            if let Some(f_track) = foveated_track_arc {
+                while let Some(data) = foveated_rx.recv().await {
+                    let sample = Sample {
+                        data: data.into(),
+                        duration: Duration::from_millis(33),
+                        ..Default::default()
+                    };
+                    let _ = tokio::time::timeout(std::time::Duration::from_millis(100), f_track.write_sample(&sample)).await;
+                }
+            }
+        });
+
+        let foveated_encoder_arc = self.foveated_encoder.clone();
 
         tokio::task::spawn_blocking(move || {
             let mut tick = std::time::Instant::now();
@@ -266,20 +312,13 @@ impl VideoStreamer {
                         }
                         frame_count += 1;
                         
-                        crate::debug_log!("VIDEO", "Before encoder.encode_rgba_frame frame_count={} bytes_len={} w={} h={}", frame_count, bytes.len(), adj_width, adj_height);
                         let encode_result = encoder_guard.encode_rgba_frame(&bytes, adj_width as u32, adj_height as u32);
-                        crate::debug_log!("VIDEO", "After encoder.encode_rgba_frame result={}", encode_result.is_ok());
                         
                         match encode_result {
                             Ok(encoded) => {
                                 let data = encoded.to_vec();
                                 if !data.is_empty() {
-                                    if frame_count % 30 == 1 {
-                                        println!("[Video] Encoded frame size: {} bytes", data.len());
-                                    }
-                                    if let Err(_e) = tx.try_send(data) {
-                                        // 可以在這裡加入除錯訊息，表示網路擁塞導致掉幀
-                                    }
+                                    if let Err(_e) = tx.try_send(data) {}
                                 }
                             }
                             Err(e) => {
@@ -287,6 +326,47 @@ impl VideoStreamer {
                                 eprintln!("[Video] {}", msg);
                                 if let Some(tx) = &status_tx {
                                     let _ = tx.send(msg);
+                                }
+                            }
+                        }
+                    }
+
+                    // 處理第二軌道（Foveated 感知優先擷取）
+                    if let Some(fe_arc) = &foveated_encoder_arc {
+                        if let Ok(mut fe_guard) = fe_arc.try_lock() {
+                            let (cx_ratio, cy_ratio) = crate::input::get_global_cursor();
+                            let cx_px = (cx_ratio * width as f32) as i32;
+                            let cy_px = (cy_ratio * height as f32) as i32;
+                            let roi_w = 400;
+                            let roi_h = 400;
+                            
+                            // 確保 ROI 不超出邊界
+                            let mut start_x = (cx_px - roi_w / 2).max(0);
+                            let mut start_y = (cy_px - roi_h / 2).max(0);
+                            if start_x + roi_w > width as i32 { start_x = (width as i32 - roi_w).max(0); }
+                            if start_y + roi_h > height as i32 { start_y = (height as i32 - roi_h).max(0); }
+                            
+                            let start_x = start_x as usize;
+                            let start_y = start_y as usize;
+                            let roi_w = roi_w as usize;
+                            let roi_h = roi_h as usize;
+
+                            if width >= roi_w && height >= roi_h {
+                                let mut roi_bytes = vec![0u8; roi_w * roi_h * 4];
+                                for y in 0..roi_h {
+                                    let src_idx = ((start_y + y) * width + start_x) * 4;
+                                    let dst_idx = y * roi_w * 4;
+                                    roi_bytes[dst_idx..dst_idx + roi_w * 4].copy_from_slice(&bytes[src_idx..src_idx + roi_w * 4]);
+                                }
+                                
+                                if frame_count % 30 == 0 {
+                                    let _ = fe_guard.force_intra_frame();
+                                }
+                                
+                                if let Ok(encoded) = fe_guard.encode_rgba_frame(&roi_bytes, roi_w as u32, roi_h as u32) {
+                                    if !encoded.is_empty() {
+                                        let _ = foveated_tx.try_send(encoded);
+                                    }
                                 }
                             }
                         }

@@ -1,5 +1,22 @@
 use crate::CoreError;
 use std::convert::TryInto;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// 全域滑鼠游標追蹤，供後端雙軌擷取引擎（Foveated Streaming）定位 ROI 中心點
+/// 儲存 f32 位元結構的 Atomic 變數
+pub static CURSOR_X: AtomicU32 = AtomicU32::new(0);
+pub static CURSOR_Y: AtomicU32 = AtomicU32::new(0);
+
+pub fn set_global_cursor(x: f32, y: f32) {
+    CURSOR_X.store(x.to_bits(), Ordering::Relaxed);
+    CURSOR_Y.store(y.to_bits(), Ordering::Relaxed);
+}
+
+pub fn get_global_cursor() -> (f32, f32) {
+    let x = f32::from_bits(CURSOR_X.load(Ordering::Relaxed));
+    let y = f32::from_bits(CURSOR_Y.load(Ordering::Relaxed));
+    (x, y)
+}
 
 /// 輸入事件類型
 #[derive(Debug, Clone, PartialEq)]
@@ -156,6 +173,9 @@ impl InputEvent {
                     InputEvent::MouseMove { x, y } => {
                         let clamped_x = x.clamp(0.0, 1.0);
                         let clamped_y = y.clamp(0.0, 1.0);
+                        // 更新全域游標位置
+                        set_global_cursor(clamped_x, clamped_y);
+                        
                         // 設定為絕對座標定位，對應螢幕解析度 (0 ~ 65535)
                         input.r#type = INPUT_MOUSE;
                         input.Anonymous.mi.dx = (clamped_x * 65535.0) as i32;
@@ -341,6 +361,9 @@ impl InputEvent {
                 InputEvent::MouseMove { x, y } => {
                     let clamped_x = x.clamp(0.0, 1.0);
                     let clamped_y = y.clamp(0.0, 1.0);
+                    // 更新全域游標位置
+                    set_global_cursor(clamped_x, clamped_y);
+                    
                     let point = core_graphics::geometry::CGPoint::new(clamped_x as f64 * screen_w, clamped_y as f64 * screen_h);
                     
                     let mut event_type = CGEventType::MouseMoved;

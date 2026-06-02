@@ -12,7 +12,8 @@ const files = {
   tauriClientConf: path.join(rootDir, 'desktop', 'src-tauri', 'tauri.client.conf.json'),
   tauriCargo: path.join(rootDir, 'desktop', 'src-tauri', 'Cargo.toml'),
   coreCargo: path.join(rootDir, 'core', 'Cargo.toml'),
-  signalingCargo: path.join(rootDir, 'signaling', 'Cargo.toml')
+  signalingCargo: path.join(rootDir, 'signaling', 'Cargo.toml'),
+  indexHtml: path.join(rootDir, 'desktop', 'index.html')
 };
 
 // 讀取目前 package.json 的版次
@@ -82,5 +83,19 @@ const updateCargoVersion = (filePath) => {
 updateCargoVersion(files.tauriCargo);
 updateCargoVersion(files.coreCargo);
 updateCargoVersion(files.signalingCargo);
+
+// 5. 更新 index.html 中的標題版本
+const updateIndexHtmlVersion = (filePath) => {
+  if (fs.existsSync(filePath)) {
+    let content = fs.readFileSync(filePath, 'utf-8');
+    // 替換 <title> 標籤
+    content = content.replace(/<title>2syn_Duel v[\d\.]+<\/title>/g, `<title>2syn_Duel v${nextVersion}</title>`);
+    // 替換 logo 文字
+    content = content.replace(/2syn_Duel v[\d\.]+/g, `2syn_Duel v${nextVersion}`);
+    fs.writeFileSync(filePath, content);
+    console.log(`Updated: ${filePath}`);
+  }
+};
+updateIndexHtmlVersion(files.indexHtml);
 
 console.log(`[Version Bump] Successfully bumped version to ${nextVersion} in all files!`);
