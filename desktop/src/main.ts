@@ -1999,7 +1999,8 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         }
 
         if (!videoEl.srcObject) {
-          videoEl.srcObject = stream;
+          // 強制僅綁定視訊軌道，避免 iOS Safari 因為混入音訊軌道而無條件阻擋 autoplay
+          videoEl.srcObject = new MediaStream([event.track]);
             
           // 啟用零延遲渲染 (Zero-Latency Rendering)
           if ((videoEl as any).playoutDelayHint !== undefined) {
@@ -4400,8 +4401,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           sendInputPacket(buildInputPacket(0x03, payload));
           isDragging = false;
         } else {
-          // 軌跡板模式單指輕觸 -> 左鍵點擊 (15ms 延遲確保雙平台相容)
-          if (touchStartTime > 0 && now - touchStartTime < 350 && maxTouches === 1) {
+          // 軌跡板模式單指輕觸 -> 左鍵點擊 (降低延遲至20ms，放寬點擊判定至450ms)
+          if (touchStartTime > 0 && now - touchStartTime < 450 && maxTouches === 1) {
             const dist = Math.sqrt(Math.pow(endX - touchStartPos.x, 2) + Math.pow(endY - touchStartPos.y, 2));
             if (dist < 20) {
               const tapDist = Math.sqrt(Math.pow(endX - lastTapPos.x, 2) + Math.pow(endY - lastTapPos.y, 2));
@@ -4420,7 +4421,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
                   payloadUp[0] = 1;
                   sendInputPacket(buildInputPacket(0x03, payloadUp));
                   console.log("[Gesture-Trackpad] 單指輕點完成");
-                }, 60);
+                }, 20);
                 
                 lastTapTime = now;
                 lastTapPos = { x: endX, y: endY };
@@ -4661,12 +4662,20 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       sendText();
     });
 
+    // 針對 Android Gboard 等虛擬鍵盤，使用 beforeinput 達成零延遲的刪除攔截
+    mobileKeyboardInput.addEventListener("beforeinput", (e: InputEvent) => {
+      if (e.inputType === "deleteContentBackward") {
+        e.preventDefault();
+        sendKeyStroke(8);
+      }
+    });
+
     mobileKeyboardInput.addEventListener("input", (e: Event) => {
       if (isResetting) return;
       
       const val = mobileKeyboardInput.value;
       if (val === "") {
-        // ZWS was deleted. If previous length was 1, it means user hit Backspace on an "empty" field.
+        // Fallback for older browsers: ZWS was deleted
         if (previousValueLength === 1) {
           sendKeyStroke(8);
         }
