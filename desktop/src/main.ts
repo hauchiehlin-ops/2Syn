@@ -4711,23 +4711,28 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       
       const container = document.getElementById("remote-video-container");
       if (container) {
-        // 將視訊容器的高度限制在視口內，防止被鍵盤遮擋
-        container.style.height = `${vv.height}px`;
-        
-        if (isKeyboardActive && keyboardBar.style.display !== "none") {
-          // 讓工具列貼齊視口底部 (尤其在 iOS 上需要計算 offset)
-          keyboardBar.style.bottom = `${window.innerHeight - vv.height - vv.offsetTop}px`;
+        // 只有在鍵盤開啟時才動態縮放高度，避免 iOS 上觸發 layout shift 導致 touchcancel 吃掉點擊事件
+        if (isKeyboardActive || document.activeElement === mobileKeyboardInput) {
+          container.style.height = `${vv.height}px`;
+          
+          if (keyboardBar.style.display !== "none") {
+            // 讓工具列貼齊視口底部 (尤其在 iOS 上需要計算 offset)
+            keyboardBar.style.bottom = `${window.innerHeight - vv.height - vv.offsetTop}px`;
+          }
         } else {
+          container.style.height = `100vh`;
           keyboardBar.style.bottom = "0px";
         }
       }
       
-      // 確保畫面捲動置頂，防止 iOS 將 body 往上推
-      window.scrollTo(0, 0);
+      // 僅在鍵盤開啟時強制置頂，防呆 iOS Safari 將 body 往上推
+      if (isKeyboardActive) {
+        window.scrollTo(0, 0);
+      }
     };
     
     window.visualViewport.addEventListener("resize", onViewportChange);
-    window.visualViewport.addEventListener("scroll", onViewportChange);
+    // 移除 scroll 監聽，因為在 iOS 上會造成嚴重效能問題與觸控中斷
     // 初始化呼叫
     onViewportChange();
   }
