@@ -4312,8 +4312,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
     
     if (e.touches.length === 0) {
-      if (isKeyboardActive && hiddenInput && document.activeElement !== hiddenInput) {
-        hiddenInput.focus();
+      if (isKeyboardActive && mobileKeyboardInput && document.activeElement !== mobileKeyboardInput) {
+        if (keyboardBar && !keyboardBar.contains(e.target as Node)) {
+          isKeyboardActive = false;
+          keyboardBar.style.display = "none";
+        }
       }
       // 抬起手指時，立刻重置邊緣平移
       currentCursorPercentX = 0.5;
@@ -4617,17 +4620,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     sendInputPacket(buildInputPacket(0x06, payload));
   };
 
-  const handleBackspace = () => {
-    const now = Date.now();
-    if (now - lastBackspaceTime > 100) {
-      lastBackspaceTime = now;
-      sendKeyStroke(8);
-    }
-    if (hiddenInput) {
-      hiddenInput.value = "   ";
-    }
-    lastValue = "   ";
-  };
+
 
   const handleEnter = () => {
     sendKeyStroke(13);
