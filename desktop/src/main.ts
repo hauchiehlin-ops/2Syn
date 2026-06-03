@@ -4490,14 +4490,40 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       setTimeout(() => isResetting = false, 10);
     };
 
-    btnKeyboard.addEventListener("click", (e) => {
-      e.stopPropagation();
+    // 開啟鍵盤的核心邏輯（供 touchend / click 共用）
+    let keyboardOpenGuard = false;
+    const openMobileKeyboard = () => {
+      if (keyboardOpenGuard) return;
+      keyboardOpenGuard = true;
+      setTimeout(() => keyboardOpenGuard = false, 300);
+
       isKeyboardActive = true;
       keyboardBar.style.visibility = "visible";
       keyboardBar.style.opacity = "1";
       keyboardBar.style.pointerEvents = "auto";
-      resetInput();
+
+      // iOS Safari 強制要求：focus() 必須在使用者手勢的同步呼叫鏈內，
+      // 且必須在任何 setTimeout 之前執行，否則虛擬鍵盤不會彈出。
       mobileKeyboardInput.focus();
+
+      // focus 之後再重設 input 值（不影響鍵盤彈出）
+      isResetting = true;
+      mobileKeyboardInput.value = "\u200B";
+      previousValueLength = 1;
+      setTimeout(() => isResetting = false, 10);
+    };
+
+    // iOS Safari：touchend 是唯一能在同步呼叫鏈中觸發虛擬鍵盤的事件
+    btnKeyboard.addEventListener("touchend", (e) => {
+      e.preventDefault(); // 阻止合成 click，避免 openMobileKeyboard 被觸發兩次
+      e.stopPropagation();
+      openMobileKeyboard();
+    }, { passive: false });
+
+    // Android / Desktop 後備：click 事件
+    btnKeyboard.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openMobileKeyboard();
     });
 
     const sendText = () => {
@@ -4573,15 +4599,16 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     });
 
     mobileKeyboardInput.addEventListener("blur", () => {
-      // 延遲隱藏，避免點擊發送按鈕時立即隱藏
+      // 延遲隱藏：iOS Safari 彈出虛擬鍵盤時會觸發假 blur，需足夠長的延遲避免誤關
       setTimeout(() => {
+        if (keyboardOpenGuard) return; // 正在開啟鍵盤，忽略此次 blur
         if (document.activeElement !== mobileKeyboardInput) {
           isKeyboardActive = false;
           keyboardBar.style.visibility = "hidden";
           keyboardBar.style.opacity = "0";
           keyboardBar.style.pointerEvents = "none";
         }
-      }, 100);
+      }, 300);
     });
   }
 
