@@ -3417,6 +3417,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let lastTapTime = 0;
   let lastTapPos = { x: 0, y: 0 };
   let isDragging = false;
+  let isPotentialDrag = false;
+  let twoFingerHasMoved = false;
+  let wasLongPressDrag = false;
   let lastTouchX = 0;
   let lastTouchY = 0;
   let touchStartPos = { x: 0, y: 0 };
@@ -3445,6 +3448,40 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         }, 60);
       }, 60);
     }, 60);
+  };
+
+  const triggerMacShortcut = (shortcut: "mission-control" | "space-left" | "space-right") => {
+    const ctrlCode = 17;
+    let arrowCode = 38; // Up for Mission Control
+    if (shortcut === "space-left") {
+      arrowCode = 37; // Left arrow
+    } else if (shortcut === "space-right") {
+      arrowCode = 39; // Right arrow
+    }
+
+    const pressKey = (code: number, mods: number = 0) => {
+      const payload = new Uint8Array(3);
+      const view = new DataView(payload.buffer);
+      view.setUint16(0, code, false);
+      payload[2] = mods;
+      sendInputPacket(buildInputPacket(0x05, payload));
+    };
+
+    const releaseKey = (code: number, mods: number = 0) => {
+      const payload = new Uint8Array(3);
+      const view = new DataView(payload.buffer);
+      view.setUint16(0, code, false);
+      payload[2] = mods;
+      sendInputPacket(buildInputPacket(0x06, payload));
+    };
+
+    // Press Ctrl, then press Arrow, then release Arrow, then release Ctrl
+    pressKey(ctrlCode, 2);
+    pressKey(arrowCode, 2);
+    setTimeout(() => {
+      releaseKey(arrowCode, 2);
+      releaseKey(ctrlCode, 0);
+    }, 50);
   };
   let initialPinchDistance = -1;
   let maxTouches = 0;
@@ -3728,8 +3765,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       currentCursorPercentX = x;
       currentCursorPercentY = y;
       // 實體滑鼠不再更新與顯示合成游標，直接依賴原生游標
-      
-      
     }
   });
 
@@ -3737,241 +3772,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     // 移出時終止邊緣平移
     currentCursorPercentX = 0.5;
     currentCursorPercentY = 0.5;
-  });
-
-  videoEl.addEventListener("pointerdown", (e) => {
-    if (e.pointerType === "touch" || e.pointerType === "pen") return;
-    e.preventDefault();
-    
-    const videoContainer = document.getElementById("remote-video-container");
-    if (videoContainer && document.activeElement !== videoContainer) {
-      videoContainer.focus();
-    }
-    
-    // 點擊畫面時，不再強制鎖定指標，確保原生游標可以任意移動並精準發送絕對座標
-    
-    const payload = new Uint8Array(1);
-    let btn = 1;
-    if (e.button === 2) btn = 2;
-    if (e.button === 1) btn = 3;
-    payload[0] = btn;
-    sendInputPacket(buildInputPacket(0x02, payload));
-  });
-
-  // 監聽 Pointer Lock 變更
-  document.addEventListener("pointerlockchange", () => {
-    const tooltip = document.getElementById("pointer-lock-tooltip");
-    
-    
-    if (document.pointerLockElement === videoEl) {
-      console.log("[Pointer Lock] 滑鼠指標已鎖定");
-      
-      // 初始化合成游標位置
-      syntheticCursorPercentX = currentCursorPercentX || 0.5;
-      syntheticCursorPercentY = currentCursorPercentY || 0.5;
-      
-      
-      
-      if (tooltip) {
-        tooltip.style.display = "block";
-        tooltip.style.opacity = "1";
-        // 3 秒後漸隱
-        setTimeout(() => {
-          if (document.pointerLockElement === videoEl) {
-            tooltip.style.opacity = "0";
-            setTimeout(() => {
-              if (document.pointerLockElement === videoEl && tooltip.style.opacity === "0") {
-                tooltip.style.display = "none";
-              }
-            }, 300);
-          }
-        }, 3000);
-      }
-      
-      // 啟用 Keyboard Lock (系統快捷鍵攔截)
-      if ((navigator as any).keyboard && typeof (navigator as any).keyboard.lock === "function") {
-        (navigator as any).keyboard.lock(["Escape", "Tab", "MetaLeft", "MetaRight", "AltLeft", "AltRight"])
-          .then(() => console.log("[Keyboard Lock] 鍵盤鎖定成功"))
-          .catch((err: any) => console.warn("[Keyboard Lock] 鍵盤鎖定失敗:", err));
-      }
-    } else {
-      console.log("[Pointer Lock] 滑鼠指標已解鎖");
-      
-
-      if (tooltip) {
-        tooltip.style.display = "none";
-        tooltip.style.opacity = "0";
-      }
-      
-      // 解除 Keyboard Lock
-      if ((navigator as any).keyboard && typeof (navigator as any).keyboard.unlock === "function") {
-        (navigator as any).keyboard.unlock();
-        console.log("[Keyboard Lock] 鍵盤鎖定解除");
-      }
-      
-      // 重置邊緣平移座標
-      currentCursorPercentX = 0.5;
-      currentCursorPercentY = 0.5;
-    }
-  });
-
-  // 快速鍵下拉選單切換與複合按鍵發送
-  const btnSendKeys = document.getElementById("btn-send-keys");
-  const shortcutsDropdown = document.getElementById("shortcuts-dropdown");
-  if (btnSendKeys && shortcutsDropdown) {
-    btnSendKeys.onclick = (e) => {
-      e.stopPropagation();
-      const isVisible = shortcutsDropdown.style.display === "flex";
-      shortcutsDropdown.style.display = isVisible ? "none" : "flex";
-    };
-
-    // 點擊選單外部時，隱藏選單
-    document.addEventListener("click", () => {
-      if (shortcutsDropdown.style.display === "flex") {
-        shortcutsDropdown.style.display = "none";
-      }
-    });
-
-    // 阻止選單內部點擊冒泡
-    shortcutsDropdown.onclick = (e) => {
-      e.stopPropagation();
-    };
-
-    // 下拉選單項目的 hover 效果與點擊事件
-    const shortcutItems = shortcutsDropdown.querySelectorAll(".shortcut-item");
-    shortcutItems.forEach((item) => {
-      const btnItem = item as HTMLButtonElement;
-      
-      btnItem.onmouseenter = () => {
-        btnItem.style.background = "rgba(255, 255, 255, 0.15)";
-      };
-      btnItem.onmouseleave = () => {
-        btnItem.style.background = "none";
-      };
-
-      btnItem.onclick = () => {
-        const keys = btnItem.getAttribute("data-keys");
-        if (keys) {
-          sendShortcut(keys);
-        }
-        shortcutsDropdown.style.display = "none";
-      };
-    });
-  }
-
-  // 輔助函數：發送複合快捷鍵
-  function sendShortcut(keys: string) {
-    const ctrlCode = 17;
-    const altCode = 18;
-    const delCode = 46;
-    const winCode = 91;
-    const tabCode = 9;
-    const escCode = 27;
-
-    const pressKey = (code: number, mods: number = 0) => {
-      const payload = new Uint8Array(3);
-      const view = new DataView(payload.buffer);
-      view.setUint16(0, code, false);
-      payload[2] = mods;
-      sendInputPacket(buildInputPacket(0x05, payload));
-    };
-
-    const releaseKey = (code: number, mods: number = 0) => {
-      const payload = new Uint8Array(3);
-      const view = new DataView(payload.buffer);
-      view.setUint16(0, code, false);
-      payload[2] = mods;
-      sendInputPacket(buildInputPacket(0x06, payload));
-    };
-
-    if (keys === "ctrl-alt-del") {
-      // 複合鍵順序：Ctrl Down -> Alt Down -> Del Down -> Del Up -> Alt Up -> Ctrl Up
-      pressKey(ctrlCode, 2);
-      pressKey(altCode, 6);
-      pressKey(delCode, 6);
-      setTimeout(() => {
-        releaseKey(delCode, 6);
-        releaseKey(altCode, 2);
-        releaseKey(ctrlCode, 0);
-      }, 50);
-    } else if (keys === "win") {
-      pressKey(winCode, 8);
-      setTimeout(() => {
-        releaseKey(winCode, 0);
-      }, 50);
-    } else if (keys === "alt-tab") {
-      pressKey(altCode, 4);
-      pressKey(tabCode, 4);
-      setTimeout(() => {
-        releaseKey(tabCode, 4);
-        releaseKey(altCode, 0);
-      }, 50);
-    } else if (keys === "ctrl-esc") {
-      pressKey(ctrlCode, 2);
-      pressKey(escCode, 2);
-      setTimeout(() => {
-        releaseKey(escCode, 2);
-        releaseKey(ctrlCode, 0);
-      }, 50);
-    }
-  }
-
-  // 輔助函數：發送 Mac 系統手勢快捷鍵宏
-  function triggerMacShortcut(keyName: "mission-control" | "space-left" | "space-right") {
-    const ctrlCode = 17;
-    const upCode = 38;
-    const leftCode = 37;
-    const rightCode = 39;
-
-    const pressKey = (code: number, mods: number = 0) => {
-      const payload = new Uint8Array(3);
-      const view = new DataView(payload.buffer);
-      view.setUint16(0, code, false);
-      payload[2] = mods;
-      sendInputPacket(buildInputPacket(0x05, payload));
-    };
-
-    const releaseKey = (code: number, mods: number = 0) => {
-      const payload = new Uint8Array(3);
-      const view = new DataView(payload.buffer);
-      view.setUint16(0, code, false);
-      payload[2] = mods;
-      sendInputPacket(buildInputPacket(0x06, payload));
-    };
-
-    if (keyName === "mission-control") {
-      pressKey(ctrlCode, 2);
-      pressKey(upCode, 2);
-      setTimeout(() => {
-        releaseKey(upCode, 2);
-        releaseKey(ctrlCode, 0);
-      }, 50);
-    } else if (keyName === "space-left") {
-      pressKey(ctrlCode, 2);
-      pressKey(leftCode, 2);
-      setTimeout(() => {
-        releaseKey(leftCode, 2);
-        releaseKey(ctrlCode, 0);
-      }, 50);
-    } else if (keyName === "space-right") {
-      pressKey(ctrlCode, 2);
-      pressKey(rightCode, 2);
-      setTimeout(() => {
-        releaseKey(rightCode, 2);
-        releaseKey(ctrlCode, 0);
-      }, 50);
-    }
-  }
-
-  videoEl.addEventListener("pointerup", (e) => {
-    if (e.pointerType === "touch" || e.pointerType === "pen") return;
-    e.preventDefault();
-    const payload = new Uint8Array(1);
-    let btn = 1;
-    if (e.button === 2) btn = 2;
-    if (e.button === 1) btn = 3;
-    payload[0] = btn;
-    sendInputPacket(buildInputPacket(0x03, payload));
   });
 
   // --- 手勢辨識與狀態機 ---
@@ -4008,6 +3808,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       pinchStartTy = videoTranslateY;
       pinchStartCx = lastTouchX;
       pinchStartCy = lastTouchY;
+      twoFingerHasMoved = false; // 重置雙指移動狀態
     } else if (e.touches.length === 1) {
       lastTouchX = e.touches[0].clientX;
       lastTouchY = e.touches[0].clientY;
@@ -4018,41 +3819,33 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       touchStartClientX = lastTouchX;
       touchStartClientY = lastTouchY;
       hasTriggeredLongPress = false;
+      isPotentialDrag = false;
+      wasLongPressDrag = false;
 
       if (longPressTimer) clearTimeout(longPressTimer);
+      // 單指長按重壓 -> 觸發拖曳模式 (滑鼠左鍵按下，伴隨重震動)
       longPressTimer = setTimeout(() => {
         hasTriggeredLongPress = true;
         
-        if (isDragging) {
-          const payloadLeftUp = new Uint8Array(1);
-          payloadLeftUp[0] = 1; // Left click release
-          sendInputPacket(buildInputPacket(0x03, payloadLeftUp));
-          isDragging = false;
-        }
-
-        // 發送右鍵按下與放開
-        const payloadDown = new Uint8Array(1);
-        payloadDown[0] = 2; // Right click down
-        sendInputPacket(buildInputPacket(0x02, payloadDown));
+        isDragging = true;
+        wasLongPressDrag = true;
         
-        const payloadUp = new Uint8Array(1);
-        payloadUp[0] = 2; // Right click up
-        sendInputPacket(buildInputPacket(0x03, payloadUp));
+        // 發送滑鼠左鍵按下
+        const payload = new Uint8Array(1);
+        payload[0] = 1; // Left click down
+        sendInputPacket(buildInputPacket(0x02, payload));
         
         triggerHaptic("heavy");
-        console.log("[Gesture] 單指長按，觸發右鍵點擊與震動");
+        console.log("[Gesture] 單指長按重壓，觸發左鍵拖曳模式");
       }, 400);
       
       if (isDirectTouchMode) {
-        // Direct Touch 模式：不在此立即發送 MouseDown，而是採取 Lazy Drag 延遲拖曳
         isDragging = false;
       } else {
         if (now - lastTapTime < 350) {
-          // 雙擊拖曳
-          isDragging = true;
-          const payload = new Uint8Array(1);
-          payload[0] = 1;
-          sendInputPacket(buildInputPacket(0x02, payload));
+          // 雙擊時間窗內：標記為潛在拖曳 (不要在此立刻發送 MouseDown，而是等 move 判斷)
+          isPotentialDrag = true;
+          isDragging = false;
         } else {
           isDragging = false;
         }
@@ -4098,6 +3891,12 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       
+      // 雙指位移或捏合距離追蹤，用於過濾右鍵點擊
+      const moveDist = Math.sqrt(Math.pow(centerX - touchStartPos.x, 2) + Math.pow(centerY - touchStartPos.y, 2));
+      if (moveDist > 10 || (initialPinchDistance > 0 && Math.abs(currentDistance - initialPinchDistance) > 10)) {
+        twoFingerHasMoved = true;
+      }
+
       if (!isLocalPinching && initialPinchDistance > 0 && Math.abs(currentDistance - initialPinchDistance) > 30) {
         isLocalPinching = true;
       }
@@ -4179,7 +3978,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       }
 
       if (hasTriggeredLongPress) {
-        return;
+        // 長按重壓拖曳中：長按觸發後會直接進入 dragging，這裡交給下方的 isDragging 處理位置更新
       }
       
       const rect = videoEl.getBoundingClientRect();
@@ -4206,14 +4005,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         x = Math.max(0, Math.min(1, x));
         y = Math.max(0, Math.min(1, y));
         
-        // 移除智能磁吸
-        
         // Tremor Suppression (防手震) & Lazy Drag (延遲拖曳激活)
         if (!isDragging) {
           const startDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
           if (startDist > 20 || Date.now() - touchStartTime > 200) {
             isDragging = true;
-            // 首次啟動拖曳：先發送滑鼠移動到起點，再發送滑鼠按下
             let startPctX = (touchStartPos.x - rect.left - offsetX) / renderedWidth;
             let startPctY = (touchStartPos.y - rect.top - offsetY) / renderedHeight;
             startPctX = Math.max(0, Math.min(1, startPctX));
@@ -4238,6 +4034,20 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           currentCursorPercentY = y;
         }
       } else {
+        // 軌跡板模式下的移動
+        if (isPotentialDrag) {
+          // 雙擊後手指移動：如果移動超過微小閾值，真正激活拖曳模式
+          const moveDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
+          if (moveDist > 5) {
+            isDragging = true;
+            isPotentialDrag = false;
+            const payload = new Uint8Array(1);
+            payload[0] = 1; // Left click down
+            sendInputPacket(buildInputPacket(0x02, payload));
+            console.log("[Gesture] 雙擊拖曳模式激活");
+          }
+        }
+
         if (lastTouchX !== 0 && lastTouchY !== 0) {
           const dx = currentX - lastTouchX;
           const dy = currentY - lastTouchY;
@@ -4288,7 +4098,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     const now = Date.now();
 
     if (isThreeFingerGesture) {
-      if (!threeFingerHasMoved && touchStartTime > 0 && now - touchStartTime < 300) {
+      if (!threeFingerHasMoved && touchStartTime > 0 && now - touchStartTime < 350) {
         triggerMacShortcut("mission-control");
         triggerHaptic("medium");
         console.log("[Gesture] 三指輕點，觸發 Mission Control");
@@ -4300,10 +4110,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       return;
     }
 
-    // 雙指輕觸判定優化：只要在 350ms 內偵測到 maxTouches === 2，且未發生大範圍縮放，在第一根手指抬起時即刻觸發右鍵
+    // 雙指輕觸判定：無兩指大幅滑動 (!twoFingerHasMoved) 時，在第一根手指抬起時觸發右鍵
     if (maxTouches === 2) {
-      if (touchStartTime > 0 && now - touchStartTime < 350 && !isLocalPinching) {
-        // 雙指輕觸 -> 右鍵點擊 (發送 Down 與 Up 之間加入 15ms 延遲，以防 macOS 忽略同網路包連續點擊)
+      if (touchStartTime > 0 && now - touchStartTime < 350 && !isLocalPinching && !twoFingerHasMoved) {
         const payloadDown = new Uint8Array(1);
         payloadDown[0] = 2; // Right click down
         sendInputPacket(buildInputPacket(0x02, payloadDown));
@@ -4312,10 +4121,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           const payloadUp = new Uint8Array(1);
           payloadUp[0] = 2; // Right click up
           sendInputPacket(buildInputPacket(0x03, payloadUp));
-          console.log("[Gesture] 雙指輕點，60ms 延遲發送右鍵釋送完成");
+          console.log("[Gesture] 雙指輕點，發送右鍵釋送完成");
         }, 60);
-        
-        console.log("[Gesture] 雙指輕點，觸發右鍵按下");
         
         triggerHaptic("heavy");
       }
@@ -4324,10 +4131,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         startScrollMomentum();
       }
 
-      // 重置雙指狀態，防範後續多重觸發
       maxTouches = 0;
       touchStartTime = 0;
       initialPinchDistance = -1;
+      twoFingerHasMoved = false;
       return;
     }
     
@@ -4338,11 +4145,20 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           keyboardBar.style.display = "none";
         }
       }
-      // 抬起手指時，立刻重置邊緣平移
       currentCursorPercentX = 0.5;
       currentCursorPercentY = 0.5;
       
       if (hasTriggeredLongPress) {
+        // 長按重壓拖曳結束：釋放滑鼠左鍵，並彈出懸浮選項選單
+        const payload = new Uint8Array(1);
+        payload[0] = 1; // Left click release
+        sendInputPacket(buildInputPacket(0x03, payload));
+        isDragging = false;
+        
+        const clientX = e.changedTouches.length > 0 ? e.changedTouches[0].clientX : window.innerWidth / 2;
+        const clientY = e.changedTouches.length > 0 ? e.changedTouches[0].clientY : window.innerHeight / 2;
+        showFloatingMenu(clientX, clientY);
+        
         hasTriggeredLongPress = false;
         initialPinchDistance = -1;
         touchStartTime = 0;
@@ -4362,16 +4178,15 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           payload[0] = 1; // Left click release
           sendInputPacket(buildInputPacket(0x03, payload));
           isDragging = false;
+          
+          // 直控模式拖曳/匡選結束後也彈出懸浮選單
+          showFloatingMenu(endX, endY);
         } else {
-          // 直控模式單指輕觸 -> 左鍵點擊 (15ms 延遲確保雙平台相容)
-          // 智慧雙擊判定
           const tapDist = Math.sqrt(Math.pow(endX - lastTapPos.x, 2) + Math.pow(endY - lastTapPos.y, 2));
           if (now - lastTapTime < 350 && tapDist < 35) {
-            // 智慧雙擊序列
             sendDoubleClickSequence();
             lastTapTime = 0;
           } else {
-            // 單點
             const rect = videoEl.getBoundingClientRect();
             const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
             const containerRatio = rect.width / rect.height;
@@ -4405,7 +4220,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
               const payloadUp = new Uint8Array(1);
               payloadUp[0] = 1;
               sendInputPacket(buildInputPacket(0x03, payloadUp));
-              console.log("[Gesture-Direct] 單指輕點完成");
             }, 60);
             
             lastTapTime = now;
@@ -4418,18 +4232,26 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           payload[0] = 1; // Left click release
           sendInputPacket(buildInputPacket(0x03, payload));
           isDragging = false;
+          
+          // 軌跡板模式雙擊拖曳/匡選結束後也彈出懸浮選單
+          // 將 trackpad 的虛擬游標百分比轉回相對於 client 的實際像素坐標
+          const rect = videoEl.getBoundingClientRect();
+          const menuX = rect.left + trackpadCursorX * rect.width;
+          const menuY = rect.top + trackpadCursorY * rect.height;
+          showFloatingMenu(menuX, menuY);
+        } else if (isPotentialDrag) {
+          isPotentialDrag = false;
+          sendDoubleClickSequence();
+          lastTapTime = 0;
         } else {
-          // 軌跡板模式單指輕觸 -> 左鍵點擊 (降低延遲至20ms，放寬點擊判定至450ms)
           if (touchStartTime > 0 && now - touchStartTime < 450 && maxTouches === 1) {
             const dist = Math.sqrt(Math.pow(endX - touchStartPos.x, 2) + Math.pow(endY - touchStartPos.y, 2));
             if (dist < 35) {
               const tapDist = Math.sqrt(Math.pow(endX - lastTapPos.x, 2) + Math.pow(endY - lastTapPos.y, 2));
               if (now - lastTapTime < 350 && tapDist < 35) {
-                // 智慧雙擊序列
                 sendDoubleClickSequence();
                 lastTapTime = 0;
               } else {
-                // 單點
                 const payloadDown = new Uint8Array(1);
                 payloadDown[0] = 1;
                 sendInputPacket(buildInputPacket(0x02, payloadDown));
@@ -4438,7 +4260,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
                   const payloadUp = new Uint8Array(1);
                   payloadUp[0] = 1;
                   sendInputPacket(buildInputPacket(0x03, payloadUp));
-                  console.log("[Gesture-Trackpad] 單指輕點完成");
                 }, 20);
                 
                 lastTapTime = now;
@@ -4465,6 +4286,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       lastTouchY = e.touches[0].clientY;
     }
   }, { passive: false });
+
   // 增加觸控防護：當遭遇衝突時，強制發送 MouseUp 並重置狀態，防止滑鼠死鎖
   videoEl.addEventListener("touchcancel", (e) => {
     e.preventDefault();
@@ -4487,6 +4309,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     sendInputPacket(buildInputPacket(0x03, payloadRight));
 
     isDragging = false;
+    isPotentialDrag = false;
+    wasLongPressDrag = false;
     initialPinchDistance = -1;
     touchStartTime = 0;
     lastTouchX = 0;
@@ -4563,7 +4387,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   // 攔截鍵盤輸入 (直通 Scan Code 繞過輸入法)
   window.addEventListener("keydown", (e) => {
-    if (videoEl.style.display === "none") return;
+    if (videoContainer.style.display === "none") return;
     if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
       // 正在輸入欄位時，交由輸入法與虛擬鍵盤處理
       return;
@@ -4571,9 +4395,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     
     e.preventDefault(); 
     
+    const code = e.code || `Key_${e.keyCode}`;
+    
     // 防重複觸發 (OS Key Repeat)
-    if (activeKeys.has(e.code)) return;
-    activeKeys.add(e.code);
+    if (activeKeys.has(code)) return;
+    activeKeys.add(code);
 
     const payload = new Uint8Array(3);
     const view = new DataView(payload.buffer);
@@ -4599,13 +4425,14 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   // 新增 KeyUp 監聽，徹底解決按鍵卡死 (Ghosting) 問題
   window.addEventListener("keyup", (e) => {
-    if (videoEl.style.display === "none") return;
+    if (videoContainer.style.display === "none") return;
     if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
       return;
     }
     
     e.preventDefault(); 
-    activeKeys.delete(e.code);
+    const code = e.code || `Key_${e.keyCode}`;
+    activeKeys.delete(code);
 
     const payload = new Uint8Array(3);
     const view = new DataView(payload.buffer);
@@ -4768,7 +4595,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   // 監聽失去焦點與頁面隱藏事件，清空 Host 卡死按鍵
   const onResetTrigger = () => {
-    if (videoEl.style.display !== "none") {
+    if (videoContainer && videoContainer.style.display !== "none") {
       const payload = new Uint8Array(0);
       sendInputPacket(buildInputPacket(0xFF, payload));
       console.log("[Input] 失去焦點或切換分頁，發送 ResetState (0xFF) 清空被控端修飾鍵狀態");
@@ -4779,6 +4606,188 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       onResetTrigger();
+    }
+  });
+
+  // 建立精美的懸浮功能選單 (Floating Option Menu)
+  let activeFloatingMenu: HTMLDivElement | null = null;
+
+  const showFloatingMenu = (x: number, y: number) => {
+    // 先移除舊選單
+    if (activeFloatingMenu) {
+      activeFloatingMenu.remove();
+      activeFloatingMenu = null;
+    }
+
+    const menu = document.createElement("div");
+    activeFloatingMenu = menu;
+    menu.id = "floating-selection-menu";
+    
+    // 毛玻璃玻璃擬態 Glassmorphism 精美樣式
+    menu.style.position = "fixed";
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y - 65}px`; // 顯示在點擊位置上方 65 像素
+    menu.style.transform = "translateX(-50%) scale(0.9)";
+    menu.style.opacity = "0";
+    menu.style.transition = "all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)";
+    menu.style.zIndex = "3000";
+    menu.style.background = "rgba(15, 23, 42, 0.85)";
+    menu.style.backdropFilter = "blur(16px)";
+    menu.style.setProperty("-webkit-backdrop-filter", "blur(16px)");
+    menu.style.border = "1px solid rgba(255, 255, 255, 0.2)";
+    menu.style.borderRadius = "12px";
+    menu.style.padding = "4px 8px";
+    menu.style.display = "flex";
+    menu.style.flexDirection = "row";
+    menu.style.gap = "4px";
+    menu.style.boxShadow = "0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)";
+
+    // 選單選項清單
+    const options = [
+      { label: "📋 複製", action: "copy" },
+      { label: "📥 貼上", action: "paste" },
+      { label: "🔍 全選", action: "selectall" },
+      { label: "⚡ 右鍵", action: "rightclick" },
+      { label: "✕", action: "cancel" }
+    ];
+
+    options.forEach(opt => {
+      const btn = document.createElement("button");
+      btn.textContent = opt.label;
+      btn.style.background = "transparent";
+      btn.style.border = "none";
+      btn.style.color = "white";
+      btn.style.fontSize = "12px";
+      btn.style.fontWeight = "600";
+      btn.style.padding = "6px 10px";
+      btn.style.borderRadius = "8px";
+      btn.style.cursor = "pointer";
+      btn.style.transition = "all 0.15s ease";
+      btn.style.whiteSpace = "nowrap";
+
+      btn.addEventListener("mouseenter", () => {
+        btn.style.background = "rgba(255, 255, 255, 0.15)";
+      });
+      btn.addEventListener("mouseleave", () => {
+        btn.style.background = "transparent";
+      });
+
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        triggerHaptic("light");
+        
+        const ctrlCode = 17;
+        const winCode = 91;
+        const cCode = 67;
+        const vCode = 86;
+        const aCode = 65;
+
+        const pressKey = (code: number, mods: number = 0) => {
+          const payload = new Uint8Array(3);
+          const view = new DataView(payload.buffer);
+          view.setUint16(0, code, false);
+          payload[2] = mods;
+          sendInputPacket(buildInputPacket(0x05, payload));
+        };
+
+        const releaseKey = (code: number, mods: number = 0) => {
+          const payload = new Uint8Array(3);
+          const view = new DataView(payload.buffer);
+          view.setUint16(0, code, false);
+          payload[2] = mods;
+          sendInputPacket(buildInputPacket(0x06, payload));
+        };
+
+        if (opt.action === "copy") {
+          // macOS: Cmd + C, Windows: Ctrl + C (同時發送相容雙系統)
+          pressKey(winCode, 8); // Meta Down (Mac Cmd)
+          pressKey(cCode, 8);
+          setTimeout(() => {
+            releaseKey(cCode, 8);
+            releaseKey(winCode, 0);
+            
+            // Windows
+            pressKey(ctrlCode, 2);
+            pressKey(cCode, 2);
+            setTimeout(() => {
+              releaseKey(cCode, 2);
+              releaseKey(ctrlCode, 0);
+            }, 20);
+          }, 20);
+        } else if (opt.action === "paste") {
+          // macOS: Cmd + V, Windows: Ctrl + V
+          pressKey(winCode, 8);
+          pressKey(vCode, 8);
+          setTimeout(() => {
+            releaseKey(vCode, 8);
+            releaseKey(winCode, 0);
+            
+            // Windows
+            pressKey(ctrlCode, 2);
+            pressKey(vCode, 2);
+            setTimeout(() => {
+              releaseKey(vCode, 2);
+              releaseKey(ctrlCode, 0);
+            }, 20);
+          }, 20);
+        } else if (opt.action === "selectall") {
+          // macOS: Cmd + A, Windows: Ctrl + A
+          pressKey(winCode, 8);
+          pressKey(aCode, 8);
+          setTimeout(() => {
+            releaseKey(aCode, 8);
+            releaseKey(winCode, 0);
+            
+            // Windows
+            pressKey(ctrlCode, 2);
+            pressKey(aCode, 2);
+            setTimeout(() => {
+              releaseKey(aCode, 2);
+              releaseKey(ctrlCode, 0);
+            }, 20);
+          }, 20);
+        } else if (opt.action === "rightclick") {
+          const payloadDown = new Uint8Array(1);
+          payloadDown[0] = 2; // Right click down
+          sendInputPacket(buildInputPacket(0x02, payloadDown));
+          setTimeout(() => {
+            const payloadUp = new Uint8Array(1);
+            payloadUp[0] = 2; // Right click up
+            sendInputPacket(buildInputPacket(0x03, payloadUp));
+          }, 60);
+        }
+
+        // 點擊後隱藏選單
+        menu.style.transform = "translateX(-50%) scale(0.9)";
+        menu.style.opacity = "0";
+        setTimeout(() => {
+          menu.remove();
+          if (activeFloatingMenu === menu) activeFloatingMenu = null;
+        }, 200);
+      });
+
+      menu.appendChild(btn);
+    });
+
+    document.body.appendChild(menu);
+    
+    // 觸發進場動畫
+    requestAnimationFrame(() => {
+      menu.style.transform = "translateX(-50%) scale(1)";
+      menu.style.opacity = "1";
+    });
+  };
+
+  // 全局點擊時關閉懸浮選單
+  document.addEventListener("click", (e) => {
+    if (activeFloatingMenu && !activeFloatingMenu.contains(e.target as Node)) {
+      const menu = activeFloatingMenu;
+      menu.style.transform = "translateX(-50%) scale(0.9)";
+      menu.style.opacity = "0";
+      setTimeout(() => {
+        menu.remove();
+        if (activeFloatingMenu === menu) activeFloatingMenu = null;
+      }, 200);
     }
   });
 
@@ -5079,8 +5088,8 @@ async function initializeApp() {
   // 網頁控制端（Client）聚焦與可見度狀態檢測重連
   if (!isDesktopTauri()) {
     window.addEventListener("focus", () => {
-      const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
-      if (videoEl && videoEl.style.display === "none") {
+      const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
+      if (videoContainer && videoContainer.style.display === "none") {
         if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
           console.log(t("log_sig_focus_reconnect"));
           initSignalingClient();
@@ -5092,8 +5101,8 @@ async function initializeApp() {
     });
 
     document.addEventListener("visibilitychange", () => {
-      const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
-      if (!document.hidden && videoEl && videoEl.style.display === "none") {
+      const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
+      if (!document.hidden && videoContainer && videoContainer.style.display === "none") {
         if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
           console.log(t("log_sig_visible_reconnect"));
           initSignalingClient();
