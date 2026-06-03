@@ -4148,6 +4148,12 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           keyboardBar.style.visibility = "hidden";
           keyboardBar.style.opacity = "0";
           keyboardBar.style.pointerEvents = "none";
+          // 恢復全螢幕
+          const vc = document.getElementById("remote-video-container");
+          if (vc) { vc.style.height = "100vh"; vc.style.top = "0px"; }
+          keyboardBar.style.top = "auto";
+          keyboardBar.style.bottom = "0";
+          mobileKeyboardInput.blur();
         }
       }
       currentCursorPercentX = 0.5;
@@ -4607,46 +4613,89 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           keyboardBar.style.visibility = "hidden";
           keyboardBar.style.opacity = "0";
           keyboardBar.style.pointerEvents = "none";
+
+          // 立即恢復視訊容器為全螢幕（不等 visualViewport resize 回調）
+          const container = document.getElementById("remote-video-container");
+          if (container) {
+            container.style.height = "100vh";
+            container.style.top = "0px";
+          }
+          keyboardBar.style.top = "auto";
+          keyboardBar.style.bottom = "0";
         }
       }, 300);
     });
   }
 
-  // Visual Viewport 自適應邏輯 (對齊 Chrome 遠端桌面)
+  // Visual Viewport 自適應邏輯：鍵盤彈出時壓縮視訊區域，消除中間空白
   if (window.visualViewport) {
+    const KEYBOARD_BAR_HEIGHT = 56; // keyboard bar 的固定高度（padding 8*2 + input 40）
+
     const onViewportChange = () => {
       const vv = window.visualViewport;
       if (!vv) return;
       
       const container = document.getElementById("remote-video-container");
-      if (container) {
-        // 只有在鍵盤開啟時才動態縮放高度，避免 iOS 上觸發 layout shift 導致 touchcancel 吃掉點擊事件
-        if (isKeyboardActive || document.activeElement === mobileKeyboardInput) {
-          container.style.height = `${vv.height}px`;
-        } else {
-          container.style.height = `100vh`;
+      if (!container) return;
+
+      const isKbOpen = isKeyboardActive || document.activeElement === mobileKeyboardInput;
+
+      if (isKbOpen) {
+        // 鍵盤開啟：視訊容器高度 = visualViewport 可見高度 - keyboard bar 高度
+        const availableHeight = vv.height - KEYBOARD_BAR_HEIGHT;
+        container.style.height = `${Math.max(availableHeight, 100)}px`;
+        container.style.top = `${vv.offsetTop}px`; // iOS Safari 會把 viewport 往上推，需要補償
+
+        // Keyboard Bar 定位：貼齊在視訊容器正下方（系統鍵盤正上方）
+        if (keyboardBar) {
+          // 在 iOS Safari 中，position:fixed 的 bottom:0 對齊的是 layout viewport 底部，
+          // 不是 visual viewport 底部（即系統鍵盤頂部）。
+          // 因此需要用 top 定位：visualViewport.offsetTop + visualViewport.height - bar 高度
+          const barTop = vv.offsetTop + vv.height - KEYBOARD_BAR_HEIGHT;
+          keyboardBar.style.position = "fixed";
+          keyboardBar.style.top = `${barTop}px`;
+          keyboardBar.style.bottom = "auto";
         }
-      }
-      
-      // 僅在鍵盤開啟時強制置頂，防呆 iOS Safari 將 body 往上推
-      if (isKeyboardActive) {
+
+        // 防止 iOS Safari 將頁面推離視窗
         window.scrollTo(0, 0);
+      } else {
+        // 鍵盤關閉：恢復全螢幕
+        container.style.height = "100vh";
+        container.style.top = "0px";
+
+        if (keyboardBar) {
+          keyboardBar.style.top = "auto";
+          keyboardBar.style.bottom = "0";
+        }
       }
     };
     
     window.visualViewport.addEventListener("resize", onViewportChange);
-    // 移除 scroll 監聽，因為在 iOS 上會造成嚴重效能問題與觸控中斷
+    window.visualViewport.addEventListener("scroll", onViewportChange);
     // 初始化呼叫
     onViewportChange();
   }
 
-  // 點擊視訊畫面時的防失焦重新 Focus 處理
+  // 點擊視訊畫面時關閉鍵盤並恢復全螢幕
   videoEl.addEventListener("click", () => {
     if (isKeyboardActive && mobileKeyboardInput && document.activeElement !== mobileKeyboardInput) {
       isKeyboardActive = false;
       keyboardBar.style.visibility = "hidden";
       keyboardBar.style.opacity = "0";
       keyboardBar.style.pointerEvents = "none";
+
+      // 恢復視訊容器全螢幕
+      const container = document.getElementById("remote-video-container");
+      if (container) {
+        container.style.height = "100vh";
+        container.style.top = "0px";
+      }
+      keyboardBar.style.top = "auto";
+      keyboardBar.style.bottom = "0";
+
+      // 強制收起虛擬鍵盤
+      mobileKeyboardInput.blur();
     }
   });
 
