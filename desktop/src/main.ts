@@ -1952,7 +1952,10 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
         
         if (videoEl) videoEl.style.cursor = "default"; // 讓原生硬體游標保持顯示，達成零延遲操控體驗
-        if (videoContainer) videoContainer.style.display = "block";
+        if (videoContainer) {
+          videoContainer.style.display = "block";
+          videoContainer.focus();
+        }
         if (btnDisplayMode) btnDisplayMode.style.display = "block";
         if (btnAudioToggle) btnAudioToggle.style.display = "block";
         if (mainContent) mainContent.style.display = "none";
@@ -4142,7 +4145,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       if (isKeyboardActive && mobileKeyboardInput && document.activeElement !== mobileKeyboardInput) {
         if (keyboardBar && !keyboardBar.contains(e.target as Node)) {
           isKeyboardActive = false;
-          keyboardBar.style.display = "none";
+          keyboardBar.style.visibility = "hidden";
+          keyboardBar.style.opacity = "0";
+          keyboardBar.style.pointerEvents = "none";
         }
       }
       currentCursorPercentX = 0.5;
@@ -4386,8 +4391,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   const activeKeys = new Set<string>();
 
   // 攔截鍵盤輸入 (直通 Scan Code 繞過輸入法)
-  window.addEventListener("keydown", (e) => {
-    if (videoContainer.style.display === "none") return;
+  document.addEventListener("keydown", (e) => {
+    if (!videoContainer || videoContainer.style.display === "none") return;
     if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
       // 正在輸入欄位時，交由輸入法與虛擬鍵盤處理
       return;
@@ -4424,8 +4429,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   });
 
   // 新增 KeyUp 監聽，徹底解決按鍵卡死 (Ghosting) 問題
-  window.addEventListener("keyup", (e) => {
-    if (videoContainer.style.display === "none") return;
+  document.addEventListener("keyup", (e) => {
+    if (!videoContainer || videoContainer.style.display === "none") return;
     if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
       return;
     }
@@ -4488,7 +4493,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     btnKeyboard.addEventListener("click", (e) => {
       e.stopPropagation();
       isKeyboardActive = true;
-      keyboardBar.style.display = "flex";
+      keyboardBar.style.visibility = "visible";
+      keyboardBar.style.opacity = "1";
+      keyboardBar.style.pointerEvents = "auto";
       resetInput();
       mobileKeyboardInput.focus();
     });
@@ -4527,10 +4534,29 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         resetInput();
       } else if (!val.includes("\u200B")) {
         isResetting = true;
+        const textToSend = val;
+        if (textToSend.length > 0) {
+          const encoder = new TextEncoder();
+          const payload = encoder.encode(textToSend);
+          sendInputPacket(buildInputPacket(0x08, payload));
+        }
         mobileKeyboardInput.value = "\u200B" + val;
         previousValueLength = mobileKeyboardInput.value.length;
         setTimeout(() => isResetting = false, 10);
       } else {
+        if (val.length > previousValueLength) {
+          const newText = val.substring(previousValueLength);
+          if (newText.length > 0) {
+            const encoder = new TextEncoder();
+            const payload = encoder.encode(newText);
+            sendInputPacket(buildInputPacket(0x08, payload));
+          }
+        } else if (val.length < previousValueLength) {
+          const diff = previousValueLength - val.length;
+          for (let i = 0; i < diff; i++) {
+            sendKeyStroke(8);
+          }
+        }
         previousValueLength = val.length;
       }
     });
@@ -4551,7 +4577,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       setTimeout(() => {
         if (document.activeElement !== mobileKeyboardInput) {
           isKeyboardActive = false;
-          keyboardBar.style.display = "none";
+          keyboardBar.style.visibility = "hidden";
+          keyboardBar.style.opacity = "0";
+          keyboardBar.style.pointerEvents = "none";
         }
       }, 100);
     });
@@ -4589,7 +4617,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   videoEl.addEventListener("click", () => {
     if (isKeyboardActive && mobileKeyboardInput && document.activeElement !== mobileKeyboardInput) {
       isKeyboardActive = false;
-      keyboardBar.style.display = "none";
+      keyboardBar.style.visibility = "hidden";
+      keyboardBar.style.opacity = "0";
+      keyboardBar.style.pointerEvents = "none";
     }
   });
 
