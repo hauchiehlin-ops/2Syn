@@ -369,12 +369,14 @@ let pinchStartTx = 0;
 let pinchStartTy = 0;
 let pinchStartCx = 0;
 let pinchStartCy = 0;
+let warpX = 0;
+let warpY = 0;
 
 function applyVideoTransform() {
   const video = document.getElementById("remote-video") as HTMLVideoElement;
   if (!video) return;
   const finalY = videoTranslateY + keyboardOffsetUpdateY;
-  video.style.transform = `translate(${videoTranslateX}px, ${finalY}px) scale(${videoScale})`;
+  video.style.transform = `translate(${videoTranslateX + warpX}px, ${finalY + warpY}px) scale(${videoScale})`;
 }
 
 function triggerHaptic(type: "light" | "medium" | "heavy") {
@@ -3691,6 +3693,32 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let syntheticCursorPercentX = 0.5;
   let syntheticCursorPercentY = 0.5;
 
+  videoEl.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch" || e.pointerType === "pen") return;
+    e.preventDefault();
+    videoContainer?.focus();
+    if (!isDirectTouchMode && document.pointerLockElement !== videoEl) {
+      videoEl.requestPointerLock().catch(() => {});
+    }
+    const payload = new Uint8Array(1);
+    if (e.button === 0) payload[0] = 1;
+    else if (e.button === 2) payload[0] = 2;
+    else if (e.button === 1) payload[0] = 3;
+    else return;
+    sendInputPacket(buildInputPacket(0x02, payload));
+  });
+
+  videoEl.addEventListener("pointerup", (e) => {
+    if (e.pointerType === "touch" || e.pointerType === "pen") return;
+    e.preventDefault();
+    const payload = new Uint8Array(1);
+    if (e.button === 0) payload[0] = 1;
+    else if (e.button === 2) payload[0] = 2;
+    else if (e.button === 1) payload[0] = 3;
+    else return;
+    sendInputPacket(buildInputPacket(0x03, payload));
+  });
+
   videoEl.addEventListener("pointermove", (e) => {
     e.preventDefault();
     if (e.pointerType === "touch" || e.pointerType === "pen") return; // 由觸控手勢處理
@@ -4332,8 +4360,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   videoEl.addEventListener("contextmenu", (e) => e.preventDefault());
 
   // 破壞性創新：非同步重投影 (Asynchronous Reprojection / Time Warping)
-  let warpX = 0;
-  let warpY = 0;
   let warpRaf: number | null = null;
   const applyTimeWarping = (dx: number, dy: number) => {
     warpX += dx;
@@ -4344,9 +4370,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         warpY *= 0.85;
         if (Math.abs(warpX) < 1 && Math.abs(warpY) < 1) {
             warpX = 0; warpY = 0;
-            videoEl.style.transform = `none`;
+            applyVideoTransform();
         } else {
-            videoEl.style.transform = `translate(${warpX}px, ${warpY}px)`;
+            applyVideoTransform();
             warpRaf = requestAnimationFrame(decay);
         }
     };
@@ -4490,10 +4516,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     let previousValueLength = 0;
 
     const resetInput = () => {
-      isResetting = true;
       mobileKeyboardInput.value = "\u200B";
-      previousValueLength = 1;
-      setTimeout(() => isResetting = false, 10);
     };
 
     // 開啟鍵盤的核心邏輯（供 touchend / click 共用）
@@ -4513,10 +4536,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       mobileKeyboardInput.focus();
 
       // focus 之後再重設 input 值（不影響鍵盤彈出）
-      isResetting = true;
-      mobileKeyboardInput.value = "\u200B";
-      previousValueLength = 1;
-      setTimeout(() => isResetting = false, 10);
+      resetInput();
     };
 
     // iOS Safari：touchend 是唯一能在同步呼叫鏈中觸發虛擬鍵盤的事件
@@ -4546,56 +4566,27 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       sendText();
     });
 
-    // 針對 Android Gboard 等虛擬鍵盤，使用 beforeinput 達成零延遲的刪除攔截
+    // 針對 Android Gboard 等虛擬鍵盤的退格鍵處理
     mobileKeyboardInput.addEventListener("beforeinput", (e: InputEvent) => {
       if (e.inputType === "deleteContentBackward") {
-        e.preventDefault();
-        sendKeyStroke(8);
-      }
-    });
-
-    mobileKeyboardInput.addEventListener("input", (e: Event) => {
-      if (isResetting) return;
-      
-      const val = mobileKeyboardInput.value;
-      if (val === "") {
-        // Fallback for older browsers: ZWS was deleted
-        if (previousValueLength === 1) {
+        // 只有當輸入框為空時，才將退格鍵發送至遠端桌面
+        if (mobileKeyboardInput.value === "\u200B" || mobileKeyboardInput.value === "") {
+          e.preventDefault();
           sendKeyStroke(8);
         }
-        resetInput();
-      } else if (!val.includes("\u200B")) {
-        isResetting = true;
-        const textToSend = val;
-        if (textToSend.length > 0) {
-          const encoder = new TextEncoder();
-          const payload = encoder.encode(textToSend);
-          sendInputPacket(buildInputPacket(0x08, payload));
-        }
-        mobileKeyboardInput.value = "\u200B" + val;
-        previousValueLength = mobileKeyboardInput.value.length;
-        setTimeout(() => isResetting = false, 10);
-      } else {
-        if (val.length > previousValueLength) {
-          const newText = val.substring(previousValueLength);
-          if (newText.length > 0) {
-            const encoder = new TextEncoder();
-            const payload = encoder.encode(newText);
-            sendInputPacket(buildInputPacket(0x08, payload));
-          }
-        } else if (val.length < previousValueLength) {
-          const diff = previousValueLength - val.length;
-          for (let i = 0; i < diff; i++) {
-            sendKeyStroke(8);
-          }
-        }
-        previousValueLength = val.length;
       }
     });
 
     mobileKeyboardInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
-        sendText();
+        e.preventDefault();
+        const val = mobileKeyboardInput.value.replace(/\u200B/g, "");
+        if (val.length > 0) {
+          sendText();
+        } else {
+          // 若輸入框為空，直接向遠端發送 Enter 鍵
+          sendKeyStroke(13);
+        }
       } else if (e.key === "Backspace") {
         if (mobileKeyboardInput.value === "\u200B" || mobileKeyboardInput.value === "") {
           e.preventDefault();
@@ -4702,6 +4693,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   // 監聽失去焦點與頁面隱藏事件，清空 Host 卡死按鍵
   const onResetTrigger = () => {
     if (videoContainer && videoContainer.style.display !== "none") {
+      activeKeys.clear();
       const payload = new Uint8Array(0);
       sendInputPacket(buildInputPacket(0xFF, payload));
       console.log("[Input] 失去焦點或切換分頁，發送 ResetState (0xFF) 清空被控端修飾鍵狀態");

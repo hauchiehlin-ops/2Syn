@@ -149,7 +149,8 @@ impl InputEvent {
             }
             0x08 => {
                 if data.len() < 2 { return Err(CoreError::NetworkError("TextInput 封包長度不足".to_string())); }
-                let text = String::from_utf8_lossy(&data[1..]).into_owned();
+                let text = String::from_utf8(data[1..].to_vec())
+                    .map_err(|_| CoreError::NetworkError("TextInput 封包非有效 UTF-8".to_string()))?;
                 Ok(InputEvent::TextInput { text })
             }
             0xFF => {
