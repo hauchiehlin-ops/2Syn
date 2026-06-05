@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2syn - Privacy Policy | 隱私權與政策</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0a0c;
+            --bg-card: rgba(255, 255, 255, 0.03);
+            --bg-card-hover: rgba(255, 255, 255, 0.08);
+            --text-primary: #f0f0f5;
+            --text-secondary: #9ba1a6;
+            --accent: #00ffaa;
+            --accent-glow: rgba(0, 255, 170, 0.2);
+            --glass-border: rgba(255, 255, 255, 0.08);
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(20, 30, 40, 1), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(10, 40, 30, 0.5), transparent 25%);
+            background-attachment: fixed;
+        }
+
+        /* Glassmorphism Header */
+        header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 70px;
+            background: rgba(10, 10, 12, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--glass-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 40px;
+            z-index: 1000;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: -1px;
+            background: linear-gradient(135deg, #fff, var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .logo span {
+            color: var(--accent);
+            -webkit-text-fill-color: var(--accent);
+            text-shadow: 0 0 15px var(--accent-glow);
+        }
+
+        /* Language Selector */
+        .lang-selector {
+            position: relative;
+        }
+
+        .lang-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .lang-btn:hover {
+            background: var(--bg-card-hover);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 0 15px var(--accent-glow);
+        }
+
+        /* Main Content */
+        main {
+            max-width: 900px;
+            margin: 120px auto 60px;
+            padding: 0 20px;
+        }
+
+        .glass-container {
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 50px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            animation: fadeUp 0.8s ease-out forwards;
+            opacity: 0;
+            transform: translateY(30px);
+        }
+
+        @keyframes fadeUp {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Markdown Styles */
+        #content h1 {
+            font-size: 36px;
+            font-weight: 800;
+            margin-bottom: 30px;
+            background: linear-gradient(135deg, #fff, var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1px;
+        }
+
+        #content h2 {
+            font-size: 24px;
+            font-weight: 600;
+            margin: 40px 0 20px;
+            color: #fff;
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 10px;
+        }
+
+        #content p {
+            margin-bottom: 20px;
+            color: var(--text-secondary);
+            font-size: 16px;
+        }
+
+        #content ul, #content ol {
+            margin-bottom: 20px;
+            padding-left: 20px;
+            color: var(--text-secondary);
+        }
+
+        #content li {
+            margin-bottom: 10px;
+        }
+
+        #content strong {
+            color: #fff;
+            font-weight: 600;
+        }
+
+        /* Loader */
+        .loader {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 200px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--glass-border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            header {
+                padding: 0 20px;
+            }
+            .glass-container {
+                padding: 30px 20px;
+            }
+            #content h1 {
+                font-size: 28px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">2syn <span>Privacy</span></div>
+        <div class="lang-selector">
+            <select id="langSelect" class="lang-btn" style="appearance: none; outline: none;">
+                <option value="zh-TW">繁體中文 (zh-TW)</option>
+                <option value="en">English</option>
+                <option value="ja">日本語 (ja)</option>
+                <option value="ko">한국어 (ko)</option>
+                <option value="zh-CN">简体中文 (zh-CN)</option>
+                <option value="de">Deutsch (de)</option>
+                <option value="es">Español (es)</option>
+                <option value="ru">Русский (ru)</option>
+                <option value="th">ไทย (th)</option>
+                <option value="id">Bahasa Indonesia (id)</option>
+                <option value="ms">Bahasa Melayu (ms)</option>
+            </select>
+        </div>
+    </header>
+
+    <main>
+        <div class="glass-container">
+            <div id="loader" class="loader"><div class="spinner"></div></div>
+            <div id="content" style="display: none;"></div>
+        </div>
+    </main>
+
+    <script>
+        const contentDiv = document.getElementById('content');
+        const loader = document.getElementById('loader');
+        const langSelect = document.getElementById('langSelect');
+
+        // Detect system language or use URL param
+        const urlParams = new URLSearchParams(window.location.search);
+        let currentLang = urlParams.get('lang') || localStorage.getItem('2syn_lang') || 'zh-TW';
+        
+        // If system language is English, default to en
+        if (!urlParams.get('lang') && !localStorage.getItem('2syn_lang')) {
+            const sysLang = navigator.language;
+            if (sysLang.startsWith('en')) currentLang = 'en';
+            if (sysLang === 'zh-CN') currentLang = 'zh-CN';
+            if (sysLang === 'ja') currentLang = 'ja';
+            if (sysLang === 'ko') currentLang = 'ko';
+        }
+
+        // Ensure currentLang is in our list
+        const options = Array.from(langSelect.options).map(o => o.value);
+        if (!options.includes(currentLang)) {
+            currentLang = 'en';
+        }
+        
+        langSelect.value = currentLang;
+
+        async function loadContent(lang) {
+            contentDiv.style.display = 'none';
+            loader.style.display = 'flex';
+            
+            try {
+                const response = await fetch(`${lang}/privacy-policy.md`);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const markdown = await response.text();
+                
+                contentDiv.innerHTML = marked.parse(markdown);
+                
+                // Add micro-animations to elements
+                const elements = contentDiv.querySelectorAll('h1, h2, p, ul');
+                elements.forEach((el, index) => {
+                    el.style.opacity = '0';
+                    el.style.transform = 'translateY(10px)';
+                    el.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+                    setTimeout(() => {
+                        el.style.opacity = '1';
+                        el.style.transform = 'translateY(0)';
+                    }, index * 50);
+                });
+
+                loader.style.display = 'none';
+                contentDiv.style.display = 'block';
+                localStorage.setItem('2syn_lang', lang);
+                
+                // Update URL without reload
+                const newUrl = new URL(window.location);
+                newUrl.searchParams.set('lang', lang);
+                window.history.pushState({}, '', newUrl);
+                
+            } catch (error) {
+                console.error('Error loading markdown:', error);
+                contentDiv.innerHTML = `<p style="color: #ff4444; text-align: center;">Failed to load content for ${lang}. Please try another language.</p>`;
+                loader.style.display = 'none';
+                contentDiv.style.display = 'block';
+            }
+        }
+
+        langSelect.addEventListener('change', (e) => {
+            loadContent(e.target.value);
+        });
+
+        // Initial load
+        loadContent(currentLang);
+    </script>
+</body>
+</html>
