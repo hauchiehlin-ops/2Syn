@@ -2,7 +2,8 @@ name: syn-desktop
 options:
   bundleIdPrefix: com.twosyn.app
   deploymentTarget:
-    iOS: 14.0
+    macOS: 10.13
+    iOS: 15.0
 fileGroups: [../../src]
 configs:
   Debug: debug

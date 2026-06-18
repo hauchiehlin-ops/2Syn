@@ -1185,7 +1185,7 @@ pub fn run() {
     
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
-        builder = builder.plugin(tauri_plugin_autostart::Builder::new().build());
+        builder = builder.plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec![])));
     }
 
     builder

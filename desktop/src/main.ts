@@ -875,7 +875,7 @@ async function initI18n() {
 // 載入指定的語言 JSON 檔案並更新 DOM
 async function loadLanguage(lang: string) {
   try {
-    const response = await fetch(`/locales/${lang}.json`);
+    const response = await fetch(`./locales/${lang}.json`);
     translations = await response.json();
     updateDomTranslations();
   } catch (error) {

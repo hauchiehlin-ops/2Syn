@@ -26,10 +26,10 @@ try {
   fs.copyFileSync(tauriClientConfPath, tauriConfPath);
   console.log('[Build] Temporarily overwritten tauri.conf.json with tauri.client.conf.json.');
 
-  // 3. 執行 tauri ios build --archive-only
+  // 3. 執行 tauri ios build
   console.log('[Build] Running tauri ios build...');
   const extraArgs = process.argv.slice(2).join(' ');
-  execSync(`npx tauri ios build --archive-only ${extraArgs}`, {
+  execSync(`npx tauri ios build ${extraArgs}`, {
     cwd: path.join(__dirname, '../desktop'),
     stdio: 'inherit'
   });

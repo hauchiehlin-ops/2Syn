@@ -50,7 +50,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>符合 App Store & Google Play 審核標準之隱私聲明</h3>
+        <h3>符合 App Store 審核標準之隱私聲明</h3>
         <p>您的隱私與數據安全是 2syn 最核心的原則。本應用程式符合兩大平台對於遠端控制與安全傳輸的嚴格審核標準。</p>
       </div>
       <div>
@@ -119,7 +119,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>符合 App Store & Google Play 审核标准之隐私声明</h3>
+        <h3>符合 App Store 审核标准之隐私声明</h3>
         <p>您的隐私与数据安全是 2syn 最核心的原则。本应用程序符合两大平台对于远程控制与安全传输的严格审核标准。</p>
       </div>
       <div>
@@ -186,7 +186,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>Privacy Compliance for App Store & Google Play</h3>
+        <h3>Privacy Compliance for App Store</h3>
         <p>Your privacy and data security are the core principles of 2syn. This app strictly complies with store guidelines for remote control tools.</p>
       </div>
       <div>
@@ -248,7 +248,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>App Store & Google Play 審査基準適合声明</h3>
+        <h3>App Store 審査基準適合声明</h3>
         <p>お客様のプライバシーとデータセキュリティは、2synの最優先事項です。本アプリは、遠隔制御ツールに関する両プラットフォームの厳格な審査ガイドラインに完全準拠しています。</p>
       </div>
       <div>
@@ -310,7 +310,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>App Store & Google Play 심사 기준 준수 선언</h3>
+        <h3>App Store 심사 기준 준수 선언</h3>
         <p>고객의 개인정보와 데이터 보안은 2syn의 가장 핵심적인 원칙입니다. 본 앱은 원격 제어 및 보안 전송에 대한 양대 플랫폼의 엄격한 심사 가이드라인을 완벽히 준수합니다.</p>
       </div>
       <div>
@@ -372,7 +372,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>Datenschutzkonformität für App Store & Google Play</h3>
+        <h3>Datenschutzkonformität für App Store</h3>
         <p>Ihre Privatsphäre und Datensicherheit sind die Grundprinzipien von 2syn. Diese App entspricht vollständig den Richtlinien für Fernsteuerungstools.</p>
       </div>
       <div>
@@ -434,7 +434,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>การปฏิบัติตามนโยบายความเป็นส่วนตัวสำหรับ App Store & Google Play</h3>
+        <h3>การปฏิบัติตามนโยบายความเป็นส่วนตัวสำหรับ App Store</h3>
         <p>ความเป็นส่วนตัวและความปลอดภัยของข้อมูลของคุณคือหลักการสำคัญที่สุดของ 2syn แอปนี้ปฏิบัติตามแนวทางสโตร์สำหรับเครื่องมือควบคุมระยะไกลอย่างเคร่งครัด</p>
       </div>
       <div>
@@ -496,7 +496,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>Kepatuhan Privasi untuk App Store & Google Play</h3>
+        <h3>Kepatuhan Privasi untuk App Store</h3>
         <p>Privasi dan keamanan data Anda adalah prinsip utama dari 2syn. Aplikasi ini mematuhi pedoman toko untuk alat kontrol jarak jauh secara ketat.</p>
       </div>
       <div>
@@ -558,7 +558,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>Kepatuhan Privasi untuk App Store & Google Play</h3>
+        <h3>Kepatuhan Privasi untuk App Store</h3>
         <p>Privasi dan keselamatan data anda adalah prinsip utama dari 2syn. Aplikasi ini mematuhi garis panduan stor untuk alat kawalan jauh secara ketat.</p>
       </div>
       <div>
@@ -620,7 +620,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>Соответствие стандартам App Store и Google Play</h3>
+        <h3>Соответствие стандартам App Store</h3>
         <p>Ваша конфиденциальность и безопасность данных — главный приоритет 2syn. Приложение строго соответствует правилам магазинов для инструментов удаленного доступа.</p>
       </div>
       <div>
@@ -682,7 +682,7 @@ export const I18N_HELP_DOCS: Record<string, {
     `,
     privacyHtml: `
       <div>
-        <h3>Cumplimiento de Privacidad para App Store y Google Play</h3>
+        <h3>Cumplimiento de Privacidad para App Store</h3>
         <p>Su privacidad y la seguridad de sus datos son los principios fundamentales de 2syn. Esta aplicación cumple estrictamente con las políticas de las tiendas para herramientas de control remoto.</p>
       </div>
       <div>

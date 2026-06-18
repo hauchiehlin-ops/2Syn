@@ -27,3 +27,32 @@ desktop/src-tauri/target/
 # Android builds
 *.apk
 *.aab
+
+# iOS / Xcode 建置產物
+**/gen/apple/build/
+**/gen/apple/Externals/
+**/gen/apple/Pods/
+**/xcuserdata/
+DerivedData/
+*.xcarchive
+*.xcuserstate
+
+# Android gen 建置產物
+**/gen/android/app/build/
+**/gen/android/.gradle/
+**/gen/android/build/
+
+# 機密 / 簽章（請勿提交）
+.env.*
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+*.cer
+*.pem
+*.certSigningRequest
+
+# 其他
+*.log
+*.backup
+*.conf.json.backup
