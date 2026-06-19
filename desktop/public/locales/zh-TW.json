@@ -127,6 +127,8 @@
   "conn_disconnected": "已中斷",
   "conn_failed": "連線失敗",
   "conn_closed": "已關閉",
+  "ui_btn_disconnect": "斷開連線",
+  "ui_confirm_disconnect": "確定要斷開與遠端設備的連線嗎？",
   "txt_tailscale_alert": "由於您的網路環境受限（無公網 IP 或嚴格 NAT），建議您與遠端主機雙方皆下載並安裝 Tailscale。\n\n登入後即可獲得無限距的高速穿透能力！安裝完成後，此燈號會自動轉為綠色。",
   "desc_tailscale_detected": "已偵測到 Tailscale 虛擬網卡，您現在擁有 100% 的行動網路與 CGNAT 穿透率，連線將極度穩定且高速。",
   "desc_ipv6_detected": "已偵測到 IPv6 網路，大部份情況下能成功穿透。但若遇到純 IPv4 的嚴格行動網路，可能會降級為中繼模式。建議安裝 Tailscale 以獲取最佳體驗。",

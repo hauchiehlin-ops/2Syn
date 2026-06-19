@@ -770,7 +770,8 @@ const fallbackTranslations: Record<string, string> = {
   "ui_dl_hint": "Both host and client devices need to download and install the application.",
   "ui_sys_auto_adj": "System automatically adjusting. Network and stream quality are in optimal states.",
   "ui_sim_relay_mode": "Simulate Relay Mode",
-
+  "ui_btn_disconnect": "Disconnect",
+  "ui_confirm_disconnect": "Are you sure you want to disconnect?",
 };
 
 // 統一翻譯取值函數
@@ -1167,6 +1168,11 @@ function updateDomTranslations() {
       (el as HTMLInputElement | HTMLTextAreaElement).placeholder = t(key);
     }
   });
+
+  const btnDisconnect = document.getElementById("btn-disconnect");
+  if (btnDisconnect) {
+    btnDisconnect.textContent = "🔌 " + t("ui_btn_disconnect");
+  }
 }
 
 function setTextContent(id: string, text: string) {
@@ -3144,15 +3150,18 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     remoteCursor = document.createElement("div");
     remoteCursor.id = "remote-cursor-indicator";
     remoteCursor.style.position = "absolute";
-    remoteCursor.style.width = "12px";
+    remoteCursor.style.width = "10px";
     remoteCursor.style.height = "12px";
-    remoteCursor.style.borderRadius = "50%";
-    remoteCursor.style.backgroundColor = "rgba(255, 60, 60, 0.8)";
-    remoteCursor.style.boxShadow = "0 0 4px rgba(0,0,0,0.5)";
+    remoteCursor.style.borderRadius = "0px";
+    remoteCursor.style.backgroundColor = "transparent";
+    remoteCursor.style.backgroundImage = 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' width=\'10\' height=\'12\'><path d=\'M0,0 L0,17 L4.7,12.3 L8,20 L10.5,19 L7.2,11.3 L12.7,11.3 Z\' fill=\'white\' stroke=\'black\' stroke-width=\'1.5\' stroke-linejoin=\'miter\'/></svg>")';
+    remoteCursor.style.backgroundSize = "contain";
+    remoteCursor.style.backgroundRepeat = "no-repeat";
+    remoteCursor.style.boxShadow = "none";
     remoteCursor.style.pointerEvents = "none";
     remoteCursor.style.zIndex = "1001";
     remoteCursor.style.display = "none";
-    remoteCursor.style.transform = "translate(-50%, -50%)"; // Center it exactly
+    remoteCursor.style.transform = "none";
     document.body.appendChild(remoteCursor);
   }
   const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
@@ -3455,6 +3464,22 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }, 60);
   };
 
+  const pressKey = (code: number, mods: number = 0) => {
+    const payload = new Uint8Array(3);
+    const view = new DataView(payload.buffer);
+    view.setUint16(0, code, false);
+    payload[2] = mods;
+    sendInputPacket(buildInputPacket(0x05, payload));
+  };
+
+  const releaseKey = (code: number, mods: number = 0) => {
+    const payload = new Uint8Array(3);
+    const view = new DataView(payload.buffer);
+    view.setUint16(0, code, false);
+    payload[2] = mods;
+    sendInputPacket(buildInputPacket(0x06, payload));
+  };
+
   const triggerMacShortcut = (shortcut: "mission-control" | "space-left" | "space-right") => {
     const ctrlCode = 17;
     let arrowCode = 38; // Up for Mission Control
@@ -3463,22 +3488,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     } else if (shortcut === "space-right") {
       arrowCode = 39; // Right arrow
     }
-
-    const pressKey = (code: number, mods: number = 0) => {
-      const payload = new Uint8Array(3);
-      const view = new DataView(payload.buffer);
-      view.setUint16(0, code, false);
-      payload[2] = mods;
-      sendInputPacket(buildInputPacket(0x05, payload));
-    };
-
-    const releaseKey = (code: number, mods: number = 0) => {
-      const payload = new Uint8Array(3);
-      const view = new DataView(payload.buffer);
-      view.setUint16(0, code, false);
-      payload[2] = mods;
-      sendInputPacket(buildInputPacket(0x06, payload));
-    };
 
     // Press Ctrl, then press Arrow, then release Arrow, then release Ctrl
     pressKey(ctrlCode, 2);
@@ -3683,6 +3692,87 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     };
   }
 
+  // --- Shortcuts 下拉選單與事件處理 ---
+  const btnSendKeys = document.getElementById("btn-send-keys") as HTMLButtonElement;
+  const shortcutsDropdown = document.getElementById("shortcuts-dropdown") as HTMLDivElement;
+  if (btnSendKeys && shortcutsDropdown) {
+    btnSendKeys.onclick = (e) => {
+      e.stopPropagation();
+      const isOpen = shortcutsDropdown.style.display === "flex";
+      shortcutsDropdown.style.display = isOpen ? "none" : "flex";
+    };
+  }
+
+  document.addEventListener("click", () => {
+    if (shortcutsDropdown) {
+      shortcutsDropdown.style.display = "none";
+    }
+  });
+
+  document.querySelectorAll(".shortcut-item").forEach((btn) => {
+    const el = btn as HTMLButtonElement;
+    el.onclick = (e) => {
+      e.stopPropagation();
+      const keys = el.getAttribute("data-keys");
+      if (keys === "ctrl-alt-del") {
+        pressKey(17, 2);
+        pressKey(18, 6);
+        pressKey(46, 6);
+        setTimeout(() => {
+          releaseKey(46, 6);
+          releaseKey(18, 2);
+          releaseKey(17, 0);
+        }, 50);
+      } else if (keys === "win") {
+        pressKey(91, 8);
+        setTimeout(() => {
+          releaseKey(91, 0);
+        }, 50);
+      } else if (keys === "alt-tab") {
+        pressKey(18, 4);
+        pressKey(9, 4);
+        setTimeout(() => {
+          releaseKey(9, 4);
+          releaseKey(18, 0);
+        }, 50);
+      } else if (keys === "ctrl-esc") {
+        pressKey(17, 2);
+        pressKey(27, 2);
+        setTimeout(() => {
+          releaseKey(27, 2);
+          releaseKey(17, 0);
+        }, 50);
+      }
+      if (shortcutsDropdown) {
+        shortcutsDropdown.style.display = "none";
+      }
+    };
+  });
+
+  // --- 斷開連線按鈕與事件處理 ---
+  const btnDisconnect = document.getElementById("btn-disconnect") as HTMLButtonElement;
+  if (btnDisconnect) {
+    btnDisconnect.onclick = () => {
+      if (confirm(t("ui_confirm_disconnect"))) {
+        if (peerConnection) {
+          try {
+            peerConnection.close();
+          } catch (e) {
+            console.warn("[WebRTC] Error closing peerConnection:", e);
+          }
+          peerConnection = null;
+        }
+        dataChannelControl = null;
+        dataChannelUnreliable = null;
+        dataChannelClipboard = null;
+        dataChannelFileTransfer = null;
+        dataChannelSystemControl = null;
+        iceCandidateQueue = [];
+        resetConnectionUI();
+      }
+    };
+  }
+
   function getPinchDistance(touches: TouchList) {
     const dx = touches[0].clientX - touches[1].clientX;
     const dy = touches[0].clientY - touches[1].clientY;
@@ -3870,16 +3960,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         console.log("[Gesture] 單指長按重壓，觸發左鍵拖曳模式");
       }, 400);
       
-      if (isDirectTouchMode) {
-        isDragging = false;
-      } else {
-        if (now - lastTapTime < 350) {
-          // 雙擊時間窗內：標記為潛在拖曳 (不要在此立刻發送 MouseDown，而是等 move 判斷)
-          isPotentialDrag = true;
-          isDragging = false;
-        } else {
-          isDragging = false;
-        }
+      isDragging = false;
+      if (now - lastTapTime < 350) {
+        isPotentialDrag = true;
       }
     }
   }, { passive: false });
@@ -4038,25 +4121,32 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         
         // Tremor Suppression (防手震) & Lazy Drag (延遲拖曳激活)
         if (!isDragging) {
-          const startDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
-          if (startDist > 20 || Date.now() - touchStartTime > 200) {
-            isDragging = true;
-            let startPctX = (touchStartPos.x - rect.left - offsetX) / renderedWidth;
-            let startPctY = (touchStartPos.y - rect.top - offsetY) / renderedHeight;
-            startPctX = Math.max(0, Math.min(1, startPctX));
-            startPctY = Math.max(0, Math.min(1, startPctY));
-            
-            pendingMouseMoveX = startPctX;
-            pendingMouseMoveY = startPctY;
+          if (hasTriggeredLongPress || isPotentialDrag) {
+            const startDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
+            if (startDist > 10) {
+              isDragging = true;
+              isPotentialDrag = false;
+              let startPctX = (touchStartPos.x - rect.left - offsetX) / renderedWidth;
+              let startPctY = (touchStartPos.y - rect.top - offsetY) / renderedHeight;
+              startPctX = Math.max(0, Math.min(1, startPctX));
+              startPctY = Math.max(0, Math.min(1, startPctY));
+              
+              pendingMouseMoveX = startPctX;
+              pendingMouseMoveY = startPctY;
+              triggerMoveRaf();
+              
+              const payload = new Uint8Array(1);
+              payload[0] = 1; // Left click down
+              sendInputPacket(buildInputPacket(0x02, payload));
+            }
+          } else {
+            // 普通單指滑動：只發送滑鼠移動，不觸發框選 (MouseDown)
+            pendingMouseMoveX = x;
+            pendingMouseMoveY = y;
             triggerMoveRaf();
-            
-            const payload = new Uint8Array(1);
-            payload[0] = 1; // Left click down
-            sendInputPacket(buildInputPacket(0x02, payload));
           }
-        }
-        
-        if (isDragging) {
+        } else {
+          // 已進入拖曳狀態
           pendingMouseMoveX = x;
           pendingMouseMoveY = y;
           triggerMoveRaf();

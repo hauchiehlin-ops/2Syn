@@ -127,6 +127,8 @@
   "conn_disconnected": "Disconnected",
   "conn_failed": "Connection Failed",
   "conn_closed": "Closed",
+  "ui_btn_disconnect": "Disconnect",
+  "ui_confirm_disconnect": "Are you sure you want to disconnect from the remote device?",
   "txt_tailscale_alert": "Due to restricted network conditions (no public IP or strict NAT), it is highly recommended to install Tailscale on both machines. Under Tailscale, you can establish direct high-speed P2P connections bypass most firewalls! Once installed, this light will automatically turn green.",
   "desc_tailscale_detected": "Tailscale interface detected. You now have 100% traversal rate through cellular and CGNAT networks for ultra-stable, high-speed connections.",
   "desc_ipv6_detected": "IPv6 network detected, allowing successful direct P2P connection in most cases. However, strict IPv4-only mobile connections may fall back to relay. Tailscale is recommended for the best experience.",

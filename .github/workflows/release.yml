@@ -33,8 +33,9 @@ jobs:
           node-version: 20
 
       - name: Install Compatible CMake (for audiopus_sys)
-        if: matrix.platform != 'windows-latest'
-        run: pipx install cmake==3.26.0
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.26.x'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -89,7 +90,9 @@ jobs:
           node-version: 20
 
       - name: Install Compatible CMake (for audiopus_sys)
-        run: pipx install cmake==3.26.0
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.26.x'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
