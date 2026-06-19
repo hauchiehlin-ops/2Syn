@@ -460,6 +460,8 @@ loadCustomIceServers();
 // 宣告語系翻譯字典快取
 let translations: Record<string, string> = {};
 let isPinVisible = false;
+let isPanelOpen = false;
+let isDirectTouchMode = false;
 
 // 萬用英文 Fallback 字典，供載入錯誤或翻譯遺漏時調用，徹底與寫死中文解耦
 const fallbackTranslations: Record<string, string> = {
@@ -2351,6 +2353,25 @@ function resetConnectionUI() {
     mobileControlOrb.style.display = "none";
   }
 
+  // 重置 Quick Menu 面板狀態為關閉
+  isPanelOpen = false;
+  const controlPanel = document.getElementById("control-dock-panel");
+  const toggleArrow = document.getElementById("control-toggle-arrow");
+  const shortcutsDropdown = document.getElementById("shortcuts-dropdown");
+  if (controlPanel) {
+    controlPanel.style.maxHeight = "0px";
+    controlPanel.style.opacity = "0";
+    controlPanel.style.pointerEvents = "none";
+    controlPanel.style.transform = "translateY(-10px)";
+  }
+  if (toggleArrow) {
+    toggleArrow.textContent = "▼";
+    toggleArrow.style.transform = "rotate(0deg)";
+  }
+  if (shortcutsDropdown) {
+    shortcutsDropdown.style.display = "none";
+  }
+
   // 重置顯示模式狀態與隱藏懸浮手勢工具輪
   resetDisplayMode();
 }
@@ -3133,7 +3154,39 @@ function sendInputPacket(packet: Uint8Array) {
   }
 }
 
+function pressKey(code: number, mods: number = 0) {
+  const payload = new Uint8Array(3);
+  const view = new DataView(payload.buffer);
+  view.setUint16(0, code, false);
+  payload[2] = mods;
+  sendInputPacket(buildInputPacket(0x05, payload));
+}
+
+function releaseKey(code: number, mods: number = 0) {
+  const payload = new Uint8Array(3);
+  const view = new DataView(payload.buffer);
+  view.setUint16(0, code, false);
+  payload[2] = mods;
+  sendInputPacket(buildInputPacket(0x06, payload));
+}
+
 function setupInputControl(videoEl: HTMLVideoElement) {
+  // 顯示懸浮選單控制柄 (每當連線成功時都要呼叫)
+  const mobileControlOrb = document.getElementById("mobile-control-orb");
+  if (mobileControlOrb) {
+    mobileControlOrb.style.display = "flex";
+  }
+
+  // 同步更新 Touch Mode 按鈕文字以符合當前的 isDirectTouchMode 狀態
+  const btnTouchMode = document.getElementById("btn-touch-mode") as HTMLButtonElement;
+  if (btnTouchMode) {
+    if (isDirectTouchMode) {
+      btnTouchMode.textContent = "👆 Direct Touch";
+    } else {
+      btnTouchMode.textContent = "🖱️ Trackpad Mode";
+    }
+  }
+
   if (inputBound) return;
   inputBound = true;
 
@@ -3464,21 +3517,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }, 60);
   };
 
-  const pressKey = (code: number, mods: number = 0) => {
-    const payload = new Uint8Array(3);
-    const view = new DataView(payload.buffer);
-    view.setUint16(0, code, false);
-    payload[2] = mods;
-    sendInputPacket(buildInputPacket(0x05, payload));
-  };
 
-  const releaseKey = (code: number, mods: number = 0) => {
-    const payload = new Uint8Array(3);
-    const view = new DataView(payload.buffer);
-    view.setUint16(0, code, false);
-    payload[2] = mods;
-    sendInputPacket(buildInputPacket(0x06, payload));
-  };
 
   const triggerMacShortcut = (shortcut: "mission-control" | "space-left" | "space-right") => {
     const ctrlCode = 17;
@@ -3511,7 +3550,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let pinchStartCy = 0;
 
   // 觸控模式 (絕對觸控 vs 虛擬軌跡板)
-  let isDirectTouchMode = false; // 預設為軌跡板模式
+  isDirectTouchMode = false; // 預設為軌跡板模式
   let longPressTimer: any = null;
   let touchStartClientX = 0;
   let touchStartClientY = 0;
@@ -3643,135 +3682,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
   }
 
-  // 初始化懸浮選單與 Toggle 切換按鈕
-  const mobileControlOrb = document.getElementById("mobile-control-orb");
-  if (mobileControlOrb) {
-    mobileControlOrb.style.display = "flex";
-  }
 
-  // 藥丸型手把折疊事件綁定
-  const controlToggle = document.getElementById("btn-control-toggle");
-  const controlPanel = document.getElementById("control-dock-panel");
-  const toggleArrow = document.getElementById("control-toggle-arrow");
-  let isPanelOpen = false;
-  
-  if (controlToggle && controlPanel && toggleArrow) {
-    controlToggle.onclick = (e) => {
-      e.stopPropagation();
-      isPanelOpen = !isPanelOpen;
-      if (isPanelOpen) {
-        controlPanel.style.maxHeight = "200px";
-        controlPanel.style.opacity = "1";
-        controlPanel.style.pointerEvents = "auto";
-        controlPanel.style.transform = "translateY(0)";
-        toggleArrow.textContent = "▲";
-        toggleArrow.style.transform = "rotate(180deg)";
-      } else {
-        controlPanel.style.maxHeight = "0px";
-        controlPanel.style.opacity = "0";
-        controlPanel.style.pointerEvents = "none";
-        controlPanel.style.transform = "translateY(-10px)";
-        toggleArrow.textContent = "▼";
-        toggleArrow.style.transform = "rotate(0deg)";
-      }
-    };
-  }
-
-  const btnTouchMode = document.getElementById("btn-touch-mode") as HTMLButtonElement;
-  if (btnTouchMode) {
-    btnTouchMode.onclick = () => {
-      isDirectTouchMode = !isDirectTouchMode;
-      if (isDirectTouchMode) {
-        btnTouchMode.textContent = "👆 Direct Touch";
-        // 絕對觸控模式下隱藏本地游標
-        
-        
-      } else {
-        btnTouchMode.textContent = "🖱️ Trackpad Mode";
-      }
-    };
-  }
-
-  // --- Shortcuts 下拉選單與事件處理 ---
-  const btnSendKeys = document.getElementById("btn-send-keys") as HTMLButtonElement;
-  const shortcutsDropdown = document.getElementById("shortcuts-dropdown") as HTMLDivElement;
-  if (btnSendKeys && shortcutsDropdown) {
-    btnSendKeys.onclick = (e) => {
-      e.stopPropagation();
-      const isOpen = shortcutsDropdown.style.display === "flex";
-      shortcutsDropdown.style.display = isOpen ? "none" : "flex";
-    };
-  }
-
-  document.addEventListener("click", () => {
-    if (shortcutsDropdown) {
-      shortcutsDropdown.style.display = "none";
-    }
-  });
-
-  document.querySelectorAll(".shortcut-item").forEach((btn) => {
-    const el = btn as HTMLButtonElement;
-    el.onclick = (e) => {
-      e.stopPropagation();
-      const keys = el.getAttribute("data-keys");
-      if (keys === "ctrl-alt-del") {
-        pressKey(17, 2);
-        pressKey(18, 6);
-        pressKey(46, 6);
-        setTimeout(() => {
-          releaseKey(46, 6);
-          releaseKey(18, 2);
-          releaseKey(17, 0);
-        }, 50);
-      } else if (keys === "win") {
-        pressKey(91, 8);
-        setTimeout(() => {
-          releaseKey(91, 0);
-        }, 50);
-      } else if (keys === "alt-tab") {
-        pressKey(18, 4);
-        pressKey(9, 4);
-        setTimeout(() => {
-          releaseKey(9, 4);
-          releaseKey(18, 0);
-        }, 50);
-      } else if (keys === "ctrl-esc") {
-        pressKey(17, 2);
-        pressKey(27, 2);
-        setTimeout(() => {
-          releaseKey(27, 2);
-          releaseKey(17, 0);
-        }, 50);
-      }
-      if (shortcutsDropdown) {
-        shortcutsDropdown.style.display = "none";
-      }
-    };
-  });
-
-  // --- 斷開連線按鈕與事件處理 ---
-  const btnDisconnect = document.getElementById("btn-disconnect") as HTMLButtonElement;
-  if (btnDisconnect) {
-    btnDisconnect.onclick = () => {
-      if (confirm(t("ui_confirm_disconnect"))) {
-        if (peerConnection) {
-          try {
-            peerConnection.close();
-          } catch (e) {
-            console.warn("[WebRTC] Error closing peerConnection:", e);
-          }
-          peerConnection = null;
-        }
-        dataChannelControl = null;
-        dataChannelUnreliable = null;
-        dataChannelClipboard = null;
-        dataChannelFileTransfer = null;
-        dataChannelSystemControl = null;
-        iceCandidateQueue = [];
-        resetConnectionUI();
-      }
-    };
-  }
 
   function getPinchDistance(touches: TouchList) {
     const dx = touches[0].clientX - touches[1].clientX;
@@ -4870,21 +4781,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         const vCode = 86;
         const aCode = 65;
 
-        const pressKey = (code: number, mods: number = 0) => {
-          const payload = new Uint8Array(3);
-          const view = new DataView(payload.buffer);
-          view.setUint16(0, code, false);
-          payload[2] = mods;
-          sendInputPacket(buildInputPacket(0x05, payload));
-        };
 
-        const releaseKey = (code: number, mods: number = 0) => {
-          const payload = new Uint8Array(3);
-          const view = new DataView(payload.buffer);
-          view.setUint16(0, code, false);
-          payload[2] = mods;
-          sendInputPacket(buildInputPacket(0x06, payload));
-        };
 
         if (opt.action === "copy") {
           // macOS: Cmd + C, Windows: Ctrl + C (同時發送相容雙系統)
@@ -5150,6 +5047,132 @@ function initPinToggle() {
 }
 
 // =========================================================================
+// Quick Menu 控制面板事件初始化 (全域僅綁定一次)
+// =========================================================================
+function initQuickMenu() {
+  const controlToggle = document.getElementById("btn-control-toggle");
+  const controlPanel = document.getElementById("control-dock-panel");
+  const toggleArrow = document.getElementById("control-toggle-arrow");
+  const btnTouchMode = document.getElementById("btn-touch-mode") as HTMLButtonElement;
+  const btnSendKeys = document.getElementById("btn-send-keys") as HTMLButtonElement;
+  const shortcutsDropdown = document.getElementById("shortcuts-dropdown") as HTMLDivElement;
+  const btnDisconnect = document.getElementById("btn-disconnect") as HTMLButtonElement;
+
+  if (controlToggle && controlPanel && toggleArrow) {
+    controlToggle.onclick = (e) => {
+      e.stopPropagation();
+      isPanelOpen = !isPanelOpen;
+      console.log("[QuickMenu] Toggle click, isPanelOpen:", isPanelOpen);
+      if (isPanelOpen) {
+        controlPanel.style.maxHeight = "200px";
+        controlPanel.style.opacity = "1";
+        controlPanel.style.pointerEvents = "auto";
+        controlPanel.style.transform = "translateY(0)";
+        toggleArrow.textContent = "▲";
+        toggleArrow.style.transform = "rotate(180deg)";
+      } else {
+        controlPanel.style.maxHeight = "0px";
+        controlPanel.style.opacity = "0";
+        controlPanel.style.pointerEvents = "none";
+        controlPanel.style.transform = "translateY(-10px)";
+        toggleArrow.textContent = "▼";
+        toggleArrow.style.transform = "rotate(0deg)";
+      }
+    };
+  }
+
+  if (btnTouchMode) {
+    btnTouchMode.onclick = () => {
+      isDirectTouchMode = !isDirectTouchMode;
+      console.log("[QuickMenu] Touch mode toggled, isDirectTouchMode:", isDirectTouchMode);
+      if (isDirectTouchMode) {
+        btnTouchMode.textContent = "👆 Direct Touch";
+      } else {
+        btnTouchMode.textContent = "🖱️ Trackpad Mode";
+      }
+    };
+  }
+
+  if (btnSendKeys && shortcutsDropdown) {
+    btnSendKeys.onclick = (e) => {
+      e.stopPropagation();
+      const isOpen = shortcutsDropdown.style.display === "flex";
+      shortcutsDropdown.style.display = isOpen ? "none" : "flex";
+    };
+  }
+
+  document.addEventListener("click", () => {
+    if (shortcutsDropdown) {
+      shortcutsDropdown.style.display = "none";
+    }
+  });
+
+  document.querySelectorAll(".shortcut-item").forEach((btn) => {
+    const el = btn as HTMLButtonElement;
+    el.onclick = (e) => {
+      e.stopPropagation();
+      const keys = el.getAttribute("data-keys");
+      console.log("[QuickMenu] Shortcut clicked:", keys);
+      if (keys === "ctrl-alt-del") {
+        pressKey(17, 2);
+        pressKey(18, 6);
+        pressKey(46, 6);
+        setTimeout(() => {
+          releaseKey(46, 6);
+          releaseKey(18, 2);
+          releaseKey(17, 0);
+        }, 50);
+      } else if (keys === "win") {
+        pressKey(91, 8);
+        setTimeout(() => {
+          releaseKey(91, 0);
+        }, 50);
+      } else if (keys === "alt-tab") {
+        pressKey(18, 4);
+        pressKey(9, 4);
+        setTimeout(() => {
+          releaseKey(9, 4);
+          releaseKey(18, 0);
+        }, 50);
+      } else if (keys === "ctrl-esc") {
+        pressKey(17, 2);
+        pressKey(27, 2);
+        setTimeout(() => {
+          releaseKey(27, 2);
+          releaseKey(17, 0);
+        }, 50);
+      }
+      if (shortcutsDropdown) {
+        shortcutsDropdown.style.display = "none";
+      }
+    };
+  });
+
+  if (btnDisconnect) {
+    btnDisconnect.onclick = () => {
+      console.log("[QuickMenu] Disconnect clicked");
+      if (confirm(t("ui_confirm_disconnect"))) {
+        if (peerConnection) {
+          try {
+            peerConnection.close();
+          } catch (e) {
+            console.warn("[WebRTC] Error closing peerConnection:", e);
+          }
+          peerConnection = null;
+        }
+        dataChannelControl = null;
+        dataChannelUnreliable = null;
+        dataChannelClipboard = null;
+        dataChannelFileTransfer = null;
+        dataChannelSystemControl = null;
+        iceCandidateQueue = [];
+        resetConnectionUI();
+      }
+    };
+  }
+}
+
+// =========================================================================
 // 應用程式初始化入口點
 // =========================================================================
 async function initializeApp() {
@@ -5222,6 +5245,7 @@ async function initializeApp() {
   await loadMyMac();
   
   initConnectButton();
+  initQuickMenu();
   // initLicenseVerification();
   initPrivacyMode();
   initAutostart();
