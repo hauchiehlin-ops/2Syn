@@ -1,6 +1,6 @@
 {
-  "productName": "2syn_Client",
-  "version": "3.4.14",
+  "productName": "2syn_Duel",
+  "version": "3.4.15",
   "identifier": "com.twosyn.app",
   "build": {
     "frontendDist": "../dist",
@@ -10,9 +10,15 @@
   "app": {
     "windows": [
       {
-        "label": "main",
-        "title": "2syn Client",
-        "visible": true,
+        "title": "2syn",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
         "devtools": true
       }
     ],
@@ -23,11 +29,11 @@
   "bundle": {
     "active": true,
     "icon": [
-      "icons-client/32x32.png",
-      "icons-client/128x128.png",
-      "icons-client/128x128@2x.png",
-      "icons-client/icon.icns",
-      "icons-client/icon.ico"
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
     ],
     "iOS": {
       "developmentTeam": "6UJ8GS752W",
