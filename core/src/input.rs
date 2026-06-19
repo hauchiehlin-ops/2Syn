@@ -1,6 +1,11 @@
 use crate::CoreError;
 use std::convert::TryInto;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+
+pub static TARGET_MONITOR_X: AtomicI32 = AtomicI32::new(0);
+pub static TARGET_MONITOR_Y: AtomicI32 = AtomicI32::new(0);
+pub static TARGET_MONITOR_W: AtomicU32 = AtomicU32::new(0);
+pub static TARGET_MONITOR_H: AtomicU32 = AtomicU32::new(0);
 
 /// 全域滑鼠游標追蹤，供後端雙軌擷取引擎（Foveated Streaming）定位 ROI 中心點
 /// 儲存 f32 位元結構的 Atomic 變數
@@ -177,11 +182,39 @@ impl InputEvent {
                         // 更新全域游標位置
                         set_global_cursor(clamped_x, clamped_y);
                         
-                        // 設定為絕對座標定位，對應螢幕解析度 (0 ~ 65535)
                         input.r#type = INPUT_MOUSE;
-                        input.Anonymous.mi.dx = (clamped_x * 65535.0) as i32;
-                        input.Anonymous.mi.dy = (clamped_y * 65535.0) as i32;
-                        input.Anonymous.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+                        
+                        let tx = TARGET_MONITOR_X.load(Ordering::Relaxed);
+                        let ty = TARGET_MONITOR_Y.load(Ordering::Relaxed);
+                        let tw = TARGET_MONITOR_W.load(Ordering::Relaxed);
+                        let th = TARGET_MONITOR_H.load(Ordering::Relaxed);
+                        
+                        let mut flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+                        let (dx, dy) = if tw > 0 && th > 0 {
+                            flags |= MOUSEEVENTF_VIRTUALDESKTOP;
+                            let abs_x = tx + (clamped_x as f64 * tw as f64) as i32;
+                            let abs_y = ty + (clamped_y as f64 * th as f64) as i32;
+                            
+                            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                                GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN
+                            };
+                            let vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+                            let vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+                            let vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+                            let vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+                            
+                            let dx = if vw > 1 { ((abs_x - vx) * 65535) / (vw - 1) } else { 0 };
+                            let dy = if vh > 1 { ((abs_y - vy) * 65535) / (vh - 1) } else { 0 };
+                            (dx, dy)
+                        } else {
+                            let dx = (clamped_x * 65535.0) as i32;
+                            let dy = (clamped_y * 65535.0) as i32;
+                            (dx, dy)
+                        };
+                        
+                        input.Anonymous.mi.dx = dx;
+                        input.Anonymous.mi.dy = dy;
+                        input.Anonymous.mi.dwFlags = flags;
                     }
                     InputEvent::MouseDown { button } => {
                         input.r#type = INPUT_MOUSE;
@@ -365,7 +398,22 @@ impl InputEvent {
                     // 更新全域游標位置
                     set_global_cursor(clamped_x, clamped_y);
                     
-                    let point = core_graphics::geometry::CGPoint::new(clamped_x as f64 * screen_w, clamped_y as f64 * screen_h);
+                    let tx = TARGET_MONITOR_X.load(Ordering::Relaxed);
+                    let ty = TARGET_MONITOR_Y.load(Ordering::Relaxed);
+                    let tw = TARGET_MONITOR_W.load(Ordering::Relaxed);
+                    let th = TARGET_MONITOR_H.load(Ordering::Relaxed);
+                    
+                    let point = if tw > 0 && th > 0 {
+                        core_graphics::geometry::CGPoint::new(
+                            tx as f64 + clamped_x as f64 * tw as f64,
+                            ty as f64 + clamped_y as f64 * th as f64,
+                        )
+                    } else {
+                        core_graphics::geometry::CGPoint::new(
+                            clamped_x as f64 * screen_w,
+                            clamped_y as f64 * screen_h,
+                        )
+                    };
                     
                     let mut event_type = CGEventType::MouseMoved;
                     let mut mouse_btn = CGMouseButton::Left;

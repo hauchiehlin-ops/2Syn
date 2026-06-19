@@ -369,6 +369,10 @@ let pinchStartTx = 0;
 let pinchStartTy = 0;
 let pinchStartCx = 0;
 let pinchStartCy = 0;
+let currentCursorPercentX = 0.5;               // 全域游標百分比 X（用於避讓對焦）
+let currentCursorPercentY = 0.5;               // 全域游標百分比 Y（用於避讓對焦）
+let lastMouseClientX = window.innerWidth / 2;
+let lastMouseClientY = window.innerHeight / 2;
 let warpX = 0;
 let warpY = 0;
 
@@ -407,8 +411,6 @@ let _lastRemoteClipboard = "";
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
 let myId: string = "";                        // 本機 9 位數 ID
 let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
-let currentCursorPercentX = 0.5;               // 全域游標百分比 X（用於避讓對焦）
-let currentCursorPercentY = 0.5;               // 全域游標百分比 Y（用於避讓對焦）
 
 // 取得信令伺服器 WebSocket URL（優先環境變數，備用本地，支援 LAN 測試）
 // 官方中心化信令伺服器位址 (未來上架部署於雲端的主機)
@@ -3312,7 +3314,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   if (btnDisplayMode) {
     btnDisplayMode.textContent = "🔍 " + t("btn_original_size");
-    btnDisplayMode.onclick = () => {
+    bindButtonAction(btnDisplayMode, () => {
       if (displayMode === "fit") {
         displayMode = "original";
       } else if (displayMode === "original") {
@@ -3321,23 +3323,23 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         displayMode = "fit";
       }
       applyDisplayMode();
-    };
+    });
   }
 
   const btnAudioToggle = document.getElementById("btn-audio-toggle") as HTMLButtonElement;
   if (btnAudioToggle) {
-    btnAudioToggle.onclick = () => {
+    bindButtonAction(btnAudioToggle, () => {
       const audioEl = document.getElementById("remote-audio") as HTMLAudioElement;
       if (audioEl) {
         audioEl.muted = !audioEl.muted;
         btnAudioToggle.textContent = audioEl.muted ? "🔇 Unmute" : "🔊 Mute";
       }
-    };
+    });
   }
 
   const btnSwitchMonitor = document.getElementById("btn-switch-monitor") as HTMLButtonElement;
   if (btnSwitchMonitor) {
-    btnSwitchMonitor.onclick = () => {
+    bindButtonAction(btnSwitchMonitor, () => {
       if (availableMonitors.length > 1 && dataChannelSystemControl && dataChannelSystemControl.readyState === "open") {
         currentMonitorIndex = (currentMonitorIndex + 1) % availableMonitors.length;
         btnSwitchMonitor.textContent = `🖥️ ${availableMonitors[currentMonitorIndex].name}`;
@@ -3347,7 +3349,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           index: currentMonitorIndex
         }));
       }
-    };
+    });
   }
 
   function startEdgePanLoop() {
@@ -3368,8 +3370,16 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         renderedHeight = renderedWidth / videoRatio;
         offsetY = (rect.height - renderedHeight) / 2;
       }
-      const pixelX = rect.left + offsetX + currentCursorPercentX * renderedWidth;
-      const pixelY = rect.top + offsetY + currentCursorPercentY * renderedHeight;
+      
+      // 若為 Pointer Lock 則使用虛擬合成游標位置，否則使用實體 client 滑鼠座標
+      let pixelX = 0, pixelY = 0;
+      if (document.pointerLockElement === videoEl) {
+        pixelX = rect.left + offsetX + syntheticCursorPercentX * renderedWidth;
+        pixelY = rect.top + offsetY + syntheticCursorPercentY * renderedHeight;
+      } else {
+        pixelX = lastMouseClientX;
+        pixelY = lastMouseClientY;
+      }
 
       const edgeThresholdX = window.innerWidth * 0.08;
       const edgeThresholdY = window.innerHeight * 0.08;
@@ -3423,6 +3433,42 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           videoTranslateY = Math.max(-maxTy, Math.min(maxTy, videoTranslateY));
           applyVideoTransform();
         }
+
+        // 畫面平移後，滑鼠對應的遠端絕對座標位置發生改變，重新計算並即時發送給被控端
+        let updatedX = 0, updatedY = 0;
+        if (displayMode === "original" && videoContainer) {
+          const rectContainer = videoContainer.getBoundingClientRect();
+          updatedX = (lastMouseClientX - rectContainer.left + videoContainer.scrollLeft) / videoEl.videoWidth;
+          updatedY = (lastMouseClientY - rectContainer.top + videoContainer.scrollTop) / videoEl.videoHeight;
+        } else {
+          const rectNew = videoEl.getBoundingClientRect();
+          const videoRatioNew = videoEl.videoWidth / videoEl.videoHeight;
+          const containerRatioNew = rectNew.width / rectNew.height;
+          
+          let renderedWidthNew, renderedHeightNew, offsetXNew = 0, offsetYNew = 0;
+          if (containerRatioNew > videoRatioNew) {
+            renderedHeightNew = rectNew.height;
+            renderedWidthNew = renderedHeightNew * videoRatioNew;
+            offsetXNew = (rectNew.width - renderedWidthNew) / 2;
+          } else {
+            renderedWidthNew = rectNew.width;
+            renderedHeightNew = renderedWidthNew / videoRatioNew;
+            offsetYNew = (rectNew.height - renderedHeightNew) / 2;
+          }
+          
+          updatedX = (lastMouseClientX - rectNew.left - offsetXNew) / renderedWidthNew;
+          updatedY = (lastMouseClientY - rectNew.top - offsetYNew) / renderedHeightNew;
+        }
+        
+        updatedX = Math.max(0, Math.min(1, updatedX));
+        updatedY = Math.max(0, Math.min(1, updatedY));
+        
+        pendingMouseMoveX = updatedX;
+        pendingMouseMoveY = updatedY;
+        triggerMoveRaf();
+
+        currentCursorPercentX = updatedX;
+        currentCursorPercentY = updatedY;
       }
       
       panRafId = requestAnimationFrame(loop);
@@ -3724,6 +3770,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     e.preventDefault();
     if (e.pointerType === "touch" || e.pointerType === "pen") return; // 由觸控手勢處理
     
+    lastMouseClientX = e.clientX;
+    lastMouseClientY = e.clientY;
+    
     if (document.pointerLockElement === videoEl) {
       pendingRelativeDX += Math.round(e.movementX);
       pendingRelativeDY += Math.round(e.movementY);
@@ -3757,8 +3806,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     } else {
       let x = 0, y = 0;
       if (displayMode === "original" && videoContainer) {
-        x = (e.clientX + videoContainer.scrollLeft) / videoEl.videoWidth;
-        y = (e.clientY + videoContainer.scrollTop) / videoEl.videoHeight;
+        const rectContainer = videoContainer.getBoundingClientRect();
+        x = (e.clientX - rectContainer.left + videoContainer.scrollLeft) / videoEl.videoWidth;
+        y = (e.clientY - rectContainer.top + videoContainer.scrollTop) / videoEl.videoHeight;
       } else {
         const rect = videoEl.getBoundingClientRect();
         const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
@@ -5047,6 +5097,24 @@ function initPinToggle() {
 }
 
 // =========================================================================
+// =========================================================================
+// 觸控/滑鼠通用按鈕事件綁定輔助函數 (整合 pointerdown & click 並防雙重觸發)
+// =========================================================================
+function bindButtonAction(el: HTMLElement | null, callback: (e: Event) => void) {
+  if (!el) return;
+  let lastTriggerTime = 0;
+  const handler = (e: Event) => {
+    const now = Date.now();
+    if (now - lastTriggerTime < 300) return;
+    lastTriggerTime = now;
+    e.stopPropagation();
+    e.preventDefault();
+    callback(e);
+  };
+  el.addEventListener("pointerdown", handler);
+  el.addEventListener("click", handler);
+}
+
 // Quick Menu 控制面板事件初始化 (全域僅綁定一次)
 // =========================================================================
 function initQuickMenu() {
@@ -5059,10 +5127,9 @@ function initQuickMenu() {
   const btnDisconnect = document.getElementById("btn-disconnect") as HTMLButtonElement;
 
   if (controlToggle && controlPanel && toggleArrow) {
-    controlToggle.onclick = (e) => {
-      e.stopPropagation();
+    bindButtonAction(controlToggle, () => {
       isPanelOpen = !isPanelOpen;
-      console.log("[QuickMenu] Toggle click, isPanelOpen:", isPanelOpen);
+      console.log("[QuickMenu] Toggle trigger, isPanelOpen:", isPanelOpen);
       if (isPanelOpen) {
         controlPanel.style.maxHeight = "200px";
         controlPanel.style.opacity = "1";
@@ -5078,11 +5145,11 @@ function initQuickMenu() {
         toggleArrow.textContent = "▼";
         toggleArrow.style.transform = "rotate(0deg)";
       }
-    };
+    });
   }
 
   if (btnTouchMode) {
-    btnTouchMode.onclick = () => {
+    bindButtonAction(btnTouchMode, () => {
       isDirectTouchMode = !isDirectTouchMode;
       console.log("[QuickMenu] Touch mode toggled, isDirectTouchMode:", isDirectTouchMode);
       if (isDirectTouchMode) {
@@ -5090,15 +5157,14 @@ function initQuickMenu() {
       } else {
         btnTouchMode.textContent = "🖱️ Trackpad Mode";
       }
-    };
+    });
   }
 
   if (btnSendKeys && shortcutsDropdown) {
-    btnSendKeys.onclick = (e) => {
-      e.stopPropagation();
+    bindButtonAction(btnSendKeys, () => {
       const isOpen = shortcutsDropdown.style.display === "flex";
       shortcutsDropdown.style.display = isOpen ? "none" : "flex";
-    };
+    });
   }
 
   document.addEventListener("click", () => {
@@ -5109,8 +5175,7 @@ function initQuickMenu() {
 
   document.querySelectorAll(".shortcut-item").forEach((btn) => {
     const el = btn as HTMLButtonElement;
-    el.onclick = (e) => {
-      e.stopPropagation();
+    bindButtonAction(el, () => {
       const keys = el.getAttribute("data-keys");
       console.log("[QuickMenu] Shortcut clicked:", keys);
       if (keys === "ctrl-alt-del") {
@@ -5145,11 +5210,11 @@ function initQuickMenu() {
       if (shortcutsDropdown) {
         shortcutsDropdown.style.display = "none";
       }
-    };
+    });
   });
 
   if (btnDisconnect) {
-    btnDisconnect.onclick = () => {
+    bindButtonAction(btnDisconnect, () => {
       console.log("[QuickMenu] Disconnect clicked");
       if (confirm(t("ui_confirm_disconnect"))) {
         if (peerConnection) {
@@ -5168,7 +5233,7 @@ function initQuickMenu() {
         iceCandidateQueue = [];
         resetConnectionUI();
       }
-    };
+    });
   }
 }
 

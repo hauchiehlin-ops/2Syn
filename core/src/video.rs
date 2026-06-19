@@ -137,7 +137,12 @@ impl VideoStreamer {
             let mut monitors = Monitor::all().unwrap_or_default();
             #[cfg(not(target_os = "macos"))]
             let mut monitor_clone = if !monitors.is_empty() {
-                Some(monitors[current_monitor_index.min(monitors.len() - 1)].clone())
+                let m = monitors[current_monitor_index.min(monitors.len() - 1)].clone();
+                crate::input::TARGET_MONITOR_X.store(m.x(), std::sync::atomic::Ordering::Relaxed);
+                crate::input::TARGET_MONITOR_Y.store(m.y(), std::sync::atomic::Ordering::Relaxed);
+                crate::input::TARGET_MONITOR_W.store(m.width(), std::sync::atomic::Ordering::Relaxed);
+                crate::input::TARGET_MONITOR_H.store(m.height(), std::sync::atomic::Ordering::Relaxed);
+                Some(m)
             } else {
                 None
             };
@@ -196,7 +201,12 @@ impl VideoStreamer {
                     {
                         monitors = Monitor::all().unwrap_or_default();
                         if !monitors.is_empty() {
-                            monitor_clone = Some(monitors[current_monitor_index.min(monitors.len() - 1)].clone());
+                            let m = monitors[current_monitor_index.min(monitors.len() - 1)].clone();
+                            crate::input::TARGET_MONITOR_X.store(m.x(), std::sync::atomic::Ordering::Relaxed);
+                            crate::input::TARGET_MONITOR_Y.store(m.y(), std::sync::atomic::Ordering::Relaxed);
+                            crate::input::TARGET_MONITOR_W.store(m.width(), std::sync::atomic::Ordering::Relaxed);
+                            crate::input::TARGET_MONITOR_H.store(m.height(), std::sync::atomic::Ordering::Relaxed);
+                            monitor_clone = Some(m);
                         }
                     }
                     // 強制觸發 IDR 幀以利前端解碼器重置
@@ -214,6 +224,12 @@ impl VideoStreamer {
                         if let Ok(content) = screencapturekit::shareable_content::SCShareableContent::get() {
                             let displays = content.displays();
                             if let Some(display) = displays.get(current_monitor_index.min(displays.len().saturating_sub(1))) {
+                                let frame = display.frame();
+                                crate::input::TARGET_MONITOR_X.store(frame.x as i32, std::sync::atomic::Ordering::Relaxed);
+                                crate::input::TARGET_MONITOR_Y.store(frame.y as i32, std::sync::atomic::Ordering::Relaxed);
+                                crate::input::TARGET_MONITOR_W.store(frame.width as u32, std::sync::atomic::Ordering::Relaxed);
+                                crate::input::TARGET_MONITOR_H.store(frame.height as u32, std::sync::atomic::Ordering::Relaxed);
+                                
                                 let filter = screencapturekit::stream::content_filter::SCContentFilter::builder().display(display).build();
                                 let min_frame_interval = screencapturekit::cm::CMTime::new(1, target_fps as i32);
                                 let config = screencapturekit::stream::configuration::SCStreamConfiguration::new()
