@@ -18,7 +18,7 @@ android {
     namespace = "com.twosyn.app"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "com.twosyn.host"
+        applicationId = "com.twosyn.app"
         minSdk = 24
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
