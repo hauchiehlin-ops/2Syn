@@ -138,10 +138,22 @@ impl VideoStreamer {
             #[cfg(not(target_os = "macos"))]
             let mut monitor_clone = if !monitors.is_empty() {
                 let m = monitors[current_monitor_index.min(monitors.len() - 1)].clone();
-                crate::input::TARGET_MONITOR_X.store(m.x(), std::sync::atomic::Ordering::Relaxed);
-                crate::input::TARGET_MONITOR_Y.store(m.y(), std::sync::atomic::Ordering::Relaxed);
-                crate::input::TARGET_MONITOR_W.store(m.width(), std::sync::atomic::Ordering::Relaxed);
-                crate::input::TARGET_MONITOR_H.store(m.height(), std::sync::atomic::Ordering::Relaxed);
+                #[cfg(target_os = "windows")]
+                {
+                    if let Some((left, top, width, height)) = crate::input::get_monitor_bounds(current_monitor_index) {
+                        crate::input::TARGET_MONITOR_X.store(left, std::sync::atomic::Ordering::Relaxed);
+                        crate::input::TARGET_MONITOR_Y.store(top, std::sync::atomic::Ordering::Relaxed);
+                        crate::input::TARGET_MONITOR_W.store(width as u32, std::sync::atomic::Ordering::Relaxed);
+                        crate::input::TARGET_MONITOR_H.store(height as u32, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+                #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+                {
+                    crate::input::TARGET_MONITOR_X.store(m.x(), std::sync::atomic::Ordering::Relaxed);
+                    crate::input::TARGET_MONITOR_Y.store(m.y(), std::sync::atomic::Ordering::Relaxed);
+                    crate::input::TARGET_MONITOR_W.store(m.width(), std::sync::atomic::Ordering::Relaxed);
+                    crate::input::TARGET_MONITOR_H.store(m.height(), std::sync::atomic::Ordering::Relaxed);
+                }
                 Some(m)
             } else {
                 None
@@ -202,10 +214,22 @@ impl VideoStreamer {
                         monitors = Monitor::all().unwrap_or_default();
                         if !monitors.is_empty() {
                             let m = monitors[current_monitor_index.min(monitors.len() - 1)].clone();
-                            crate::input::TARGET_MONITOR_X.store(m.x(), std::sync::atomic::Ordering::Relaxed);
-                            crate::input::TARGET_MONITOR_Y.store(m.y(), std::sync::atomic::Ordering::Relaxed);
-                            crate::input::TARGET_MONITOR_W.store(m.width(), std::sync::atomic::Ordering::Relaxed);
-                            crate::input::TARGET_MONITOR_H.store(m.height(), std::sync::atomic::Ordering::Relaxed);
+                            #[cfg(target_os = "windows")]
+                            {
+                                if let Some((left, top, width, height)) = crate::input::get_monitor_bounds(current_monitor_index) {
+                                    crate::input::TARGET_MONITOR_X.store(left, std::sync::atomic::Ordering::Relaxed);
+                                    crate::input::TARGET_MONITOR_Y.store(top, std::sync::atomic::Ordering::Relaxed);
+                                    crate::input::TARGET_MONITOR_W.store(width as u32, std::sync::atomic::Ordering::Relaxed);
+                                    crate::input::TARGET_MONITOR_H.store(height as u32, std::sync::atomic::Ordering::Relaxed);
+                                }
+                            }
+                            #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+                            {
+                                crate::input::TARGET_MONITOR_X.store(m.x(), std::sync::atomic::Ordering::Relaxed);
+                                crate::input::TARGET_MONITOR_Y.store(m.y(), std::sync::atomic::Ordering::Relaxed);
+                                crate::input::TARGET_MONITOR_W.store(m.width(), std::sync::atomic::Ordering::Relaxed);
+                                crate::input::TARGET_MONITOR_H.store(m.height(), std::sync::atomic::Ordering::Relaxed);
+                            }
                             monitor_clone = Some(m);
                         }
                     }

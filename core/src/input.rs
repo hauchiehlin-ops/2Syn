@@ -686,3 +686,41 @@ impl SecureInputPacket {
         Ok(())
     }
 }
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn monitor_enum_proc(
+    hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR,
+    _hdc: windows_sys::Win32::Graphics::Gdi::HDC,
+    _rect: *mut windows_sys::Win32::Foundation::RECT,
+    data: windows_sys::Win32::Foundation::LPARAM,
+) -> windows_sys::Win32::Foundation::BOOL {
+    let monitors = &mut *(data as *mut Vec<windows_sys::Win32::Graphics::Gdi::HMONITOR>);
+    monitors.push(hmonitor);
+    1 // TRUE to continue enumeration
+}
+
+#[cfg(target_os = "windows")]
+pub fn get_monitor_bounds(index: usize) -> Option<(i32, i32, i32, i32)> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetMonitorInfoW, MONITORINFO};
+    use windows_sys::Win32::Graphics::Gdi::EnumDisplayMonitors;
+    use std::mem::size_of;
+
+    unsafe {
+        let mut monitors: Vec<windows_sys::Win32::Graphics::Gdi::HMONITOR> = Vec::new();
+        let data = &mut monitors as *mut _ as windows_sys::Win32::Foundation::LPARAM;
+        if EnumDisplayMonitors(0, std::ptr::null(), Some(monitor_enum_proc), data) != 0 {
+            if let Some(&hmonitor) = monitors.get(index) {
+                let mut info: MONITORINFO = std::mem::zeroed();
+                info.cbSize = size_of::<MONITORINFO>() as u32;
+                if GetMonitorInfoW(hmonitor, &mut info) != 0 {
+                    let left = info.rcMonitor.left;
+                    let top = info.rcMonitor.top;
+                    let width = info.rcMonitor.right - info.rcMonitor.left;
+                    let height = info.rcMonitor.bottom - info.rcMonitor.top;
+                    return Some((left, top, width, height));
+                }
+            }
+        }
+    }
+    None
+}

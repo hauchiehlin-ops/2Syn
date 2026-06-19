@@ -1,6 +1,6 @@
 [package]
 name = "syn-core"
-version = "3.5.0"
+version = "3.5.1"
 edition = "2021"
 
 [dependencies]
@@ -37,12 +37,12 @@ xcap = "0.9.6"
 winreg = "0.52"
 windows-sys = { version = "0.52", features = [
     "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
     "Win32_Foundation",
     "Win32_System_IO",
     "Win32_Storage_FileSystem",
     "Win32_Graphics",
-    "Win32_Graphics_Gdi"
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging"
 ] }
 windows = { version = "0.52", features = ["Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_Foundation", "Win32_Media"] }
 
