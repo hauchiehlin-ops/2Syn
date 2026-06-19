@@ -33,6 +33,7 @@ jobs:
           node-version: 20
 
       - name: Install Compatible CMake (for audiopus_sys)
+        if: matrix.platform != 'windows-latest'
         uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '3.26.x'
