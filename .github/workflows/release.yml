@@ -9,6 +9,7 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   CARGO_HTTP_MULTIPLEXING: false
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
   build-desktop:
@@ -33,7 +34,6 @@ jobs:
           node-version: 20
 
       - name: Install Compatible CMake (for audiopus_sys)
-        if: matrix.platform != 'windows-latest'
         uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '3.26.x'
