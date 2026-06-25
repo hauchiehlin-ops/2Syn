@@ -3251,6 +3251,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let openMobileKeyboard: (() => void) | null = null;
   // 釋放所有被按住的桌面修飾鍵（⌘⌃⌥⇧），供關閉鍵盤/失焦/斷線等路徑呼叫，避免修飾鍵卡死
   let releaseAllHeldMods: (() => void) | null = null;
+  // 觸發鍵盤的那一下點擊在螢幕上的 Y 座標（client px）；鍵盤彈出時據此把畫面上移到剛好露出焦點
+  let kbFocusClientY = -1;
   let lastBackspaceTime = 0;
   let isComposing = false;
   let lastValue = ""; // 用於追蹤鍵盤增量輸入框內容
@@ -4373,6 +4375,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           if (vc) { vc.style.height = "100vh"; vc.style.top = "0px"; }
           keyboardBar.style.top = "auto";
           keyboardBar.style.bottom = "0";
+          kbFocusClientY = -1;
+          keyboardOffsetUpdateY = 0;
+          applyVideoTransform();
           mobileKeyboardInput.blur();
         }
       }
@@ -4489,7 +4494,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
                   sendInputPacket(buildInputPacket(0x03, payloadUp));
                 }, 20);
 
-                // 單指點擊自動啟動鍵盤（虛擬或外接鍵盤皆適用）
+                // 單指點擊自動啟動鍵盤（虛擬或外接鍵盤皆適用），並記下點擊 Y 供自適應上移
+                kbFocusClientY = endY;
                 if (openMobileKeyboard) openMobileKeyboard();
 
                 lastTapTime = now;
@@ -4887,55 +4893,76 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           }
           keyboardBar.style.top = "auto";
           keyboardBar.style.bottom = "0";
+          kbFocusClientY = -1;
+          keyboardOffsetUpdateY = 0;
+          applyVideoTransform();
         }
       }, 300);
     });
   }
 
-  // Visual Viewport 自適應邏輯：鍵盤彈出時壓縮視訊區域，消除中間空白
+  // Visual Viewport 自適應邏輯（仿 Chrome 遠端桌面）：
+  // 鍵盤彈出時「不壓縮」視訊容器（桌面保持全尺寸、清晰可讀），改為只把畫面
+  // 上移到剛好露出使用者點擊的焦點之上；焦點本就在可見區則完全不動。
+  // 這避免了舊版把整個桌面縮成頂部一小條的可視性問題。
   if (window.visualViewport) {
-    const KEYBOARD_BAR_HEIGHT = 56; // keyboard bar 的固定高度（padding 8*2 + input 40）
-
     const onViewportChange = () => {
       const vv = window.visualViewport;
       if (!vv) return;
-      
+
       const container = document.getElementById("remote-video-container");
       if (!container) return;
 
+      // 容器始終維持全螢幕，桌面以原始比例完整呈現
+      container.style.height = "100vh";
+      container.style.top = "0px";
+
       const isKbOpen = isKeyboardActive || document.activeElement === mobileKeyboardInput;
+      // 動態量測 keyboard bar 實際高度（修飾鍵列 + 輸入列），避免寫死失準
+      const barHeight = keyboardBar ? keyboardBar.offsetHeight || 100 : 100;
 
       if (isKbOpen) {
-        // 鍵盤開啟：視訊容器高度 = visualViewport 可見高度 - keyboard bar 高度
-        const availableHeight = vv.height - KEYBOARD_BAR_HEIGHT;
-        container.style.height = `${Math.max(availableHeight, 100)}px`;
-        container.style.top = `${vv.offsetTop}px`; // iOS Safari 會把 viewport 往上推，需要補償
-
-        // Keyboard Bar 定位：貼齊在視訊容器正下方（系統鍵盤正上方）
+        // 系統鍵盤頂端在螢幕上的 Y；我們的工具列再疊在它正上方
+        const sysKbTop = vv.offsetTop + vv.height;
+        const barTop = sysKbTop - barHeight;
         if (keyboardBar) {
-          // 在 iOS Safari 中，position:fixed 的 bottom:0 對齊的是 layout viewport 底部，
-          // 不是 visual viewport 底部（即系統鍵盤頂部）。
-          // 因此需要用 top 定位：visualViewport.offsetTop + visualViewport.height - bar 高度
-          const barTop = vv.offsetTop + vv.height - KEYBOARD_BAR_HEIGHT;
           keyboardBar.style.position = "fixed";
           keyboardBar.style.top = `${barTop}px`;
           keyboardBar.style.bottom = "auto";
         }
 
+        // Android WebView 會原生縮放 layout viewport，自行手動平移反而導致黑屏，故不上移
+        if (/android/i.test(navigator.userAgent)) {
+          keyboardOffsetUpdateY = 0;
+          applyVideoTransform();
+          window.scrollTo(0, 0);
+          return;
+        }
+
+        // 可見區下緣（工具列上方）。若點擊焦點落在它之下，往上平移剛好露出焦點。
+        const visibleBottom = barTop;
+        const margin = 24; // 焦點與工具列之間留一點呼吸空間
+        let pan = 0;
+        if (kbFocusClientY >= 0 && kbFocusClientY > visibleBottom - margin) {
+          pan = kbFocusClientY - (visibleBottom - margin);
+        }
+        // 上移量不超過被鍵盤遮蔽的高度，避免把畫面推過頭
+        const maxPan = window.innerHeight - vv.height + barHeight;
+        keyboardOffsetUpdateY = -Math.max(0, Math.min(pan, maxPan));
+        applyVideoTransform();
+
         // 防止 iOS Safari 將頁面推離視窗
         window.scrollTo(0, 0);
       } else {
-        // 鍵盤關閉：恢復全螢幕
-        container.style.height = "100vh";
-        container.style.top = "0px";
-
         if (keyboardBar) {
           keyboardBar.style.top = "auto";
           keyboardBar.style.bottom = "0";
         }
+        keyboardOffsetUpdateY = 0;
+        applyVideoTransform();
       }
     };
-    
+
     window.visualViewport.addEventListener("resize", onViewportChange);
     window.visualViewport.addEventListener("scroll", onViewportChange);
     // 初始化呼叫
@@ -4959,6 +4986,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       }
       keyboardBar.style.top = "auto";
       keyboardBar.style.bottom = "0";
+      kbFocusClientY = -1;
+      keyboardOffsetUpdateY = 0;
+      applyVideoTransform();
 
       // 強制收起虛擬鍵盤
       mobileKeyboardInput.blur();
@@ -5711,32 +5741,10 @@ async function initializeApp() {
 // 監聽 VisualViewport 以應對 iOS 鍵盤彈出與自適應縮放
 if (window.visualViewport) {
   const isAndroid = /android/i.test(navigator.userAgent);
-  
-  window.visualViewport.addEventListener("resize", () => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    
-    // Android WebView naturally resizes window.innerHeight and adjusts layout,
-    // so we don't need manual offset push which causes black screens.
-    if (isAndroid) {
-      keyboardOffsetUpdateY = 0;
-      applyVideoTransform();
-      return;
-    }
 
-    // iOS Safari logic: viewport overlays the content, so we must manually push up.
-    if (vv.height < window.innerHeight * 0.8) {
-      // 鍵盤彈出
-      const offset = window.innerHeight - vv.height;
-      keyboardOffsetUpdateY = -offset; // 往上推動整個鍵盤的高度
-      applyVideoTransform();
-    } else {
-      // 鍵盤收合
-      keyboardOffsetUpdateY = 0;
-      applyVideoTransform();
-    }
-  });
-
+  // 注意：鍵盤彈出時的畫面平移已統一由 setupInputControl 內的 onViewportChange
+  // 負責（焦點自適應上移、不壓縮畫面）。此處僅保留 iOS 的防滾動黑屏守衛，
+  // 不再自行改寫 keyboardOffsetUpdateY，以免與其相互覆蓋、互打架。
   window.visualViewport.addEventListener("scroll", () => {
      const vv = window.visualViewport;
      // 防止 iOS 自動滾動整個頁面導致黑屏
