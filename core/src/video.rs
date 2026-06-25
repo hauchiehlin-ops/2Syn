@@ -232,6 +232,9 @@ impl VideoStreamer {
             let mut acc_encode = std::time::Duration::ZERO; // 編碼耗時
             let mut acc_send = std::time::Duration::ZERO;   // blocking_send 阻塞
             let mut lock_fail: u32 = 0;                     // 編碼器鎖搶不到而跳幀次數
+            let mut iter_count: u32 = 0;                    // 迴圈實際跑了幾圈
+            let mut acc_sleep = std::time::Duration::ZERO;  // 實際 sleep 總時長
+            let mut no_frame: u32 = 0;                      // block_on 沒拿到幀(逾時/None)次數
             
             // 初始化 Monitor
             let mut current_monitor_index = *monitor_rx.borrow();
@@ -286,6 +289,7 @@ impl VideoStreamer {
                     return;
                 }
                 
+                iter_count += 1;
                 let current_config = config_rx.borrow().clone();
                 let target_fps = current_config.target_fps.min(30).max(1); // 為防止 Mac 死機，硬性限制最高 30 FPS
                 let frame_time = std::time::Duration::from_millis((1000 / target_fps) as u64);
@@ -414,12 +418,14 @@ impl VideoStreamer {
                                 }
                             }
                             Ok(None) => {
+                                no_frame += 1;
                                 // Stream ended or encountered a fatal error (e.g. display disconnected or resolution changed).
                                 // Drop the stream so it gets recreated on the next iteration.
                                 crate::debug_log!("VIDEO", "SCStream ended, will recreate...");
                                 macos_stream = None;
                             }
                             Err(_) => {
+                                no_frame += 1;
                                 // Timeout. Expected behavior if screen content hasn't changed.
                             }
                         }
@@ -546,11 +552,13 @@ impl VideoStreamer {
                     let secs = last_fps_log.elapsed().as_secs_f32();
                     let n = produced_frames.max(1) as f32;
                     let msg = format!(
-                        "[Video][DIAG] host {:.1} fps（目標 {}）| 每幀均值 等幀 {:.0}ms 編碼 {:.0}ms 送出 {:.0}ms | 鎖搶不到跳幀 {}",
+                        "[Video][DIAG] host {:.1} fps（目標 {}）| 迴圈 {:.0} 圈/s 沒幀 {} | 每幀 等 {:.0} 編 {:.0} 送 {:.0}ms | 平均sleep {:.0}ms | 鎖跳 {}",
                         produced_frames as f32 / secs, target_fps,
+                        iter_count as f32 / secs, no_frame,
                         acc_wait.as_millis() as f32 / n,
                         acc_encode.as_millis() as f32 / n,
                         acc_send.as_millis() as f32 / n,
+                        acc_sleep.as_millis() as f32 / iter_count.max(1) as f32,
                         lock_fail);
                     eprintln!("{}", msg);
                     if let Some(tx) = &status_tx { let _ = tx.send(msg); }
@@ -558,6 +566,9 @@ impl VideoStreamer {
                     acc_wait = std::time::Duration::ZERO;
                     acc_encode = std::time::Duration::ZERO;
                     acc_send = std::time::Duration::ZERO;
+                    acc_sleep = std::time::Duration::ZERO;
+                    iter_count = 0;
+                    no_frame = 0;
                     lock_fail = 0;
                     last_fps_log = std::time::Instant::now();
                 }
@@ -569,6 +580,7 @@ impl VideoStreamer {
                 } else {
                     std::time::Duration::from_millis(5)
                 };
+                acc_sleep += sleep_time;
                 std::thread::sleep(sleep_time);
                 tick = std::time::Instant::now();
                 })); // end catch_unwind closure
