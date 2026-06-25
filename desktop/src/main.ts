@@ -3610,6 +3610,27 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let touchStartClientY = 0;
   let hasTriggeredLongPress = false;
 
+  // --- 多指轉換防護 (Gesture Transition Guard) ---
+  // 確保單指 / 雙指 / 三指手勢彼此獨立，減少控制誤判。
+  // 當手指數由 1 增加到 2 或 3 時，若單指長按/拖曳仍持有滑鼠左鍵，
+  // 先釋放左鍵並清除單指狀態，避免「左鍵卡住」污染後續的雙指捲動/捏合或三指手勢。
+  const releaseSingleFingerDragIfActive = () => {
+    if (isDragging || hasTriggeredLongPress) {
+      const payload = new Uint8Array(1);
+      payload[0] = 1; // Left button up
+      sendInputPacket(buildInputPacket(0x03, payload));
+      console.log("[Gesture] 多指轉換：釋放單指拖曳殘留的左鍵，避免誤判");
+    }
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    isDragging = false;
+    isPotentialDrag = false;
+    hasTriggeredLongPress = false;
+    wasLongPressDrag = false;
+  };
+
   // --- 慣性 (Momentum) 狀態 ---
   let momentumVx = 0;
   let momentumVy = 0;
@@ -3879,21 +3900,17 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     stopScrollMomentum();
     
     if (e.touches.length === 3) {
+      // 1/2 → 3 指轉換：先釋放單指拖曳殘留按鍵，確保三指手勢獨立
+      releaseSingleFingerDragIfActive();
       isThreeFingerGesture = true;
       threeFingerHasMoved = false;
       const avgX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
       const avgY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
       threeFingerStartPos = { x: avgX, y: avgY };
       touchStartTime = Date.now();
-      if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
     } else if (e.touches.length === 2) {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
+      // 1 → 2 指轉換：先釋放單指拖曳殘留按鍵，避免左鍵卡住污染雙指捲動/捏合
+      releaseSingleFingerDragIfActive();
       initialPinchDistance = getPinchDistance(e.touches);
       lastTouchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       lastTouchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
