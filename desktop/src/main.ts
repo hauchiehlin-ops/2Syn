@@ -2716,8 +2716,8 @@ function startStatusPolling() {
 
       statsReport.forEach((stat: RTCStatsReport) => {
         const s = stat as any;
-        // inbound-rtp video
-        if (s.type === "inbound-rtp" && s.kind === "video") {
+        // inbound-rtp video（部分 WebView 用 mediaType 而非 kind）
+        if (s.type === "inbound-rtp" && (s.kind === "video" || s.mediaType === "video")) {
           vid = s;
           actualFps = s.framesPerSecond ?? 0;
           const totalBytes = s.bytesReceived ?? 0;
@@ -2738,7 +2738,9 @@ function startStatusPolling() {
         }
       });
 
-      // ===== 端到端延遲 / 帧间抖动 诊断（差分计算，反映当下）=====
+      // ===== 端到端延遲 / 帧间抖动 诊断 =====
+      // 穩健版：只要偵測到 video 統計就每次輪詢都渲染 HUD（不再要求 framesDecoded 前進，
+      // 因部分 iOS WKWebView 的 getStats 不提供逐帧計數器；缺的子指標顯示「—」）。
       if (vid) {
         const dFrames = (vid.framesDecoded ?? 0) - _prev.framesDecoded;
         const dJbDelay = (vid.jitterBufferDelay ?? 0) - _prev.jbDelay;
@@ -2750,24 +2752,30 @@ function startStatusPolling() {
         const dFreezeDur = (vid.totalFreezesDuration ?? 0) - _prev.freezeDur;
         const dDropped = (vid.framesDropped ?? 0) - _prev.framesDropped;
 
-        if (_prev.ready && dFrames > 0) {
-          // 抖动缓冲平均延迟（ms）— 端到端延迟的主要构成之一
-          const jbMs = dJbCount > 0 ? (dJbDelay / dJbCount) * 1000 : 0;
+        if (_prev.ready) {
+          const fmt = (v: number | null, d = 0, suf = "") =>
+            v === null || !isFinite(v) ? "—" : `${v.toFixed(d)}${suf}`;
+          // 抖动缓冲平均延迟（ms）
+          const jbMs = dJbCount > 0 ? (dJbDelay / dJbCount) * 1000 : null;
           // 平均解码耗时（ms）
-          const decodeMs = (dDecode / dFrames) * 1000;
-          // 帧间间隔均值与标准差（ms）— 标准差越大代表节奏越不稳（卡顿感来源）
-          const meanIf = dInter / dFrames;
-          const meanSq = dInterSq / dFrames;
-          const stdIf = Math.sqrt(Math.max(0, meanSq - meanIf * meanIf));
-          // 网络包到达抖动（ms）
-          const jitterMs = (vid.jitter ?? 0) * 1000;
-          // 端到端延迟估算（ms）= 单程网路(RTT/2) + 抖动缓冲 + 解码
-          const e2eMs = rttMs / 2 + jbMs + decodeMs;
+          const decodeMs = dFrames > 0 ? (dDecode / dFrames) * 1000 : null;
+          // 帧间间隔均值±标准差（ms）— 标准差大 = 节奏不稳（卡顿感来源）
+          let meanIfMs: number | null = null, stdIfMs: number | null = null;
+          if (dFrames > 0 && dInter > 0) {
+            const meanIf = dInter / dFrames;
+            const meanSq = dInterSq / dFrames;
+            meanIfMs = meanIf * 1000;
+            stdIfMs = Math.sqrt(Math.max(0, meanSq - meanIf * meanIf)) * 1000;
+          }
+          const jitterMs = vid.jitter != null ? vid.jitter * 1000 : null;
+          const fps = vid.framesPerSecond ?? actualFps ?? 0;
+          // 端到端延迟估算 = 单程网路(RTT/2) + 抖动缓冲 + 解码（缺项以 0 计）
+          const e2eMs = rttMs / 2 + (jbMs ?? 0) + (decodeMs ?? 0);
 
           logDiag(
-            `[DIAG] e2e≈${e2eMs.toFixed(0)}ms | RTT ${rttMs}ms | 抖动缓冲 ${jbMs.toFixed(0)}ms | ` +
-            `解码 ${decodeMs.toFixed(1)}ms | 帧间 ${(meanIf * 1000).toFixed(1)}±${(stdIf * 1000).toFixed(1)}ms | ` +
-            `jitter ${jitterMs.toFixed(1)}ms | fps ${actualFps.toFixed(1)} | ` +
+            `[DIAG] e2e≈${e2eMs.toFixed(0)}ms | RTT ${fmt(rttMs || null, 0, "ms")} | 抖动缓冲 ${fmt(jbMs, 0, "ms")} | ` +
+            `解码 ${fmt(decodeMs, 1, "ms")} | 帧间 ${fmt(meanIfMs, 1)}±${fmt(stdIfMs, 1)}ms | ` +
+            `jitter ${fmt(jitterMs, 1, "ms")} | fps ${fps.toFixed(1)} | ` +
             `卡顿 +${dFreezeCnt}(${(dFreezeDur * 1000).toFixed(0)}ms) | 丢帧 +${dDropped}`
           );
         }
@@ -2782,6 +2790,9 @@ function startStatusPolling() {
         _prev.freezeDur = vid.totalFreezesDuration ?? 0;
         _prev.framesDropped = vid.framesDropped ?? 0;
         _prev.ready = true;
+      } else {
+        // 沒有抓到 inbound-rtp video 統計：仍輸出一行，確認輪詢有在跑、並提示 RTT
+        logDiag(`[DIAG] 等待視訊統計… | RTT ${rttMs || "—"}ms`);
       }
 
       // 更新實際 FPS
