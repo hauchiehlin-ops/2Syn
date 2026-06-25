@@ -463,9 +463,12 @@ let translations: Record<string, string> = {};
 let isPinVisible = false;
 let isPanelOpen = false;
 let isDirectTouchMode = false;
-// 被控端已在影像中合成真實游標（core/src/video.rs，零偏移），前端不再畫合成游標，
-// 避免雙重游標並徹底擺脫前端座標推算造成的偏移。若連到舊版被控端可改回 false。
-const HOST_RENDERS_CURSOR = true;
+// 游標策略（仿 Chrome 遠端桌面）：改用「本地游標預測」。
+// false = 前端即時繪製本地合成游標（零延遲跟手），並由被控端關閉 shows_cursor 避免雙游標。
+// 軌跡板模式送的是絕對座標，本地預測游標與被控端游標同步、點擊零漂移。
+// 代價：失去 macOS 原生游標外形（I-beam/縮放箭頭），統一顯示箭頭。
+// 若連到「仍會烘焙游標」的舊版被控端，改回 true 以免雙游標。
+const HOST_RENDERS_CURSOR = false;
 
 // 萬用英文 Fallback 字典，供載入錯誤或翻譯遺漏時調用，徹底與寫死中文解耦
 const fallbackTranslations: Record<string, string> = {
@@ -3925,10 +3928,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       if (remoteCursor) remoteCursor.style.display = "none";
       return;
     }
-    if (isDirectTouchMode) {
-      if (remoteCursor) remoteCursor.style.display = "none";
-      return;
-    }
     const rect = videoEl.getBoundingClientRect();
     const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
     const containerRatio = rect.width / rect.height;
@@ -4318,6 +4317,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         let y = (currentY - rect.top - offsetY) / renderedHeight;
         x = Math.max(0, Math.min(1, x));
         y = Math.max(0, Math.min(1, y));
+
+        // 直控模式也即時繪製本地游標（被控端已關閉烘焙游標，避免直控下完全無游標）
+        updateCursorOverlay(x, y);
 
         // Tremor Suppression (防手震) & Lazy Drag (延遲拖曳激活)
         if (!isDragging) {

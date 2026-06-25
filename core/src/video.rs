@@ -54,6 +54,8 @@ const CURSOR_GLYPH: [&str; 18] = [
 
 /// 將箭頭游標合成進 RGBA 影格。`cx`,`cy` 為游標熱點所在像素（影格座標）。
 /// `scale` 放大倍率（Retina 影格較大，建議 2）。對 RGBA/BGRA 皆相容（僅用黑白）。
+/// 註：游標策略改為客戶端本地預測後，被控端不再呼叫此函式，保留以利日後切換。
+#[allow(dead_code)]
 fn composite_cursor_rgba(bytes: &mut [u8], width: usize, height: usize, cx: i32, cy: i32, scale: i32) {
     let scale = scale.max(1);
     for (row, line) in CURSOR_GLYPH.iter().enumerate() {
@@ -324,11 +326,10 @@ impl VideoStreamer {
                                 let filter = screencapturekit::stream::content_filter::SCContentFilter::builder().display(display).build();
                                 let min_frame_interval = screencapturekit::cm::CMTime::new(1, target_fps as i32);
                                 let config = screencapturekit::stream::configuration::SCStreamConfiguration::new()
-                                    // 讓 ScreenCaptureKit 直接把「真實硬體游標」合成進畫面：
-                                    // 位置 = 被控端實際游標位置（與我們注入的滑鼠同步），所見即所點、零偏移，
-                                    // 且是真正的游標外形（箭頭/I-beam/縮放）。macOS 走零拷貝 IOSurface 編碼，
-                                    // 無 CPU 端 RGBA 緩衝可手動疊圖，故用此原生方式最乾淨。
-                                    .with_shows_cursor(true)
+                                    // 游標策略改為「客戶端本地預測繪製」（仿 Chrome 遠端桌面、零延遲跟手）：
+                                    // 被控端不再把硬體游標烘焙進畫面，避免與前端本地游標形成雙游標。
+                                    // 代價是失去原生游標外形，由前端統一畫箭頭。
+                                    .with_shows_cursor(false)
                                     .with_pixel_format(screencapturekit::stream::configuration::PixelFormat::YCbCr_420v)
                                     .with_minimum_frame_interval(&min_frame_interval);
                                 let stream = screencapturekit::async_api::AsyncSCStream::new(&filter, &config, 5, screencapturekit::stream::output_type::SCStreamOutputType::Screen);
@@ -398,7 +399,7 @@ impl VideoStreamer {
                     }
                 }
 
-                if let Some(Ok((mut bytes, width, height))) = capture_result {
+                if let Some(Ok((bytes, width, height))) = capture_result {
                     let width = width as usize;
                     let height = height as usize;
 
@@ -415,19 +416,8 @@ impl VideoStreamer {
                         return;
                     }
 
-                    // 在編碼前把真實游標合成進影格（根治前端游標偏移）。
-                    // 游標比例與點擊注入同源 (input::set_global_cursor)，故零偏移。
-                    {
-                        let (cx_ratio, cy_ratio) = crate::input::get_global_cursor();
-                        // (0,0) 視為尚未收到任何輸入，避免在左上角畫出殘留游標
-                        if cx_ratio != 0.0 || cy_ratio != 0.0 {
-                            let cx = (cx_ratio * width as f32) as i32;
-                            let cy = (cy_ratio * height as f32) as i32;
-                            // Retina/高解析影格放大游標以維持可視性
-                            let scale = if width >= 2560 { 3 } else { 2 };
-                            composite_cursor_rgba(&mut bytes, width, height, cx, cy, scale);
-                        }
-                    }
+                    // 游標策略改為「客戶端本地預測繪製」：被控端不再把游標烘焙進影格，
+                    // 避免與前端本地游標形成雙游標（與 macOS shows_cursor(false) 一致）。
 
 
                     // 在同步區塊中取得 encoder 並進行編碼
