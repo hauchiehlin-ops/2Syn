@@ -224,10 +224,14 @@ impl VideoStreamer {
         tokio::task::spawn_blocking(move || {
             let mut tick = std::time::Instant::now();
             let mut frame_count: u64 = 0;
-            // 診斷：統計 host 端「實際編碼產出」的幀率，每 2 秒打印到終端，
-            // 用以判斷主動操作時 fps 偏低究竟是「host 產不出」還是「送不到」。
+            // 診斷：統計 host 端「實際編碼產出」的幀率，每 2 秒回報。
             let mut produced_frames: u32 = 0;
             let mut last_fps_log = std::time::Instant::now();
+            // 三段計時診斷：等幀 / 編碼 / 送入發送佇列（阻塞代表發送端塞車）
+            let mut acc_wait = std::time::Duration::ZERO;   // stream.next() 等待
+            let mut acc_encode = std::time::Duration::ZERO; // 編碼耗時
+            let mut acc_send = std::time::Duration::ZERO;   // blocking_send 阻塞
+            let mut lock_fail: u32 = 0;                     // 編碼器鎖搶不到而跳幀次數
             
             // 初始化 Monitor
             let mut current_monitor_index = *monitor_rx.borrow();
@@ -375,25 +379,34 @@ impl VideoStreamer {
                 {
                     if let Some(stream) = &macos_stream {
                         // Blockingly wait for the next sample up to 100ms
+                        let _t_wait = std::time::Instant::now();
                         let timeout_res = tokio::runtime::Handle::current().block_on(async {
                             tokio::time::timeout(std::time::Duration::from_millis(100), stream.next()).await
                         });
-                        
+                        acc_wait += _t_wait.elapsed();
+
                         match timeout_res {
                             Ok(Some(sample)) => {
                                 if let Some(pixel_buf) = sample.image_buffer() {
                                     if let Some(io_surface) = pixel_buf.io_surface() {
                                         let ptr = io_surface.as_ptr();
                                         if let Ok(mut encoder_guard) = encoder_arc.try_lock() {
-                                            match encoder_guard.encode_frame_zero_copy(&crate::codec::FrameBuffer::IOSurface(ptr)) {
+                                            let _t_enc = std::time::Instant::now();
+                                            let enc_res = encoder_guard.encode_frame_zero_copy(&crate::codec::FrameBuffer::IOSurface(ptr));
+                                            acc_encode += _t_enc.elapsed();
+                                            match enc_res {
                                                 Ok(encoded_bytes) => {
                                                     produced_frames += 1;
+                                                    let _t_send = std::time::Instant::now();
                                                     let _ = tx.blocking_send(encoded_bytes);
+                                                    acc_send += _t_send.elapsed();
                                                 }
                                                 Err(e) => {
                                                     crate::debug_log!("VIDEO", "Zero-copy encode failed: {:?}", e);
                                                 }
                                             }
+                                        } else {
+                                            lock_fail += 1;
                                         }
                                     } else {
                                         crate::debug_log!("VIDEO", "No IOSurface found in CVPixelBuffer");
@@ -531,11 +544,21 @@ impl VideoStreamer {
                 // 以便直接顯示在 App 的「系統日誌」面板（eprintln 只進終端 stderr 看不到）。
                 if last_fps_log.elapsed() >= std::time::Duration::from_secs(2) {
                     let secs = last_fps_log.elapsed().as_secs_f32();
-                    let msg = format!("[Video][DIAG] host 實際編碼產出 ≈ {:.1} fps（目標 {}）",
-                        produced_frames as f32 / secs, target_fps);
+                    let n = produced_frames.max(1) as f32;
+                    let msg = format!(
+                        "[Video][DIAG] host {:.1} fps（目標 {}）| 每幀均值 等幀 {:.0}ms 編碼 {:.0}ms 送出 {:.0}ms | 鎖搶不到跳幀 {}",
+                        produced_frames as f32 / secs, target_fps,
+                        acc_wait.as_millis() as f32 / n,
+                        acc_encode.as_millis() as f32 / n,
+                        acc_send.as_millis() as f32 / n,
+                        lock_fail);
                     eprintln!("{}", msg);
                     if let Some(tx) = &status_tx { let _ = tx.send(msg); }
                     produced_frames = 0;
+                    acc_wait = std::time::Duration::ZERO;
+                    acc_encode = std::time::Duration::ZERO;
+                    acc_send = std::time::Duration::ZERO;
+                    lock_fail = 0;
                     last_fps_log = std::time::Instant::now();
                 }
 
