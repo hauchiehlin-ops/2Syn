@@ -46,9 +46,9 @@ impl Default for QualityConfig {
         Self {
             target_fps: 60,
             color_format: ColorFormat::Yuv420,
-            bitrate_limit_kbps: 8_000, // 預設 8 Mbps
-            target_width: 1920, // 預設 1080p
-            target_height: 1080,
+            bitrate_limit_kbps: 5_000, // 預設 5 Mbps（720p 足夠清晰，省頻寬利吞吐）
+            target_width: 1280, // 預設 720p：手機看 Mac 桌面足夠清晰，編碼/頻寬吞吐更高、更跟手
+            target_height: 720,
         }
     }
 }
@@ -141,11 +141,13 @@ impl ConnectionManager {
             config.target_width = 1280;
             config.target_height = 720;
         } else {
-            // 網路暢通，提升至最高畫質
+            // 網路暢通：以 720p@5Mbps 為最高檔。
+            // 實測 1080p 全屏劇烈變化時 host 編碼吞吐跟不上（fps 僅 10-14、偶發凍結），
+            // 720p 編碼成本減半、頻寬減半 → fps 與跟手感大幅提升，清晰度對遠端控制足夠。
             config.target_fps = 60;
-            config.bitrate_limit_kbps = 8000;
-            config.target_width = 1920;
-            config.target_height = 1080;
+            config.bitrate_limit_kbps = 5000;
+            config.target_width = 1280;
+            config.target_height = 720;
         }
 
         config
