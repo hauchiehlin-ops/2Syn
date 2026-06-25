@@ -3249,6 +3249,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   const btnKeyboardSend = document.getElementById("btn-mobile-keyboard-send") as HTMLButtonElement;
   let isKeyboardActive = false;
   let openMobileKeyboard: (() => void) | null = null;
+  // 釋放所有被按住的桌面修飾鍵（⌘⌃⌥⇧），供關閉鍵盤/失焦/斷線等路徑呼叫，避免修飾鍵卡死
+  let releaseAllHeldMods: (() => void) | null = null;
   let lastBackspaceTime = 0;
   let isComposing = false;
   let lastValue = ""; // 用於追蹤鍵盤增量輸入框內容
@@ -4362,6 +4364,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       if (isKeyboardActive && mobileKeyboardInput && document.activeElement !== mobileKeyboardInput) {
         if (keyboardBar && !keyboardBar.contains(e.target as Node)) {
           isKeyboardActive = false;
+          if (releaseAllHeldMods) releaseAllHeldMods();
           keyboardBar.style.visibility = "hidden";
           keyboardBar.style.opacity = "0";
           keyboardBar.style.pointerEvents = "none";
@@ -4710,6 +4713,72 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       mobileKeyboardInput.value = "\u200B";
     };
 
+    // =========================================================================
+    // 桌面修飾鍵工具列（⌘⌃⌥⇧ + Esc/Tab/方向鍵）
+    // 仿 Chrome 遠端桌面：修飾鍵為「按住/再按放開」的鎖定切換，按住期間軟鍵盤
+    // 打出的字母改以「按鍵事件 (0x05/0x06)」送出，與被控端真實按住的修飾鍵組合。
+    // 被控端 host 兩平台皆忽略 modifiers 位元組，純靠真實按住的修飾鍵碼建立狀態。
+    // =========================================================================
+    interface HeldMod { code: number; bit: number; el: HTMLButtonElement; }
+    const heldMods = new Map<string, HeldMod>();
+    let activeModBits = 0;
+    const recomputeModBits = () => {
+      activeModBits = 0;
+      heldMods.forEach((m) => { activeModBits |= m.bit; });
+    };
+    const releaseAllMods = () => {
+      heldMods.forEach((m) => {
+        releaseKey(m.code, 0);
+        m.el.classList.remove("modkey-active");
+      });
+      heldMods.clear();
+      activeModBits = 0;
+    };
+    releaseAllHeldMods = releaseAllMods;
+
+    // 把單一字元映射為 Windows VK 碼（host 端再轉各平台），僅處理英數，其餘回退文字注入
+    const charToVk = (ch: string): number | null => {
+      if (/^[a-zA-Z]$/.test(ch)) return ch.toUpperCase().charCodeAt(0);
+      if (/^[0-9]$/.test(ch)) return ch.charCodeAt(0);
+      return null;
+    };
+
+    const modkeyRow = document.getElementById("mobile-modkey-row");
+    if (modkeyRow) {
+      const buttons = modkeyRow.querySelectorAll<HTMLButtonElement>(".modkey");
+      buttons.forEach((btn) => {
+        const modAttr = btn.dataset.mod;   // 修飾鍵（鎖定切換）
+        const keyAttr = btn.dataset.key;   // 一次性特殊鍵
+        // 用 pointerdown + preventDefault：避免搶走輸入框焦點（否則會誤觸發收鍵盤）
+        btn.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (modAttr) {
+            const code = parseInt(modAttr, 10);
+            const bit = parseInt(btn.dataset.bit || "0", 10);
+            if (heldMods.has(modAttr)) {
+              releaseKey(code, 0);
+              heldMods.delete(modAttr);
+              btn.classList.remove("modkey-active");
+            } else {
+              pressKey(code, bit);
+              heldMods.set(modAttr, { code, bit, el: btn });
+              btn.classList.add("modkey-active");
+            }
+            recomputeModBits();
+            triggerHaptic("light");
+          } else if (keyAttr) {
+            const code = parseInt(keyAttr, 10);
+            // 特殊鍵與目前按住的修飾鍵組合送出，修飾鍵維持按住（方便連續操作）
+            pressKey(code, activeModBits);
+            setTimeout(() => releaseKey(code, activeModBits), 20);
+            triggerHaptic("light");
+          }
+        }, { passive: false });
+      });
+    }
+
+
     // 開啟鍵盤的核心邏輯（供單指點擊觸發虛擬/實體鍵盤共用）
     let keyboardOpenGuard = false;
     openMobileKeyboard = () => {
@@ -4777,7 +4846,16 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         sendKeyStroke(13); // 換行 → 遠端 Enter
       } else {
         const val = mobileKeyboardInput.value.replace(/​/g, "");
-        if (val) sendTextChunk(val); // 一般打字即時送
+        if (val) {
+          // 有按住修飾鍵且為單一英數字元 → 以按鍵事件組合送出（達成 ⌘C/⌃V… 等快捷鍵）
+          const vk = activeModBits !== 0 && val.length === 1 ? charToVk(val) : null;
+          if (vk !== null) {
+            pressKey(vk, activeModBits);
+            releaseKey(vk, activeModBits);
+          } else {
+            sendTextChunk(val); // 一般打字即時送
+          }
+        }
       }
       resetInput(); // 立即清回 sentinel，下個按鍵只帶新字
     });
@@ -4796,6 +4874,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         if (keyboardOpenGuard) return; // 正在開啟鍵盤，忽略此次 blur
         if (document.activeElement !== mobileKeyboardInput) {
           isKeyboardActive = false;
+          if (releaseAllHeldMods) releaseAllHeldMods();
           keyboardBar.style.visibility = "hidden";
           keyboardBar.style.opacity = "0";
           keyboardBar.style.pointerEvents = "none";
@@ -4867,6 +4946,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   videoEl.addEventListener("click", () => {
     if (isKeyboardActive && mobileKeyboardInput && document.activeElement !== mobileKeyboardInput) {
       isKeyboardActive = false;
+      if (releaseAllHeldMods) releaseAllHeldMods();
       keyboardBar.style.visibility = "hidden";
       keyboardBar.style.opacity = "0";
       keyboardBar.style.pointerEvents = "none";
