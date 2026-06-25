@@ -1,14 +1,14 @@
 {
   "name": "syn-desktop-ui",
   "private": true,
-  "version": "3.5.3",
+  "version": "3.5.4",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:build:host": "tauri build",
+    "tauri:build:host": "bash ../scripts/clean-dmg-mounts.sh && tauri build",
     "tauri:build:client": "tauri build --config src-tauri/tauri.client.conf.json",
     "tauri:build:ios:host": "tauri ios build",
     "tauri:build:ios:client": "tauri ios build --config src-tauri/tauri.client.conf.json",

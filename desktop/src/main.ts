@@ -3813,12 +3813,12 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   function applyAcceleration(delta: number): number {
     const absDelta = Math.abs(delta);
     let multiplier: number;
-    if (absDelta < 2) {
-      multiplier = 0.8;
-    } else if (absDelta < 8) {
-      multiplier = 0.8 + ((absDelta - 2) / 6) * 1.7;
+    if (absDelta < 3) {
+      multiplier = 1.0;                                   // 小幅移動 1:1，精準不漂移
+    } else if (absDelta < 12) {
+      multiplier = 1.0 + ((absDelta - 3) / 9) * 0.8;      // 1.0 → 1.8 緩升
     } else {
-      multiplier = 2.5 + (absDelta - 8) * 0.08;
+      multiplier = Math.min(1.8 + (absDelta - 12) * 0.03, 2.6); // 封頂 2.6，避免快速滑動暴衝
     }
     return delta * multiplier;
   }
@@ -4051,11 +4051,16 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         
         triggerHaptic("heavy");
         console.log("[Gesture] 單指長按重壓，觸發左鍵拖曳模式");
-      }, 400);
-      
+      }, 500); // 400→500ms：降低「手指稍停就誤觸拖曳/框選」的機率
+
       isDragging = false;
+      // 雙擊拖曳（移動視窗/框選）只在「第二次觸碰落在上次點擊附近」時才預備，
+      // 避免「點一下→移到別處」被誤判成拖曳。
       if (now - lastTapTime < 350) {
-        isPotentialDrag = true;
+        const dFromLastTap = Math.hypot(lastTouchX - lastTapPos.x, lastTouchY - lastTapPos.y);
+        if (dFromLastTap < 40) {
+          isPotentialDrag = true;
+        }
       }
     }
   }, { passive: false });
@@ -4223,7 +4228,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         if (!isDragging) {
           if (hasTriggeredLongPress || isPotentialDrag) {
             const startDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
-            if (startDist > 10) {
+            if (startDist > 14) {
               isDragging = true;
               isPotentialDrag = false;
               let startPctX = (touchStartPos.x - rect.left - offsetX) / renderedWidth;
@@ -4259,7 +4264,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         if (isPotentialDrag) {
           // 雙擊後手指移動：如果移動超過微小閾值，真正激活拖曳模式
           const moveDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
-          if (moveDist > 5) {
+          if (moveDist > 12) {
             isDragging = true;
             isPotentialDrag = false;
             const payload = new Uint8Array(1);
@@ -4746,46 +4751,63 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       openMobileKeyboard();
     });
 
+    // 把一段文字以 String Packet (0x08) 即時注入被控端目前焦點欄位
+    const sendTextChunk = (text: string) => {
+      if (!text) return;
+      const payload = new TextEncoder().encode(text);
+      sendInputPacket(buildInputPacket(0x08, payload));
+    };
+
     const sendText = () => {
-      const val = mobileKeyboardInput.value.replace(/\u200B/g, "");
+      const val = mobileKeyboardInput.value.replace(/​/g, "");
       if (val.length > 0) {
-        const encoder = new TextEncoder();
-        const payload = encoder.encode(val);
-        sendInputPacket(buildInputPacket(0x08, payload)); // 0x08 is String Packet
+        sendTextChunk(val);
         resetInput();
       }
     };
 
+    // 送出鈕保留為手動 flush（live 模式下欄位通常已即時清空）
     btnKeyboardSend.addEventListener("click", () => {
       sendText();
     });
 
-    // 針對 Android Gboard 等虛擬鍵盤的退格鍵處理
-    mobileKeyboardInput.addEventListener("beforeinput", (e: InputEvent) => {
-      if (e.inputType === "deleteContentBackward") {
-        // 只有當輸入框為空時，才將退格鍵發送至遠端桌面
-        if (mobileKeyboardInput.value === "\u200B" || mobileKeyboardInput.value === "") {
-          e.preventDefault();
-          sendKeyStroke(8);
-        }
-      }
+    // =========================================================================
+    // 即時輸入（Live Typing）：邊打邊送到遠端焦點欄位
+    // - 中文/日文等以 IME 組字：組字中不送，compositionend 時整段送出
+    // - 一般字元 / 退格 / 換行：input 當下即時送，並把欄位清回 sentinel，
+    //   讓下一次 input 只攜帶「新輸入的增量」。
+    // =========================================================================
+    let imeComposing = false;
+    mobileKeyboardInput.addEventListener("compositionstart", () => {
+      imeComposing = true;
+    });
+    mobileKeyboardInput.addEventListener("compositionend", (e) => {
+      imeComposing = false;
+      const data = (e as CompositionEvent).data || "";
+      if (data) sendTextChunk(data); // 注音/拼音組好的字整段送出
+      resetInput();
     });
 
+    mobileKeyboardInput.addEventListener("input", (e) => {
+      const ie = e as InputEvent;
+      if (imeComposing || ie.isComposing) return; // 組字中，等 compositionend
+      const it = ie.inputType || "";
+      if (it.startsWith("delete")) {
+        sendKeyStroke(8); // 退格即時送
+      } else if (it === "insertLineBreak" || it === "insertParagraph") {
+        sendKeyStroke(13); // 換行 → 遠端 Enter
+      } else {
+        const val = mobileKeyboardInput.value.replace(/​/g, "");
+        if (val) sendTextChunk(val); // 一般打字即時送
+      }
+      resetInput(); // 立即清回 sentinel，下個按鍵只帶新字
+    });
+
+    // 部分 iOS 軟鍵盤的 Return 走 keydown 而非 input，這裡補送 Enter
     mobileKeyboardInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        const val = mobileKeyboardInput.value.replace(/\u200B/g, "");
-        if (val.length > 0) {
-          sendText();
-        } else {
-          // 若輸入框為空，直接向遠端發送 Enter 鍵
-          sendKeyStroke(13);
-        }
-      } else if (e.key === "Backspace") {
-        if (mobileKeyboardInput.value === "\u200B" || mobileKeyboardInput.value === "") {
-          e.preventDefault();
-          sendKeyStroke(8);
-        }
+        sendKeyStroke(13);
       }
     });
 
