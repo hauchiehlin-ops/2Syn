@@ -431,11 +431,24 @@ impl InputEvent {
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseDown { button } => {
-                    let event = CGEvent::new(source.clone());
-                    if event.is_err() {
-                        return Err(CoreError::SystemError("無法獲取當前滑鼠位置".to_string()));
-                    }
-                    let current_point = event.unwrap().location();
+                    // 直接使用已存全域游標座標計算點擊位置，避免從 CGEvent 非同步查詢可能造成
+                    // 的時序競爭，確保點擊精確落在目標視窗上以觸發視窗提升（Raise）行為
+                    let (gx, gy) = get_global_cursor();
+                    let tx = TARGET_MONITOR_X.load(Ordering::Relaxed);
+                    let ty = TARGET_MONITOR_Y.load(Ordering::Relaxed);
+                    let tw = TARGET_MONITOR_W.load(Ordering::Relaxed);
+                    let th = TARGET_MONITOR_H.load(Ordering::Relaxed);
+                    let current_point = if tw > 0 && th > 0 {
+                        core_graphics::geometry::CGPoint::new(
+                            tx as f64 + gx as f64 * tw as f64,
+                            ty as f64 + gy as f64 * th as f64,
+                        )
+                    } else {
+                        core_graphics::geometry::CGPoint::new(
+                            gx as f64 * screen_w,
+                            gy as f64 * screen_h,
+                        )
+                    };
                     let (evt_type, cg_button) = match button {
                         MouseButton::Left => {
                             LEFT_BTN_DOWN.store(true, Ordering::Relaxed);
@@ -452,11 +465,22 @@ impl InputEvent {
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseUp { button } => {
-                    let event = CGEvent::new(source.clone());
-                    if event.is_err() {
-                        return Err(CoreError::SystemError("無法獲取當前滑鼠位置".to_string()));
-                    }
-                    let current_point = event.unwrap().location();
+                    let (gx, gy) = get_global_cursor();
+                    let tx = TARGET_MONITOR_X.load(Ordering::Relaxed);
+                    let ty = TARGET_MONITOR_Y.load(Ordering::Relaxed);
+                    let tw = TARGET_MONITOR_W.load(Ordering::Relaxed);
+                    let th = TARGET_MONITOR_H.load(Ordering::Relaxed);
+                    let current_point = if tw > 0 && th > 0 {
+                        core_graphics::geometry::CGPoint::new(
+                            tx as f64 + gx as f64 * tw as f64,
+                            ty as f64 + gy as f64 * th as f64,
+                        )
+                    } else {
+                        core_graphics::geometry::CGPoint::new(
+                            gx as f64 * screen_w,
+                            gy as f64 * screen_h,
+                        )
+                    };
                     let (evt_type, cg_button) = match button {
                         MouseButton::Left => {
                             LEFT_BTN_DOWN.store(false, Ordering::Relaxed);

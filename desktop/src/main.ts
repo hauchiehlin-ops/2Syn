@@ -1963,8 +1963,6 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
         const btnAudioToggle = document.getElementById("btn-audio-toggle") as HTMLButtonElement;
         const mainContent = document.querySelector(".glass-container") as HTMLElement;
-        const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
-        
         if (videoEl) videoEl.style.cursor = "default"; // 讓原生硬體游標保持顯示，達成零延遲操控體驗
         if (videoContainer) {
           videoContainer.style.display = "block";
@@ -1973,15 +1971,10 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         if (btnDisplayMode) btnDisplayMode.style.display = "block";
         if (btnAudioToggle) btnAudioToggle.style.display = "block";
         if (mainContent) mainContent.style.display = "none";
-        
+
         // Quick Menu 已移除：保持隱藏，不要覆寫 HTML 的 display:none !important
         const mobileControlOrb = document.getElementById("mobile-control-orb");
         if (mobileControlOrb) mobileControlOrb.style.display = "none";
-        
-        // 如果是在手機/觸控環境上，顯示鍵盤呼叫按鈕
-        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-          btnKeyboard.style.display = "flex";
-        }
         // Support dual-track foveated streaming
         const stream = event.streams && event.streams.length > 0 
             ? event.streams[0] 
@@ -2329,10 +2322,9 @@ function resetConnectionUI() {
 
   const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
   const mainContent = document.querySelector(".glass-container") as HTMLElement;
-  const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
   const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
   const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
-  
+
   if (videoContainer) {
     videoContainer.style.display = "none";
   }
@@ -2348,9 +2340,6 @@ function resetConnectionUI() {
   }
   if (mainContent) {
     mainContent.style.display = "flex";
-  }
-  if (btnKeyboard) {
-    btnKeyboard.style.display = "none";
   }
   
   const mobileControlOrb = document.getElementById("mobile-control-orb");
@@ -3255,11 +3244,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
   const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
-  const btnKeyboard = document.getElementById("btn-mobile-keyboard") as HTMLButtonElement;
   const keyboardBar = document.getElementById("mobile-keyboard-bar") as HTMLDivElement;
   const mobileKeyboardInput = document.getElementById("mobile-keyboard-input") as HTMLInputElement;
   const btnKeyboardSend = document.getElementById("btn-mobile-keyboard-send") as HTMLButtonElement;
   let isKeyboardActive = false;
+  let openMobileKeyboard: (() => void) | null = null;
   let lastBackspaceTime = 0;
   let isComposing = false;
   let lastValue = ""; // 用於追蹤鍵盤增量輸入框內容
@@ -4496,7 +4485,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
                   payloadUp[0] = 1;
                   sendInputPacket(buildInputPacket(0x03, payloadUp));
                 }, 20);
-                
+
+                // 單指點擊自動啟動鍵盤（虛擬或外接鍵盤皆適用）
+                if (openMobileKeyboard) openMobileKeyboard();
+
                 lastTapTime = now;
                 lastTapPos = { x: endX, y: endY };
               }
@@ -4710,7 +4702,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   };
 
   // --- 行動端 Keyboard Bar 邏輯 ---
-  if (btnKeyboard && keyboardBar && mobileKeyboardInput && btnKeyboardSend) {
+  if (keyboardBar && mobileKeyboardInput && btnKeyboardSend) {
     let isResetting = false;
     let previousValueLength = 0;
 
@@ -4718,9 +4710,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       mobileKeyboardInput.value = "\u200B";
     };
 
-    // 開啟鍵盤的核心邏輯（供 touchend / click 共用）
+    // 開啟鍵盤的核心邏輯（供單指點擊觸發虛擬/實體鍵盤共用）
     let keyboardOpenGuard = false;
-    const openMobileKeyboard = () => {
+    openMobileKeyboard = () => {
       if (keyboardOpenGuard) return;
       keyboardOpenGuard = true;
       setTimeout(() => keyboardOpenGuard = false, 300);
@@ -4737,19 +4729,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       // focus 之後再重設 input 值（不影響鍵盤彈出）
       resetInput();
     };
-
-    // iOS Safari：touchend 是唯一能在同步呼叫鏈中觸發虛擬鍵盤的事件
-    btnKeyboard.addEventListener("touchend", (e) => {
-      e.preventDefault(); // 阻止合成 click，避免 openMobileKeyboard 被觸發兩次
-      e.stopPropagation();
-      openMobileKeyboard();
-    }, { passive: false });
-
-    // Android / Desktop 後備：click 事件
-    btnKeyboard.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openMobileKeyboard();
-    });
 
     // 把一段文字以 String Packet (0x08) 即時注入被控端目前焦點欄位
     const sendTextChunk = (text: string) => {
