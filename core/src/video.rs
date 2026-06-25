@@ -293,6 +293,7 @@ impl VideoStreamer {
                 }
                 
                 iter_count += 1;
+                let mut _got_valid_frame = false;
                 let current_config = config_rx.borrow().clone();
                 let target_fps = current_config.target_fps.min(30).max(1); // 為防止 Mac 死機，硬性限制最高 30 FPS
                 let frame_time = std::time::Duration::from_millis((1000 / target_fps) as u64);
@@ -404,6 +405,7 @@ impl VideoStreamer {
                                             match enc_res {
                                                 Ok(encoded_bytes) => {
                                                     produced_frames += 1;
+                                                    _got_valid_frame = true;
                                                     let _t_send = std::time::Instant::now();
                                                     let _ = tx.blocking_send(encoded_bytes);
                                                     acc_send += _t_send.elapsed();
@@ -489,6 +491,7 @@ impl VideoStreamer {
                                 let data = encoded.to_vec();
                                 if !data.is_empty() {
                                     produced_frames += 1;
+                                    _got_valid_frame = true;
                                     if let Err(_e) = tx.try_send(data) {}
                                 }
                             }
@@ -582,16 +585,22 @@ impl VideoStreamer {
                     last_fps_log = std::time::Instant::now();
                 }
 
-                let elapsed = tick.elapsed();
-                // 強制最低休眠 5 毫秒，釋放 CPU 資源以防止 WindowServer 渲染死鎖
-                let sleep_time = if elapsed < frame_time {
-                    (frame_time - elapsed).max(std::time::Duration::from_millis(5))
+                // 只有拿到有效幀才計入 frame_time 節拍並 sleep；
+                // 空样本（無buf）直接重試，不浪費 33ms。
+                if _got_valid_frame {
+                    let elapsed = tick.elapsed();
+                    let sleep_time = if elapsed < frame_time {
+                        (frame_time - elapsed).max(std::time::Duration::from_millis(1))
+                    } else {
+                        std::time::Duration::from_millis(1)
+                    };
+                    acc_sleep += sleep_time;
+                    std::thread::sleep(sleep_time);
+                    tick = std::time::Instant::now();
                 } else {
-                    std::time::Duration::from_millis(5)
-                };
-                acc_sleep += sleep_time;
-                std::thread::sleep(sleep_time);
-                tick = std::time::Instant::now();
+                    // 空样本：讓出 CPU 1ms，保持 tick 不重置（不影響下次有效幀的節拍）
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
                 })); // end catch_unwind closure
                 
                 if let Err(panic_info) = result {
