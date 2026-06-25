@@ -2657,7 +2657,10 @@ function initNetworkSimulator() {
 
 // 週期性輪詢後端，獲取經過智慧連線與降級決策樹計算的即時配置
 function startStatusPolling() {
-  if (!isDesktopTauri()) return;
+  // 注意：以下 get_connection_status 輪詢是「被控端 host」專屬（讀後端 ABR 配置），
+  // 僅在桌面 Tauri 環境跑；但底下的 WebRTC getStats 診斷迴圈必須在「控制端手機」
+  // 也跑（收視訊的一端才量得到端到端延遲），故不可被此守衛一併擋掉。
+  if (isDesktopTauri()) {
   setInterval(async () => {
     try {
       const status = await invoke<any>("get_connection_status");
@@ -2687,8 +2690,10 @@ function startStatusPolling() {
       console.error("狀態輪詢出錯:", error);
     }
   }, 500);
+  } // end if (isDesktopTauri())
 
   // WebRTC 原生 getStats() — 採集真實 inbound-rtp 統計（每 2 秒）
+  // ★ 此迴圈在控制端手機也要跑，不受上方 isDesktopTauri 守衛限制 ★
   let _lastBytesReceived = 0;
   let _lastStatsTime = performance.now();
   // 診斷用累積值快照（用於計算各指標的「區間差分」，反映當下而非開機至今平均）
