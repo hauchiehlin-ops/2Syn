@@ -157,17 +157,15 @@ impl VideoStreamer {
         let encoder_arc = Arc::clone(&self.encoder);
         let track_arc = Arc::clone(&self.track);
 
-        // 建立一個有界通道，用於將編碼後的資料從同步執行緒送回非同步任務中發送。
-        // 第二個欄位攜帶該幀對應的實際播放時長，使 WebRTC RTP 時間戳隨真實 fps 遞增，
-        // 否則固定 33ms 會讓播放端誤判為 30fps，導致 60fps 形同虛設並累積延遲。
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Vec<u8>, Duration)>(10);
+        // 建立一個有界通道，用於將編碼後的資料從同步執行緒送回非同步任務中發送
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
 
         // 啟動非同步任務負責按順序傳送視訊幀 (避免 out-of-order 導致 H264 解碼失敗)
         tokio::spawn(async move {
-            while let Some((data, dur)) = rx.recv().await {
+            while let Some(data) = rx.recv().await {
                 let sample = Sample {
                     data: data.into(),
-                    duration: dur,
+                    duration: Duration::from_millis(33),
                     ..Default::default()
                 };
                 match tokio::time::timeout(std::time::Duration::from_millis(100), track_arc.write_sample(&sample)).await {
@@ -179,14 +177,14 @@ impl VideoStreamer {
         });
 
         // 第二軌道（感知優先）發送通道與任務
-        let (foveated_tx, mut foveated_rx) = tokio::sync::mpsc::channel::<(Vec<u8>, Duration)>(10);
+        let (foveated_tx, mut foveated_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
         let foveated_track_arc = self.foveated_track.clone();
         tokio::spawn(async move {
             if let Some(f_track) = foveated_track_arc {
-                while let Some((data, dur)) = foveated_rx.recv().await {
+                while let Some(data) = foveated_rx.recv().await {
                     let sample = Sample {
                         data: data.into(),
-                        duration: dur,
+                        duration: Duration::from_millis(33),
                         ..Default::default()
                     };
                     let _ = tokio::time::timeout(std::time::Duration::from_millis(100), f_track.write_sample(&sample)).await;
@@ -234,19 +232,6 @@ impl VideoStreamer {
             let mut last_applied_width = 0;
             let mut last_applied_height = 0;
 
-            // === 動態 fps 看門狗 ===
-            // 預設容許上限 60fps（追平 Chrome 遠端桌面流暢度），但若擷取+編碼工作量
-            // 持續超過單幀預算（代表 CPU/編碼器/WindowServer 吃緊），自動逐級降回 30，
-            // 兼顧流暢與當初「防 Mac 死機」的穩定性訴求。
-            const FPS_CEIL_MAX: u32 = 60;
-            const FPS_CEIL_MIN: u32 = 30;
-            let mut fps_ceiling: u32 = FPS_CEIL_MAX;
-            let mut overload_streak: u32 = 0;
-            let mut healthy_streak: u32 = 0;
-            // macOS：紀錄目前 SCStream 建立時所用的 fps，變動時才重建串流
-            #[cfg(target_os = "macos")]
-            let mut last_stream_fps: u32 = 0;
-
             #[cfg(target_os = "macos")]
             let mut macos_stream: Option<screencapturekit::async_api::AsyncSCStream> = None;
 
@@ -267,14 +252,8 @@ impl VideoStreamer {
                 }
                 
                 let current_config = config_rx.borrow().clone();
-                // 取 ABR 請求值與動態看門狗上限的較小者，最高 60fps、最低 1
-                let target_fps = current_config.target_fps.min(fps_ceiling).max(1);
+                let target_fps = current_config.target_fps.min(30).max(1); // 為防止 Mac 死機，硬性限制最高 30 FPS
                 let frame_time = std::time::Duration::from_millis((1000 / target_fps) as u64);
-                // 攜帶給 WebRTC 的單幀時長（微秒精度），使時間戳隨真實 fps 遞增
-                let frame_dur = std::time::Duration::from_micros(1_000_000 / target_fps as u64);
-                // 本幀是否真的擷取並編碼了畫面（macOS 靜態畫面時 next() 會逾時而無編碼，
-                // 須排除此情況，否則看門狗會把「閒置等待」誤判為「負載過高」而錯誤降頂）
-                let mut did_encode = false;
                 
                 // 若 ABR 觸發了品質變更，通知硬體編碼器動態調整
                 if current_config.bitrate_limit_kbps != last_applied_bitrate || target_fps != last_applied_fps || current_config.target_width != last_applied_width || current_config.target_height != last_applied_height {
@@ -329,10 +308,7 @@ impl VideoStreamer {
 
                 #[cfg(target_os = "macos")]
                 {
-                    // 串流需在以下情況重建：尚未建立、切換螢幕、或目標 fps 改變
-                    // （ScreenCaptureKit 的 minimum_frame_interval 只能在建流時設定）
-                    let fps_changed = target_fps != last_stream_fps;
-                    if macos_stream.is_none() || monitor_changed || fps_changed {
+                    if macos_stream.is_none() || monitor_changed {
                         if let Some(stream) = macos_stream.take() {
                             let _ = stream.stop_capture();
                         }
@@ -358,7 +334,6 @@ impl VideoStreamer {
                                 let stream = screencapturekit::async_api::AsyncSCStream::new(&filter, &config, 5, screencapturekit::stream::output_type::SCStreamOutputType::Screen);
                                 let _ = stream.start_capture();
                                 macos_stream = Some(stream);
-                                last_stream_fps = target_fps;
                             }
                         }
                     }
@@ -382,8 +357,7 @@ impl VideoStreamer {
                                         if let Ok(mut encoder_guard) = encoder_arc.try_lock() {
                                             match encoder_guard.encode_frame_zero_copy(&crate::codec::FrameBuffer::IOSurface(ptr)) {
                                                 Ok(encoded_bytes) => {
-                                                    did_encode = true;
-                                                    let _ = tx.blocking_send((encoded_bytes, frame_dur));
+                                                    let _ = tx.blocking_send(encoded_bytes);
                                                 }
                                                 Err(e) => {
                                                     crate::debug_log!("VIDEO", "Zero-copy encode failed: {:?}", e);
@@ -469,8 +443,7 @@ impl VideoStreamer {
                             Ok(encoded) => {
                                 let data = encoded.to_vec();
                                 if !data.is_empty() {
-                                    did_encode = true;
-                                    if let Err(_e) = tx.try_send((data, frame_dur)) {}
+                                    if let Err(_e) = tx.try_send(data) {}
                                 }
                             }
                             Err(e) => {
@@ -517,7 +490,7 @@ impl VideoStreamer {
                                 
                                 if let Ok(encoded) = fe_guard.encode_rgba_frame(&roi_bytes, roi_w as u32, roi_h as u32) {
                                     if !encoded.is_empty() {
-                                        let _ = foveated_tx.try_send((encoded, frame_dur));
+                                        let _ = foveated_tx.try_send(encoded);
                                     }
                                 }
                             }
@@ -534,38 +507,6 @@ impl VideoStreamer {
                 }
 
                 let elapsed = tick.elapsed();
-
-                // === 看門狗：依實際工作量動態調整 fps 上限 ===
-                // elapsed 為本幀「擷取+編碼」純工作耗時（不含休眠）。若持續逼近/超過單幀預算，
-                // 代表機器跟不上目前 fps，逐級降頂；長時間從容則逐級回升，floor 30 保留安全底線。
-                // 僅在本幀確實有編碼時評估，排除 macOS 靜態畫面 next() 逾時造成的假性過載。
-                if !did_encode {
-                    // 閒置（無畫面更新）：不調整看門狗，並重置連續計數避免誤判
-                    overload_streak = 0;
-                } else if elapsed > frame_time {
-                    overload_streak = overload_streak.saturating_add(1);
-                    healthy_streak = 0;
-                    // 連續 ~0.5 秒跟不上才降頂，避免偶發抖動誤判
-                    if overload_streak >= 30 && fps_ceiling > FPS_CEIL_MIN {
-                        fps_ceiling = (fps_ceiling.saturating_sub(6)).max(FPS_CEIL_MIN);
-                        overload_streak = 0;
-                        eprintln!("[Video] 看門狗：負載過高，fps 上限降至 {}", fps_ceiling);
-                    }
-                } else if elapsed.as_micros() < (frame_time.as_micros() * 6 / 10) {
-                    // 工作量低於單幀預算的 60%，視為從容
-                    healthy_streak = healthy_streak.saturating_add(1);
-                    overload_streak = 0;
-                    // 連續 ~3 秒從容才回升一級，避免在臨界點來回震盪
-                    if healthy_streak >= 180 && fps_ceiling < FPS_CEIL_MAX {
-                        fps_ceiling = (fps_ceiling + 6).min(FPS_CEIL_MAX);
-                        healthy_streak = 0;
-                        eprintln!("[Video] 看門狗：負載寬裕，fps 上限回升至 {}", fps_ceiling);
-                    }
-                } else {
-                    overload_streak = 0;
-                    healthy_streak = 0;
-                }
-
                 // 強制最低休眠 5 毫秒，釋放 CPU 資源以防止 WindowServer 渲染死鎖
                 let sleep_time = if elapsed < frame_time {
                     (frame_time - elapsed).max(std::time::Duration::from_millis(5))
