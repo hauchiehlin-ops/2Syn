@@ -1,5 +1,10 @@
 # iOS 27 黑屏 — 除錯歷程記錄（Debugging Journey）
 
+> ⚠️ **2026-06-25 更正：本文第 6 節之後的結論（「破壞從 iOS 26 SDK 開始、唯一豁免是 iOS 18 SDK、只能等上游」）是誤判。**
+> 真正根因是 `Info.plist` 的 `UIApplicationSceneManifest > UIApplicationSupportsMultipleScenes` 被設成 `false`，導致 tao 不把 `UIWindow` 掛上 `UIWindowScene` → 0×0 黑屏。改成 `true` 即解決，與 iOS 版本／SDK 無關。詳見 [ios27-workaround.md](./ios27-workaround.md) 最上方的更正。
+>
+> 本文以下推理鏈在「web 層排除、量到 0×0」前都正確且有價值；但把 0×0 歸因於「tao 不支援 UIScene」這一步是錯的——tao 0.35.3 其實完整支援 UIScene，只是需要該旗標為 true。保留全文供對照「一個合理但錯誤的推論是怎麼形成的」。
+
 > 記錄日期：2026-06-17 ~ 2026-06-18
 > 對應結論與修法：見 [ios27-workaround.md](./ios27-workaround.md)
 >

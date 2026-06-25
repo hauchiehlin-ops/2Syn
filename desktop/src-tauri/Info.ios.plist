@@ -6,5 +6,28 @@
 	<false/>
 	<key>CFBundleDisplayName</key>
 	<string>2syn Client</string>
+	<!--
+		iOS 13+ 採用 UIScene 生命週期。tao 只有在此旗標為 true 時才會把 UIWindow
+		掛上 UIWindowScene（見 tao ios view.rs create_window / multiple_scenes_enabled）。
+		若有 scene manifest 但此旗標為 false，iOS 仍以 scene 模式渲染，但 window 沒有
+		掛 scene → WKWebView 0×0、全黑（與 iOS 版本無關）。務必保持 true。
+	-->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>TaoSceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 </dict>
 </plist>

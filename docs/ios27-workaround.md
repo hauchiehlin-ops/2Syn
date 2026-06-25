@@ -1,8 +1,28 @@
 # iOS 27 全黑畫面 — 根因與 workaround
 
+> ⚠️ **2026-06-25 重大更正：以下舊結論是錯的。真正根因是 `Info.plist` 設定錯誤，不是 tao 不支援 UIScene。**
+>
+> ## ✅ 正確根因與修法（請先讀這段）
+>
+> tao 0.35.3 **完整實作了 `TaoSceneDelegate` 與 UIScene 生命週期**（見 `tao/src/platform_impl/ios/scene.rs`、`app_state.rs::connect_scene`、`view.rs::create_window`）。問題出在本專案的 scene manifest 設定矛盾：
+>
+> - `gen/apple/syn-desktop_iOS/Info.plist` 有 `UIApplicationSceneManifest`（指向 `TaoSceneDelegate`）→ iOS 以 **scene 生命週期**渲染。
+> - 但其中 `UIApplicationSupportsMultipleScenes` 被設為 **`false`**。
+> - tao 的 `create_window` **只有在 `multiple_scenes_enabled()`（讀此旗標）為 true 時，才會把 `UIWindow` 掛上 `UIWindowScene`**。旗標為 false → window 沒掛任何 scene → **WKWebView 拿到 0×0、全黑、`innerWidth=0`**。
+> - 這與 iOS 版本、編譯 SDK **完全無關**：只要 manifest 在、此旗標為 false，**任何 iOS（含 26 穩定版）都會黑**。這正是「iOS 26 也黑」的原因。
+>
+> **修法：把 `UIApplicationSupportsMultipleScenes` 改成 `true`。**（已同步寫入來源 `src-tauri/Info.ios.plist` 與產生檔 `gen/apple/.../Info.plist`。）
+>
+> **連帶結論：下面整套「必須用 iOS 18 SDK / Xcode 16、macOS 26 編不出來、只能等上游」的 workaround 已不需要。** 用現行 Xcode/SDK 直接編即可正常顯示。當初 git-main 測試「仍 0×0」是因為用了同一份錯誤的 Info.plist，與 tao 版本無關。
+>
+> ---
+>
+> <details>
+> <summary>以下為 2026-06-17 的舊結論（已證實誤判，保留供歷史對照）</summary>
+
 > 建立日期：2026-06-17
 > 影響範圍：iOS 26 / iOS 27（含 beta）裝置上的 client app
-> 結論：**這是 Tauri/tao 對 Apple「UIScene 生命週期強制採用」尚未支援的框架相容問題，與本專案程式碼無關。**
+> 結論：~~這是 Tauri/tao 對 Apple「UIScene 生命週期強制採用」尚未支援的框架相容問題，與本專案程式碼無關。~~ **（已更正：見上方）**
 > 完整除錯推理鏈：見 [ios27-debugging-journey.md](./ios27-debugging-journey.md)
 
 ---
@@ -222,3 +242,17 @@ tao 需要完整採用 UIScene 生命週期。請追蹤：
 - Capacitor #7961 — "does not adopt UIScene lifecycle. This will become an assert in a future version"：https://github.com/ionic-team/capacitor/issues/7961
 - React Native #53602 — crash with SceneDelegate (Xcode 26)：https://github.com/react/react-native/issues/53602
 - Flutter — UISceneDelegate adoption（breaking change）：https://docs.flutter.dev/release/breaking-changes/uiscenedelegate
+
+</details>
+
+---
+
+## 附註：那個「stock 空專案 crash」是另一回事
+
+舊除錯記錄裡「全新 `npm create tauri-app` 空專案在 iOS 27 直接 crash（`NoSceneLifecycleAdoption`）」是**真的**，但那是**沒有任何 scene manifest** 的情況。2syn 有 manifest，所以不 crash；2syn 的問題單純是 manifest 裡 `UIApplicationSupportsMultipleScenes=false`。兩者是不同症狀：
+
+| 情況 | scene manifest | `SupportsMultipleScenes` | iOS 27 結果 |
+|---|---|---|---|
+| stock 空專案 | 無 | — | `NoSceneLifecycleAdoption` crash |
+| 2syn（修正前） | 有 | `false` | 不 crash，但 0×0 黑屏 |
+| 2syn（修正後） | 有 | `true` | ✅ 正常顯示 |
