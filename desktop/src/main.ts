@@ -1988,6 +1988,19 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
   pc.ontrack = (event) => {
     console.log("[WebRTC] 收到遠端視訊軌道:", event.track.kind);
     if (event.track.kind === "video") {
+        // ★ 低延遲調校：遠端控制場景應「犧牲平滑、優先低延遲」。
+        // 量測顯示 RTT 僅 ~10ms，但接收端 jitter buffer 為抗抖動把緩衝撐到近 900ms，
+        // 成為端到端延遲的絕對主因。下面把 jitter buffer 目標壓到最低，讓畫面變化
+        // 幾乎即時呈現（代價：偶發抖動時可能輕微跳幀，但操控跟手感大幅提升）。
+        try {
+          const r = event.receiver as any;
+          if (r) {
+            if ("jitterBufferTarget" in r) r.jitterBufferTarget = 0;       // 標準 API（ms）
+            if ("playoutDelayHint" in r) r.playoutDelayHint = 0;           // Chromium 舊 API（秒）
+          }
+        } catch (e) {
+          console.warn("[WebRTC] 設定低延遲 jitter buffer 失敗:", e);
+        }
         // --- UI Setup ---
         const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
         const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
