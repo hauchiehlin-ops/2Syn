@@ -235,6 +235,9 @@ impl VideoStreamer {
             let mut iter_count: u32 = 0;                    // 迴圈實際跑了幾圈
             let mut acc_sleep = std::time::Duration::ZERO;  // 實際 sleep 總時長
             let mut no_frame: u32 = 0;                      // block_on 沒拿到幀(逾時/None)次數
+            let mut no_img_buf: u32 = 0;                    // sample.image_buffer() == None
+            let mut no_io_surf: u32 = 0;                    // pixel_buf.io_surface() == None
+            let mut enc_err: u32 = 0;                       // encode_frame_zero_copy Err
             
             // 初始化 Monitor
             let mut current_monitor_index = *monitor_rx.borrow();
@@ -406,6 +409,7 @@ impl VideoStreamer {
                                                     acc_send += _t_send.elapsed();
                                                 }
                                                 Err(e) => {
+                                                    enc_err += 1;
                                                     crate::debug_log!("VIDEO", "Zero-copy encode failed: {:?}", e);
                                                 }
                                             }
@@ -413,8 +417,10 @@ impl VideoStreamer {
                                             lock_fail += 1;
                                         }
                                     } else {
-                                        crate::debug_log!("VIDEO", "No IOSurface found in CVPixelBuffer");
+                                        no_io_surf += 1;
                                     }
+                                } else {
+                                    no_img_buf += 1;
                                 }
                             }
                             Ok(None) => {
@@ -552,14 +558,14 @@ impl VideoStreamer {
                     let secs = last_fps_log.elapsed().as_secs_f32();
                     let n = produced_frames.max(1) as f32;
                     let msg = format!(
-                        "[Video][DIAG] host {:.1} fps（目標 {}）| 迴圈 {:.0} 圈/s 沒幀 {} | 每幀 等 {:.0} 編 {:.0} 送 {:.0}ms | 平均sleep {:.0}ms | 鎖跳 {}",
+                        "[Video][DIAG] host {:.1} fps（目標 {}）| 迴圈 {:.0} 圈/s 沒幀 {} | 每幀 等 {:.0} 編 {:.0} 送 {:.0}ms | 平均sleep {:.0}ms | 丟: 無buf {} 無surf {} 編失 {} 鎖跳 {}",
                         produced_frames as f32 / secs, target_fps,
                         iter_count as f32 / secs, no_frame,
                         acc_wait.as_millis() as f32 / n,
                         acc_encode.as_millis() as f32 / n,
                         acc_send.as_millis() as f32 / n,
                         acc_sleep.as_millis() as f32 / iter_count.max(1) as f32,
-                        lock_fail);
+                        no_img_buf, no_io_surf, enc_err, lock_fail);
                     eprintln!("{}", msg);
                     if let Some(tx) = &status_tx { let _ = tx.send(msg); }
                     produced_frames = 0;
@@ -569,6 +575,9 @@ impl VideoStreamer {
                     acc_sleep = std::time::Duration::ZERO;
                     iter_count = 0;
                     no_frame = 0;
+                    no_img_buf = 0;
+                    no_io_surf = 0;
+                    enc_err = 0;
                     lock_fail = 0;
                     last_fps_log = std::time::Instant::now();
                 }
