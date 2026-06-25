@@ -376,7 +376,8 @@ function applyVideoTransform() {
   const video = document.getElementById("remote-video") as HTMLVideoElement;
   if (!video) return;
   const finalY = videoTranslateY + keyboardOffsetUpdateY;
-  video.style.transform = `translate(${videoTranslateX + warpX}px, ${finalY + warpY}px) scale(${videoScale})`;
+  // 用 translate3d 強制 GPU 合成層，避免平移時掉出合成層導致畫面抖動/卡頓（參考 Chrome Remote Desktop 的穩定平移）
+  video.style.transform = `translate3d(${videoTranslateX + warpX}px, ${finalY + warpY}px, 0) scale(${videoScale})`;
 }
 
 function triggerHaptic(type: "light" | "medium" | "heavy") {
@@ -462,6 +463,9 @@ let translations: Record<string, string> = {};
 let isPinVisible = false;
 let isPanelOpen = false;
 let isDirectTouchMode = false;
+// 被控端已在影像中合成真實游標（core/src/video.rs，零偏移），前端不再畫合成游標，
+// 避免雙重游標並徹底擺脫前端座標推算造成的偏移。若連到舊版被控端可改回 false。
+const HOST_RENDERS_CURSOR = true;
 
 // 萬用英文 Fallback 字典，供載入錯誤或翻譯遺漏時調用，徹底與寫死中文解耦
 const fallbackTranslations: Record<string, string> = {
@@ -1970,8 +1974,9 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         if (btnAudioToggle) btnAudioToggle.style.display = "block";
         if (mainContent) mainContent.style.display = "none";
         
+        // Quick Menu 已移除：保持隱藏，不要覆寫 HTML 的 display:none !important
         const mobileControlOrb = document.getElementById("mobile-control-orb");
-        if (mobileControlOrb) mobileControlOrb.style.display = "flex";
+        if (mobileControlOrb) mobileControlOrb.style.display = "none";
         
         // 如果是在手機/觸控環境上，顯示鍵盤呼叫按鈕
         if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
@@ -2351,6 +2356,14 @@ function resetConnectionUI() {
   const mobileControlOrb = document.getElementById("mobile-control-orb");
   if (mobileControlOrb) {
     mobileControlOrb.style.display = "none";
+  }
+  const sessionToolbar = document.getElementById("session-toolbar");
+  if (sessionToolbar) {
+    sessionToolbar.style.display = "none";
+  }
+  const toolbarActions = document.getElementById("toolbar-actions");
+  if (toolbarActions) {
+    toolbarActions.style.display = "none"; // 重置為收合
   }
 
   // 重置 Quick Menu 面板狀態為關閉
@@ -3171,10 +3184,28 @@ function releaseKey(code: number, mods: number = 0) {
 }
 
 function setupInputControl(videoEl: HTMLVideoElement) {
-  // 顯示懸浮選單控制柄 (每當連線成功時都要呼叫)
+  // Quick Menu 已移除：連線成功時保持隱藏，不要覆寫 HTML 的 display:none !important
   const mobileControlOrb = document.getElementById("mobile-control-orb");
   if (mobileControlOrb) {
-    mobileControlOrb.style.display = "flex";
+    mobileControlOrb.style.display = "none";
+  }
+
+  // 顯示可收合的連線工具列（模式切換 / 顯示大小 / 登出）
+  const sessionToolbar = document.getElementById("session-toolbar");
+  if (sessionToolbar) {
+    sessionToolbar.style.display = "flex";
+  }
+  // 工具列把手：展開/收合動作列
+  const toolbarToggle = document.getElementById("btn-toolbar-toggle");
+  const toolbarActions = document.getElementById("toolbar-actions");
+  if (toolbarToggle && toolbarActions && !toolbarToggle.dataset.bound) {
+    toolbarToggle.dataset.bound = "1";
+    toolbarToggle.onclick = (e) => {
+      e.stopPropagation();
+      const open = toolbarActions.style.display !== "none";
+      toolbarActions.style.display = open ? "none" : "flex";
+      toolbarToggle.textContent = open ? "⚙️" : "✕";
+    };
   }
 
   // 同步更新 Touch Mode 按鈕文字以符合當前的 isDirectTouchMode 狀態
@@ -3315,17 +3346,53 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
   }
 
+  const cycleDisplayMode = () => {
+    if (displayMode === "fit") {
+      displayMode = "original";
+    } else if (displayMode === "original") {
+      displayMode = "fill";
+    } else {
+      displayMode = "fit";
+    }
+    applyDisplayMode();
+  };
+
   if (btnDisplayMode) {
     btnDisplayMode.textContent = "🔍 " + t("btn_original_size");
-    btnDisplayMode.onclick = () => {
-      if (displayMode === "fit") {
-        displayMode = "original";
-      } else if (displayMode === "original") {
-        displayMode = "fill";
-      } else {
-        displayMode = "fit";
+    btnDisplayMode.onclick = cycleDisplayMode;
+  }
+
+  // --- 取代 Quick Menu 的獨立浮動控制鈕 ---
+  const btnDisplayModeFloat = document.getElementById("btn-display-mode-float") as HTMLButtonElement;
+  if (btnDisplayModeFloat) {
+    btnDisplayModeFloat.textContent = btnDisplayMode ? btnDisplayMode.textContent : "🔍 " + t("btn_original_size");
+    btnDisplayModeFloat.onclick = () => {
+      cycleDisplayMode();
+      // applyDisplayMode 只會更新 btnDisplayMode 的文字，這裡同步浮動鈕
+      if (btnDisplayMode) btnDisplayModeFloat.textContent = btnDisplayMode.textContent;
+    };
+  }
+
+  const btnTouchModeFloat = document.getElementById("btn-touch-mode-float") as HTMLButtonElement;
+  const syncTouchModeLabel = () => {
+    if (btnTouchModeFloat) {
+      btnTouchModeFloat.textContent = isDirectTouchMode ? "👆 Direct Touch" : "🖱️ Trackpad";
+    }
+  };
+  if (btnTouchModeFloat) {
+    syncTouchModeLabel();
+    btnTouchModeFloat.onclick = () => {
+      isDirectTouchMode = !isDirectTouchMode;
+      console.log("[FloatControls] Touch mode toggled, isDirectTouchMode:", isDirectTouchMode);
+      syncTouchModeLabel();
+      // 同步舊 Quick Menu 內按鈕文字（雖已隱藏，保持狀態一致）
+      const orbBtn = document.getElementById("btn-touch-mode");
+      if (orbBtn) orbBtn.textContent = isDirectTouchMode ? "👆 Direct Touch" : "🖱️ Trackpad Mode";
+      // 切到直控模式時隱藏合成游標；切到軌跡板模式則於下次移動時重新顯示
+      if (isDirectTouchMode) {
+        const rc = document.getElementById("remote-cursor-indicator");
+        if (rc) rc.style.display = "none";
       }
-      applyDisplayMode();
     };
   }
 
@@ -3357,13 +3424,29 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   function startEdgePanLoop() {
     if (panRafId !== null) return;
-    const loop = () => {
-      if (!videoContainer) return;
+    panRafId = 1; // 標記已啟動（改用幀對齊排程，不再保存 rAF id）
+    // 幀對齊排程：優先 requestVideoFrameCallback（與解碼影格同步，平移與內容不撕裂、速度跟著實際幀率），
+    // 不支援時回退 requestAnimationFrame。
+    const scheduleVideoFrame = (cb: (ts: number) => void) => {
+      const anyVideo = videoEl as any;
+      if (typeof anyVideo.requestVideoFrameCallback === "function") {
+        anyVideo.requestVideoFrameCallback((now: number) => cb(now));
+      } else {
+        requestAnimationFrame((now) => cb(now));
+      }
+    };
+    let lastPanTs = 0;
+    const loop = (ts: number) => {
+      if (!videoContainer) { scheduleVideoFrame(loop); return; }
       if (!isMouseInsideVideo || !hasMouseMoved) {
-        panRafId = requestAnimationFrame(loop);
+        lastPanTs = 0; // 閒置時重置，避免下次 dt 過大造成跳動
+        scheduleVideoFrame(loop);
         return;
       }
-      
+      // 以實際影格間隔正規化平移速度，與幀率無關（30/60fps 行為一致）
+      const dtPan = lastPanTs ? Math.min((ts - lastPanTs) / 1000, 0.05) : 1 / 60;
+      lastPanTs = ts;
+
       const rect = videoEl.getBoundingClientRect();
       const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
       const containerRatio = rect.width / rect.height;
@@ -3382,6 +3465,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       if (document.pointerLockElement === videoEl) {
         pixelX = rect.left + offsetX + syntheticCursorPercentX * renderedWidth;
         pixelY = rect.top + offsetY + syntheticCursorPercentY * renderedHeight;
+      } else if (!isDirectTouchMode) {
+        // Trackpad 模式：手指位置 ≠ 游標位置，改用合成游標(trackpadCursor)的螢幕座標來判定邊緣，
+        // 與 updateCursorOverlay 同一套 rect/百分比換算，確保游標貼齊視覺位置。
+        pixelX = rect.left + offsetX + trackpadCursorX * renderedWidth;
+        pixelY = rect.top + offsetY + trackpadCursorY * renderedHeight;
       } else {
         pixelX = lastMouseClientX;
         pixelY = lastMouseClientY;
@@ -3389,7 +3477,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
       const edgeThresholdX = window.innerWidth * 0.08;
       const edgeThresholdY = window.innerHeight * 0.08;
-      const panSpeed = 15;       // 平移速度 (px/frame)
+      const panSpeed = 700 * dtPan; // 時間正規化平移量（≈700 px/秒，與幀率無關）
       
       let dx = 0;
       let dy = 0;
@@ -3440,8 +3528,15 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           applyVideoTransform();
         }
 
-        // 畫面平移後，重新計算物理滑鼠所對應的遠端絕對百分比座標並發送給被控端
-        if (document.pointerLockElement !== videoEl) {
+        // 畫面平移後的游標/座標處理
+        if (document.pointerLockElement === videoEl) {
+          // Pointer Lock：合成游標由 pointermove 維護，這裡不需處理
+        } else if (!isDirectTouchMode) {
+          // Trackpad 模式：平移只是本地視覺，遠端座標仍是 trackpadCursor（未改變），
+          // 不可用手指位置重算。只需依新的 transform 重畫合成游標，使其跟著內容。
+          updateCursorOverlay(trackpadCursorX, trackpadCursorY);
+        } else {
+          // 直控/實體滑鼠：手指(滑鼠)位置 == 游標位置，重算遠端絕對百分比並發送
           let updatedX = 0, updatedY = 0;
           if (displayMode === "original" && videoContainer) {
             const rectContainer = videoContainer.getBoundingClientRect();
@@ -3479,9 +3574,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         }
       }
       
-      panRafId = requestAnimationFrame(loop);
+      scheduleVideoFrame(loop);
     };
-    panRafId = requestAnimationFrame(loop);
+    scheduleVideoFrame(loop);
   }
 
   // 啟動全時邊緣平移檢測
@@ -3730,6 +3825,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   function updateCursorOverlay(percentX: number, percentY: number) {
     let remoteCursor = document.getElementById("remote-cursor-indicator");
+    // 被控端已合成真實游標於影像中，前端不再顯示合成游標（零偏移、避免雙游標）
+    if (HOST_RENDERS_CURSOR) {
+      if (remoteCursor) remoteCursor.style.display = "none";
+      return;
+    }
     if (isDirectTouchMode) {
       if (remoteCursor) remoteCursor.style.display = "none";
       return;
@@ -4107,11 +4207,18 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       renderedHeight = renderedHeight || window.innerHeight || 1;
 
       if (isDirectTouchMode) {
+        // 餵入邊緣平移迴圈所需的位置與旗標：直控模式下「手指位置 == 遠端游標位置」，
+        // 與 startEdgePanLoop 的座標模型一致，可在放大後手指拖到邊緣時自動平移畫面。
+        lastMouseClientX = currentX;
+        lastMouseClientY = currentY;
+        hasMouseMoved = true;
+        isMouseInsideVideo = true;
+
         let x = (currentX - rect.left - offsetX) / renderedWidth;
         let y = (currentY - rect.top - offsetY) / renderedHeight;
         x = Math.max(0, Math.min(1, x));
         y = Math.max(0, Math.min(1, y));
-        
+
         // Tremor Suppression (防手震) & Lazy Drag (延遲拖曳激活)
         if (!isDragging) {
           if (hasTriggeredLongPress || isPotentialDrag) {
@@ -4177,7 +4284,12 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           
           trackpadCursorX = Math.max(0, Math.min(1, trackpadCursorX));
           trackpadCursorY = Math.max(0, Math.min(1, trackpadCursorY));
-          
+
+          // 餵入邊緣平移迴圈：軌跡板模式以合成游標的螢幕位置判定邊緣（見 startEdgePanLoop）。
+          // 游標被夾在內容邊界(0/1)且手指持續推動時，可在放大後持續平移視野。
+          hasMouseMoved = true;
+          isMouseInsideVideo = true;
+
           pendingMouseMoveX = trackpadCursorX;
           pendingMouseMoveY = trackpadCursorY;
           triggerMoveRaf();
@@ -4269,7 +4381,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       }
       currentCursorPercentX = 0.5;
       currentCursorPercentY = 0.5;
-      
+      // 手指離開螢幕：停止邊緣自動平移
+      isMouseInsideVideo = false;
+      hasMouseMoved = false;
+
       if (hasTriggeredLongPress) {
         // 長按重壓拖曳結束：釋放滑鼠左鍵，並彈出懸浮選項選單
         const payload = new Uint8Array(1);
@@ -4300,9 +4415,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           payload[0] = 1; // Left click release
           sendInputPacket(buildInputPacket(0x03, payload));
           isDragging = false;
-          
-          // 直控模式拖曳/匡選結束後也彈出懸浮選單
-          showFloatingMenu(endX, endY);
+          // 註：一般拖曳（拖視窗、捲動、移動圖示）結束不再彈出懸浮選單，
+          // 懸浮選單只在「長按」這個明確手勢後出現（見上方 hasTriggeredLongPress 分支），避免太容易誤觸。
         } else {
           const tapDist = Math.sqrt(Math.pow(endX - lastTapPos.x, 2) + Math.pow(endY - lastTapPos.y, 2));
           if (now - lastTapTime < 350 && tapDist < 35) {
@@ -4354,13 +4468,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           payload[0] = 1; // Left click release
           sendInputPacket(buildInputPacket(0x03, payload));
           isDragging = false;
-          
-          // 軌跡板模式雙擊拖曳/匡選結束後也彈出懸浮選單
-          // 將 trackpad 的虛擬游標百分比轉回相對於 client 的實際像素坐標
-          const rect = videoEl.getBoundingClientRect();
-          const menuX = rect.left + trackpadCursorX * rect.width;
-          const menuY = rect.top + trackpadCursorY * rect.height;
-          showFloatingMenu(menuX, menuY);
+          // 註：軌跡板一般拖曳結束不再彈出懸浮選單，只在「長按」手勢後出現（避免誤觸）。
         } else if (isPotentialDrag) {
           isPotentialDrag = false;
           sendDoubleClickSequence();
@@ -4421,7 +4529,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     hasTriggeredLongPress = false;
     currentCursorPercentX = 0.5;
     currentCursorPercentY = 0.5;
-    
+    // 觸控取消：停止邊緣自動平移
+    isMouseInsideVideo = false;
+    hasMouseMoved = false;
+
     const payloadLeft = new Uint8Array(1);
     payloadLeft[0] = 1;
     sendInputPacket(buildInputPacket(0x03, payloadLeft));
@@ -5134,26 +5245,26 @@ function initPinToggle() {
 function initQuickMenu() {
   const btnSessionDisconnect = document.getElementById("btn-session-disconnect");
   if (btnSessionDisconnect) {
+    // 註：iOS WKWebView 對原生 window.confirm() 支援不可靠（可能不彈窗或直接回傳 false），
+    // 會導致「登出」按了沒反應。改為直接斷線、不依賴 confirm。
     btnSessionDisconnect.onclick = (e) => {
       e.stopPropagation();
       console.log("[RemoteSession] Session Disconnect clicked");
-      if (confirm(t("ui_confirm_disconnect"))) {
-        if (peerConnection) {
-          try {
-            peerConnection.close();
-          } catch (e) {
-            console.warn("[WebRTC] Error closing peerConnection:", e);
-          }
-          peerConnection = null;
+      if (peerConnection) {
+        try {
+          peerConnection.close();
+        } catch (err) {
+          console.warn("[WebRTC] Error closing peerConnection:", err);
         }
-        dataChannelControl = null;
-        dataChannelUnreliable = null;
-        dataChannelClipboard = null;
-        dataChannelFileTransfer = null;
-        dataChannelSystemControl = null;
-        iceCandidateQueue = [];
-        resetConnectionUI();
+        peerConnection = null;
       }
+      dataChannelControl = null;
+      dataChannelUnreliable = null;
+      dataChannelClipboard = null;
+      dataChannelFileTransfer = null;
+      dataChannelSystemControl = null;
+      iceCandidateQueue = [];
+      resetConnectionUI();
     };
   }
 

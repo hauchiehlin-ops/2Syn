@@ -16,6 +16,73 @@ use screencapturekit::stream::configuration::SCStreamConfiguration;
 use screencapturekit::stream::content_filter::SCContentFilter;
 use crate::codec::{VideoHardwareEncoder, CaptureCodecFactory, CodecParams, VideoCodecType};
 
+// =========================================================================
+// 遠端游標合成（Cursor Compositing）
+//
+// - macOS：走零拷貝 IOSurface → 硬體編碼，無 CPU 端 RGBA 緩衝；改由
+//   ScreenCaptureKit 以 with_shows_cursor(true) 直接合成「真實硬體游標」。
+// - 非 macOS（xcap capture_image 取得 RGBA）：擷取通常不含游標，於編碼前
+//   依「實際注入游標的比例座標」(input::get_global_cursor) 用下方函式手動疊圖。
+//
+// 兩者顯示用的座標都與點擊注入同源，所以所見即所點、零偏移，前端不再需要
+// 推算合成游標（根治 cursor offset）。
+// =========================================================================
+
+/// 經典箭頭游標點陣圖：'#'=黑色描邊，'.'=白色填充，' '=透明。
+/// 熱點(hotspot)位於左上角 (0,0)，對應 get_global_cursor 的比例座標。
+/// （僅非 macOS 走此手動疊圖；macOS 由 ScreenCaptureKit 原生合成游標。）
+const CURSOR_GLYPH: [&str; 18] = [
+    "#",
+    "##",
+    "#.#",
+    "#..#",
+    "#...#",
+    "#....#",
+    "#.....#",
+    "#......#",
+    "#.......#",
+    "#........#",
+    "#.........#",
+    "#......#####",
+    "#...#..#",
+    "#..# #..#",
+    "#.#  #..#",
+    "##   #..#",
+    "     #..#",
+    "     ####",
+];
+
+/// 將箭頭游標合成進 RGBA 影格。`cx`,`cy` 為游標熱點所在像素（影格座標）。
+/// `scale` 放大倍率（Retina 影格較大，建議 2）。對 RGBA/BGRA 皆相容（僅用黑白）。
+fn composite_cursor_rgba(bytes: &mut [u8], width: usize, height: usize, cx: i32, cy: i32, scale: i32) {
+    let scale = scale.max(1);
+    for (row, line) in CURSOR_GLYPH.iter().enumerate() {
+        for (col, ch) in line.bytes().enumerate() {
+            let (r, g, b) = match ch {
+                b'#' => (0u8, 0u8, 0u8),
+                b'.' => (255u8, 255u8, 255u8),
+                _ => continue,
+            };
+            for sy in 0..scale {
+                for sx in 0..scale {
+                    let px = cx + col as i32 * scale + sx;
+                    let py = cy + row as i32 * scale + sy;
+                    if px < 0 || py < 0 || px >= width as i32 || py >= height as i32 {
+                        continue;
+                    }
+                    let idx = (py as usize * width + px as usize) * 4;
+                    if idx + 3 < bytes.len() {
+                        bytes[idx] = r;
+                        bytes[idx + 1] = g;
+                        bytes[idx + 2] = b;
+                        bytes[idx + 3] = 255;
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub struct VideoStreamer {
     track: Arc<TrackLocalStaticSample>,
     encoder: Arc<Mutex<Box<dyn VideoHardwareEncoder + Send + Sync>>>,
@@ -257,7 +324,11 @@ impl VideoStreamer {
                                 let filter = screencapturekit::stream::content_filter::SCContentFilter::builder().display(display).build();
                                 let min_frame_interval = screencapturekit::cm::CMTime::new(1, target_fps as i32);
                                 let config = screencapturekit::stream::configuration::SCStreamConfiguration::new()
-                                    .with_shows_cursor(false)
+                                    // 讓 ScreenCaptureKit 直接把「真實硬體游標」合成進畫面：
+                                    // 位置 = 被控端實際游標位置（與我們注入的滑鼠同步），所見即所點、零偏移，
+                                    // 且是真正的游標外形（箭頭/I-beam/縮放）。macOS 走零拷貝 IOSurface 編碼，
+                                    // 無 CPU 端 RGBA 緩衝可手動疊圖，故用此原生方式最乾淨。
+                                    .with_shows_cursor(true)
                                     .with_pixel_format(screencapturekit::stream::configuration::PixelFormat::YCbCr_420v)
                                     .with_minimum_frame_interval(&min_frame_interval);
                                 let stream = screencapturekit::async_api::AsyncSCStream::new(&filter, &config, 5, screencapturekit::stream::output_type::SCStreamOutputType::Screen);
@@ -327,24 +398,38 @@ impl VideoStreamer {
                     }
                 }
 
-                if let Some(Ok((bytes, width, height))) = capture_result {
+                if let Some(Ok((mut bytes, width, height))) = capture_result {
                     let width = width as usize;
                     let height = height as usize;
-                    
+
                     // 防呆：擷取到空白畫面時跳過此幀
                     if width == 0 || height == 0 {
                         return;
                     }
-                    
+
                     // 為了確保 YUV 420 轉換正常，長寬必須是偶數且至少為 2
                     let adj_width = if width % 2 != 0 { width - 1 } else { width };
                     let adj_height = if height % 2 != 0 { height - 1 } else { height };
-                    
+
                     if adj_width < 2 || adj_height < 2 {
                         return;
                     }
 
-                    
+                    // 在編碼前把真實游標合成進影格（根治前端游標偏移）。
+                    // 游標比例與點擊注入同源 (input::set_global_cursor)，故零偏移。
+                    {
+                        let (cx_ratio, cy_ratio) = crate::input::get_global_cursor();
+                        // (0,0) 視為尚未收到任何輸入，避免在左上角畫出殘留游標
+                        if cx_ratio != 0.0 || cy_ratio != 0.0 {
+                            let cx = (cx_ratio * width as f32) as i32;
+                            let cy = (cy_ratio * height as f32) as i32;
+                            // Retina/高解析影格放大游標以維持可視性
+                            let scale = if width >= 2560 { 3 } else { 2 };
+                            composite_cursor_rgba(&mut bytes, width, height, cx, cy, scale);
+                        }
+                    }
+
+
                     // 在同步區塊中取得 encoder 並進行編碼
                     if let Ok(mut encoder_guard) = encoder_arc.try_lock() {
                         if frame_count % 30 == 0 {

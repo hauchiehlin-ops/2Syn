@@ -7,7 +7,7 @@
   <meta name="description" content="2syn_Duel — Secure WebRTC remote desktop with end-to-end encryption.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>2syn_Duel v3.5.1</title>
+  <title>2syn_Duel v3.5.3</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
@@ -17,8 +17,15 @@
   <!-- Remote Video Container (Hidden until connected) -->
   <div id="remote-video-container" tabindex="0" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden; z-index: 100; background: #000; touch-action: none; outline: none;">
     <video id="remote-video" autoplay playsinline muted style="display: block; width: 100%; height: 100%; object-fit: contain; transform-origin: center center; touch-action: none;"></video>
-    <!-- 獨立的「登出」斷線按鈕 -->
-    <button id="btn-session-disconnect" style="position: absolute; top: 16px; right: 16px; z-index: 1100; background: rgba(220, 38, 38, 0.45); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(220, 38, 38, 0.6); border-radius: 20px; padding: 8px 16px; color: white; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s;">🚪 登出</button>
+    <!-- 連線工具列（可收合）：把 模式 / 顯示大小 / 登出 整併成單一面板，預設只露出把手 -->
+    <div id="session-toolbar" style="display: none; position: absolute; top: max(env(safe-area-inset-top), 50px); right: 16px; z-index: 1100; flex-direction: column; align-items: flex-end; gap: 8px; touch-action: manipulation;">
+      <button id="btn-toolbar-toggle" aria-label="Toolbar" style="width: 44px; height: 44px; border-radius: 22px; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.18); color: white; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.35); transition: all 0.2s;">⚙️</button>
+      <div id="toolbar-actions" style="display: none; flex-direction: column; align-items: flex-end; gap: 8px;">
+        <button id="btn-touch-mode-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">🖱️ Trackpad</button>
+        <button id="btn-display-mode-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">🔍 原始大小</button>
+        <button id="btn-session-disconnect" style="background: rgba(220, 38, 38, 0.45); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(220, 38, 38, 0.6); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">🚪 登出</button>
+      </div>
+    </div>
     <div id="pointer-lock-tooltip" style="display: none; position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 110; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); color: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; pointer-events: none; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: opacity 0.3s ease;">
       Pointer locked. Press ESC to exit.
     </div>
@@ -41,7 +48,7 @@
     </button>
   </div>
   <!-- 行動端磨砂玻璃懸浮控制面板 -->
-  <div id="mobile-control-orb" style="display: none !important; position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1100; flex-direction: column; align-items: center; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);">
+  <div id="mobile-control-orb" style="display: none !important; position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1100; flex-direction: column; align-items: center; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); touch-action: manipulation;">
     <!-- 懸浮控制柄 / 藥丸型手把 (Notch Handle) -->
     <div id="btn-control-toggle" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 4px 16px; color: rgba(255,255,255,0.95); cursor: pointer; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.35); user-select: none;">
       <span>🛠️ Quick Menu</span>
@@ -83,7 +90,7 @@
     <header class="app-header">
       <div class="logo">
         <span class="logo-symbol">⚡</span>
-        <span class="logo-text" id="app-logo-text" style="display: flex; align-items: baseline; gap: 8px;">2syn_Duel v3.5.1</span>
+        <span class="logo-text" id="app-logo-text" style="display: flex; align-items: baseline; gap: 8px;">2syn_Duel v3.5.3</span>
       </div>
       <div class="header-actions">
         <button id="btn-show-help" class="help-trigger-btn" title="Help & Privacy">🛟</button>
