@@ -97,9 +97,9 @@ impl VideoStreamer {
         let mut encoder = CaptureCodecFactory::create_encoder();
         
         let params = CodecParams {
-            width: 1280,
-            height: 720,
-            bitrate_kbps: 5000,
+            width: 1920,
+            height: 1080,
+            bitrate_kbps: 6000,
             fps: 60,
             codec_type: VideoCodecType::H264,
         };
