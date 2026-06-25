@@ -5,6 +5,34 @@ import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 import pkg from "../package.json";
 
+// =============================================================================
+// HUD 自檢心跳：放在模組最頂端、與所有初始化/連線/getStats 解耦，
+// 確保即使後續任何頂層程式碼在某些 WebView 拋錯中斷求值，setInterval 也已註冊。
+// 純粹確認「手機運行的就是最新打包」，並顯示打包時間戳以資辨識。
+// 真正的診斷數據開始輸出時（logDiag 設 dataset.live）即讓出畫面。
+// =============================================================================
+(function diagBootstrapHeartbeat() {
+  const BUILD_TAG = "BUILD-" + new Date().toISOString().slice(5, 19).replace("T", " ");
+  let n = 0;
+  const tick = () => {
+    n++;
+    const root = document.body || document.documentElement;
+    if (!root) return;
+    let hud = document.getElementById("diag-hud");
+    if (!hud) {
+      hud = document.createElement("div");
+      hud.id = "diag-hud";
+      hud.style.cssText = "position:fixed;top:max(env(safe-area-inset-top),8px);left:8px;z-index:2147483647;max-width:94vw;background:rgba(0,0,0,0.66);color:#7dd3fc;font-family:ui-monospace,monospace;font-size:10px;line-height:1.45;padding:6px 8px;border-radius:8px;pointer-events:none;white-space:pre-wrap;";
+      root.appendChild(hud);
+    }
+    if (!hud.dataset.live) {
+      hud.textContent = `HUD 自檢 ${BUILD_TAG} #${n}`;
+    }
+  };
+  tick();
+  setInterval(tick, 1000);
+})();
+
 function isDesktopTauri(): boolean {
   if (!isTauri()) return false;
   const ua = navigator.userAgent.toLowerCase();
@@ -2697,7 +2725,8 @@ function startStatusPolling() {
       hud.style.cssText = "position:fixed;top:max(env(safe-area-inset-top),8px);left:8px;z-index:2147483647;max-width:94vw;background:rgba(0,0,0,0.66);color:#7dd3fc;font-family:ui-monospace,monospace;font-size:10px;line-height:1.45;padding:6px 8px;border-radius:8px;pointer-events:none;white-space:pre-wrap;";
       document.body.appendChild(hud);
     }
-    const prev = (hud.textContent || "").split("\n").slice(-3);
+    hud.dataset.live = "1"; // 真正的診斷數據接管，自檢心跳讓出畫面
+    const prev = (hud.textContent || "").replace(/^HUD 自檢.*$/m, "").split("\n").filter(Boolean).slice(-3);
     prev.push(msg.replace(/^\[DIAG\] /, ""));
     hud.textContent = prev.slice(-4).join("\n");
   };
