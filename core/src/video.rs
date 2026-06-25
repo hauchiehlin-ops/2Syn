@@ -527,11 +527,14 @@ impl VideoStreamer {
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
 
-                // 診斷：每 2 秒打印 host 端實際編碼產出幀率
+                // 診斷：每 2 秒回報 host 端實際編碼產出幀率。經 status_tx 送到前端，
+                // 以便直接顯示在 App 的「系統日誌」面板（eprintln 只進終端 stderr 看不到）。
                 if last_fps_log.elapsed() >= std::time::Duration::from_secs(2) {
                     let secs = last_fps_log.elapsed().as_secs_f32();
-                    eprintln!("[Video][DIAG] host 實際編碼產出 ≈ {:.1} fps（目標 {}）",
+                    let msg = format!("[Video][DIAG] host 實際編碼產出 ≈ {:.1} fps（目標 {}）",
                         produced_frames as f32 / secs, target_fps);
+                    eprintln!("{}", msg);
+                    if let Some(tx) = &status_tx { let _ = tx.send(msg); }
                     produced_frames = 0;
                     last_fps_log = std::time::Instant::now();
                 }

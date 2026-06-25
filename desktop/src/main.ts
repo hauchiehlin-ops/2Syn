@@ -2752,11 +2752,9 @@ function startStatusPolling() {
   let _diagTick = 0;
   setInterval(async () => {
     _diagTick++;
-    // 心跳 + 分段錯誤捕獲：確保無論卡在哪一步，手機端 HUD 都能看到原因
-    if (!peerConnection) {
-      logDiag(`[DIAG] #${_diagTick} 尚無 peerConnection（未連線或未指派）`);
-      return;
-    }
+    // 無 peerConnection（被控端/未連線）時靜默返回，避免刷屏汙染系統日誌。
+    // 控制端一旦建立連線即自動開始輸出真實診斷數據。
+    if (!peerConnection) return;
     let statsReport: any;
     try {
       statsReport = await peerConnection.getStats();
