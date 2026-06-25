@@ -2076,6 +2076,16 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
           videoEl.onplaying = () => {
             hasPlayed = true;
             if (videoErrorOverlay) videoErrorOverlay.style.display = "none";
+            // 連線後立即在畫面中央顯示游標，讓使用者知道游標位置
+            if (!HOST_RENDERS_CURSOR && !isDesktopTauri()) {
+              const rc = document.getElementById("remote-cursor-indicator");
+              if (rc) {
+                const vr = videoEl.getBoundingClientRect();
+                rc.style.left = `${vr.left + vr.width / 2}px`;
+                rc.style.top = `${vr.top + vr.height / 2}px`;
+                rc.style.display = "block";
+              }
+            }
           };
           
           if (btnVideoRetryPlay) {
@@ -3382,12 +3392,16 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   if (!remoteCursor) {
     remoteCursor = document.createElement("div");
     remoteCursor.id = "remote-cursor-indicator";
-    remoteCursor.style.position = "absolute";
-    remoteCursor.style.width = "10px";
-    remoteCursor.style.height = "12px";
+    // position:fixed 確保座標對齊視口，不受 pan/transform 影響
+    remoteCursor.style.position = "fixed";
+    const _mobile = !isDesktopTauri();
+    remoteCursor.style.width = _mobile ? "24px" : "16px";
+    remoteCursor.style.height = _mobile ? "30px" : "20px";
     remoteCursor.style.borderRadius = "0px";
     remoteCursor.style.backgroundColor = "transparent";
-    remoteCursor.style.backgroundImage = 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' width=\'10\' height=\'12\'><path d=\'M0,0 L0,17 L4.7,12.3 L8,20 L10.5,19 L7.2,11.3 L12.7,11.3 Z\' fill=\'white\' stroke=\'black\' stroke-width=\'1.5\' stroke-linejoin=\'miter\'/></svg>")';
+    const svgW = _mobile ? 24 : 16;
+    const svgH = _mobile ? 30 : 20;
+    remoteCursor.style.backgroundImage = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='${svgW}' height='${svgH}'><path d='M0,0 L0,17 L4.7,12.3 L8,20 L10.5,19 L7.2,11.3 L12.7,11.3 Z' fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='miter'/></svg>")`;
     remoteCursor.style.backgroundSize = "contain";
     remoteCursor.style.backgroundRepeat = "no-repeat";
     remoteCursor.style.boxShadow = "none";
