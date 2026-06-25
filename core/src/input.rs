@@ -462,6 +462,10 @@ impl InputEvent {
                     };
                     let event = CGEvent::new_mouse_event(source, evt_type, current_point, cg_button)
                         .map_err(|_| CoreError::SystemError("建立 macOS 按鍵壓下事件失敗".to_string()))?;
+                    // 設定 click state = 1：讓合成事件被視為「真實單擊」，
+                    // 確保點擊背景視窗時 WindowServer 正確觸發 click-to-front 視窗提升。
+                    event.set_integer_value_field(
+                        core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseUp { button } => {
@@ -494,6 +498,8 @@ impl InputEvent {
                     };
                     let event = CGEvent::new_mouse_event(source, evt_type, current_point, cg_button)
                         .map_err(|_| CoreError::SystemError("建立 macOS 按鍵放開事件失敗".to_string()))?;
+                    event.set_integer_value_field(
+                        core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseScroll { delta_x, delta_y } => {
