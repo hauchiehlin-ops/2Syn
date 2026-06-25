@@ -164,10 +164,24 @@ impl VideoStreamer {
 
         // 啟動非同步任務負責按順序傳送視訊幀 (避免 out-of-order 導致 H264 解碼失敗)
         tokio::spawn(async move {
+            // 用「真實流逝時間」當每幀 duration，使 RTP 時間戳與墻鐘嚴格同步。
+            // 寫死 33ms 會在實際幀率變動（尤其主動操作時）造成時間戳漂移，
+            // 接收端誤判為串流落後而不斷膨脹 jitter buffer（實測可累積到數秒）。
+            let mut last = std::time::Instant::now();
+            let mut first = true;
             while let Some(data) = rx.recv().await {
+                let now = std::time::Instant::now();
+                let dur = if first {
+                    first = false;
+                    Duration::from_millis(16)
+                } else {
+                    now.duration_since(last)
+                        .clamp(Duration::from_millis(1), Duration::from_millis(2000))
+                };
+                last = now;
                 let sample = Sample {
                     data: data.into(),
-                    duration: Duration::from_millis(33),
+                    duration: dur,
                     ..Default::default()
                 };
                 match tokio::time::timeout(std::time::Duration::from_millis(100), track_arc.write_sample(&sample)).await {
@@ -183,10 +197,21 @@ impl VideoStreamer {
         let foveated_track_arc = self.foveated_track.clone();
         tokio::spawn(async move {
             if let Some(f_track) = foveated_track_arc {
+                let mut last = std::time::Instant::now();
+                let mut first = true;
                 while let Some(data) = foveated_rx.recv().await {
+                    let now = std::time::Instant::now();
+                    let dur = if first {
+                        first = false;
+                        Duration::from_millis(16)
+                    } else {
+                        now.duration_since(last)
+                            .clamp(Duration::from_millis(1), Duration::from_millis(2000))
+                    };
+                    last = now;
                     let sample = Sample {
                         data: data.into(),
-                        duration: Duration::from_millis(33),
+                        duration: dur,
                         ..Default::default()
                     };
                     let _ = tokio::time::timeout(std::time::Duration::from_millis(100), f_track.write_sample(&sample)).await;
