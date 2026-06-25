@@ -2676,7 +2676,8 @@ function startStatusPolling() {
     framesDropped: 0,
     ready: false,
   };
-  // 把診斷字串輸出到「視訊上的浮動 HUD」（會話期間連線 UI 被隱藏，需直接疊在視訊上才看得到），
+  // 把診斷字串輸出到「浮動 HUD」。為求在任何情況下都看得到，HUD 直接掛在 document.body、
+  // 用 position:fixed + 最高 z-index，不依賴視訊容器的堆疊脈絡或顯示狀態。
   // 同步寫入 debug overlay 與 console 以利桌面端排查。
   const logDiag = (msg: string) => {
     console.log(msg);
@@ -2689,26 +2690,34 @@ function startStatusPolling() {
       while (overlay.children.length > 100) overlay.removeChild(overlay.firstChild!);
       overlay.scrollTop = overlay.scrollHeight;
     }
-    // 浮動 HUD：只在會話中顯示，疊在視訊左上角，顯示最近數筆診斷
-    const vc = document.getElementById("remote-video-container");
-    if (vc && vc.style.display !== "none") {
-      let hud = document.getElementById("diag-hud");
-      if (!hud) {
-        hud = document.createElement("div");
-        hud.id = "diag-hud";
-        hud.style.cssText = "position:absolute;top:max(env(safe-area-inset-top),8px);left:8px;z-index:1300;max-width:92vw;background:rgba(0,0,0,0.62);color:#7dd3fc;font-family:ui-monospace,monospace;font-size:10px;line-height:1.45;padding:6px 8px;border-radius:8px;pointer-events:none;white-space:pre-wrap;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);";
-        vc.appendChild(hud);
-      }
-      const prev = (hud.textContent || "").split("\n").slice(-3);
-      prev.push(msg.replace(/^\[DIAG\] /, ""));
-      hud.textContent = prev.slice(-4).join("\n");
+    let hud = document.getElementById("diag-hud");
+    if (!hud) {
+      hud = document.createElement("div");
+      hud.id = "diag-hud";
+      hud.style.cssText = "position:fixed;top:max(env(safe-area-inset-top),8px);left:8px;z-index:2147483647;max-width:94vw;background:rgba(0,0,0,0.66);color:#7dd3fc;font-family:ui-monospace,monospace;font-size:10px;line-height:1.45;padding:6px 8px;border-radius:8px;pointer-events:none;white-space:pre-wrap;";
+      document.body.appendChild(hud);
     }
+    const prev = (hud.textContent || "").split("\n").slice(-3);
+    prev.push(msg.replace(/^\[DIAG\] /, ""));
+    hud.textContent = prev.slice(-4).join("\n");
   };
 
+  let _diagTick = 0;
   setInterval(async () => {
-    if (!peerConnection) return;
+    _diagTick++;
+    // 心跳 + 分段錯誤捕獲：確保無論卡在哪一步，手機端 HUD 都能看到原因
+    if (!peerConnection) {
+      logDiag(`[DIAG] #${_diagTick} 尚無 peerConnection（未連線或未指派）`);
+      return;
+    }
+    let statsReport: any;
     try {
-      const statsReport = await peerConnection.getStats();
+      statsReport = await peerConnection.getStats();
+    } catch (err: any) {
+      logDiag(`[DIAG] #${_diagTick} getStats() 失敗: ${err?.message || err}`);
+      return;
+    }
+    try {
       let actualFps = 0;
       let bytesReceivedDelta = 0;
       let rttMs = 0;
@@ -2862,8 +2871,9 @@ function startStatusPolling() {
       if (floatingIndicator) {
         floatingIndicator.style.backgroundColor = color;
       }
-    } catch (e) {
-      // getStats() 在非連線狀態下會拋出，忽略即可
+    } catch (e: any) {
+      // 統計處理過程出錯：顯示到 HUD 以利定位（不再靜默吞掉）
+      logDiag(`[DIAG] #${_diagTick} 統計處理錯誤: ${e?.message || e}`);
     }
   }, 2000);
 }
