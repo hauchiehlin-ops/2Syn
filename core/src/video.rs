@@ -224,6 +224,10 @@ impl VideoStreamer {
         tokio::task::spawn_blocking(move || {
             let mut tick = std::time::Instant::now();
             let mut frame_count: u64 = 0;
+            // 診斷：統計 host 端「實際編碼產出」的幀率，每 2 秒打印到終端，
+            // 用以判斷主動操作時 fps 偏低究竟是「host 產不出」還是「送不到」。
+            let mut produced_frames: u32 = 0;
+            let mut last_fps_log = std::time::Instant::now();
             
             // 初始化 Monitor
             let mut current_monitor_index = *monitor_rx.borrow();
@@ -383,6 +387,7 @@ impl VideoStreamer {
                                         if let Ok(mut encoder_guard) = encoder_arc.try_lock() {
                                             match encoder_guard.encode_frame_zero_copy(&crate::codec::FrameBuffer::IOSurface(ptr)) {
                                                 Ok(encoded_bytes) => {
+                                                    produced_frames += 1;
                                                     let _ = tx.blocking_send(encoded_bytes);
                                                 }
                                                 Err(e) => {
@@ -458,6 +463,7 @@ impl VideoStreamer {
                             Ok(encoded) => {
                                 let data = encoded.to_vec();
                                 if !data.is_empty() {
+                                    produced_frames += 1;
                                     if let Err(_e) = tx.try_send(data) {}
                                 }
                             }
@@ -519,6 +525,15 @@ impl VideoStreamer {
                     }
                     // 擷取失敗時，強制休眠 100 毫秒，防止無間隔重試卡死系統
                     std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+
+                // 診斷：每 2 秒打印 host 端實際編碼產出幀率
+                if last_fps_log.elapsed() >= std::time::Duration::from_secs(2) {
+                    let secs = last_fps_log.elapsed().as_secs_f32();
+                    eprintln!("[Video][DIAG] host 實際編碼產出 ≈ {:.1} fps（目標 {}）",
+                        produced_frames as f32 / secs, target_fps);
+                    produced_frames = 0;
+                    last_fps_log = std::time::Instant::now();
                 }
 
                 let elapsed = tick.elapsed();
