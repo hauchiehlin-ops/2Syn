@@ -2341,7 +2341,9 @@ function resetConnectionUI() {
   if (mainContent) {
     mainContent.style.display = "flex";
   }
-  
+  // 移除診斷 HUD
+  document.getElementById("diag-hud")?.remove();
+
   const mobileControlOrb = document.getElementById("mobile-control-orb");
   if (mobileControlOrb) {
     mobileControlOrb.style.display = "none";
@@ -2658,6 +2660,47 @@ function startStatusPolling() {
   // WebRTC 原生 getStats() — 採集真實 inbound-rtp 統計（每 2 秒）
   let _lastBytesReceived = 0;
   let _lastStatsTime = performance.now();
+  // 診斷用累積值快照（用於計算各指標的「區間差分」，反映當下而非開機至今平均）
+  const _prev = {
+    framesDecoded: 0,
+    jbDelay: 0,            // jitterBufferDelay (秒, 累積)
+    jbCount: 0,            // jitterBufferEmittedCount (累積)
+    interFrame: 0,         // totalInterFrameDelay (秒, 累積)
+    interFrameSq: 0,       // totalSquaredInterFrameDelay (秒^2, 累積)
+    decodeTime: 0,         // totalDecodeTime (秒, 累積)
+    freezeCount: 0,
+    freezeDur: 0,          // totalFreezesDuration (秒, 累積)
+    framesDropped: 0,
+    ready: false,
+  };
+  // 把診斷字串輸出到「視訊上的浮動 HUD」（會話期間連線 UI 被隱藏，需直接疊在視訊上才看得到），
+  // 同步寫入 debug overlay 與 console 以利桌面端排查。
+  const logDiag = (msg: string) => {
+    console.log(msg);
+    const overlay = document.getElementById("debug-overlay");
+    if (overlay) {
+      const line = document.createElement("div");
+      line.textContent = msg;
+      line.style.color = "#38bdf8";
+      overlay.appendChild(line);
+      while (overlay.children.length > 100) overlay.removeChild(overlay.firstChild!);
+      overlay.scrollTop = overlay.scrollHeight;
+    }
+    // 浮動 HUD：只在會話中顯示，疊在視訊左上角，顯示最近數筆診斷
+    const vc = document.getElementById("remote-video-container");
+    if (vc && vc.style.display !== "none") {
+      let hud = document.getElementById("diag-hud");
+      if (!hud) {
+        hud = document.createElement("div");
+        hud.id = "diag-hud";
+        hud.style.cssText = "position:absolute;top:max(env(safe-area-inset-top),8px);left:8px;z-index:1300;max-width:92vw;background:rgba(0,0,0,0.62);color:#7dd3fc;font-family:ui-monospace,monospace;font-size:10px;line-height:1.45;padding:6px 8px;border-radius:8px;pointer-events:none;white-space:pre-wrap;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);";
+        vc.appendChild(hud);
+      }
+      const prev = (hud.textContent || "").split("\n").slice(-3);
+      prev.push(msg.replace(/^\[DIAG\] /, ""));
+      hud.textContent = prev.slice(-4).join("\n");
+    }
+  };
 
   setInterval(async () => {
     if (!peerConnection) return;
@@ -2669,11 +2712,13 @@ function startStatusPolling() {
       let packetsLost = 0;
       let packetsReceived = 0;
       let candidatePairFound = false;
+      let vid: any = null; // inbound-rtp video 原始統計，供診斷差分使用
 
       statsReport.forEach((stat: RTCStatsReport) => {
         const s = stat as any;
         // inbound-rtp video
         if (s.type === "inbound-rtp" && s.kind === "video") {
+          vid = s;
           actualFps = s.framesPerSecond ?? 0;
           const totalBytes = s.bytesReceived ?? 0;
           const now = performance.now();
@@ -2692,6 +2737,52 @@ function startStatusPolling() {
           candidatePairFound = true;
         }
       });
+
+      // ===== 端到端延遲 / 帧间抖动 诊断（差分计算，反映当下）=====
+      if (vid) {
+        const dFrames = (vid.framesDecoded ?? 0) - _prev.framesDecoded;
+        const dJbDelay = (vid.jitterBufferDelay ?? 0) - _prev.jbDelay;
+        const dJbCount = (vid.jitterBufferEmittedCount ?? 0) - _prev.jbCount;
+        const dInter = (vid.totalInterFrameDelay ?? 0) - _prev.interFrame;
+        const dInterSq = (vid.totalSquaredInterFrameDelay ?? 0) - _prev.interFrameSq;
+        const dDecode = (vid.totalDecodeTime ?? 0) - _prev.decodeTime;
+        const dFreezeCnt = (vid.freezeCount ?? 0) - _prev.freezeCount;
+        const dFreezeDur = (vid.totalFreezesDuration ?? 0) - _prev.freezeDur;
+        const dDropped = (vid.framesDropped ?? 0) - _prev.framesDropped;
+
+        if (_prev.ready && dFrames > 0) {
+          // 抖动缓冲平均延迟（ms）— 端到端延迟的主要构成之一
+          const jbMs = dJbCount > 0 ? (dJbDelay / dJbCount) * 1000 : 0;
+          // 平均解码耗时（ms）
+          const decodeMs = (dDecode / dFrames) * 1000;
+          // 帧间间隔均值与标准差（ms）— 标准差越大代表节奏越不稳（卡顿感来源）
+          const meanIf = dInter / dFrames;
+          const meanSq = dInterSq / dFrames;
+          const stdIf = Math.sqrt(Math.max(0, meanSq - meanIf * meanIf));
+          // 网络包到达抖动（ms）
+          const jitterMs = (vid.jitter ?? 0) * 1000;
+          // 端到端延迟估算（ms）= 单程网路(RTT/2) + 抖动缓冲 + 解码
+          const e2eMs = rttMs / 2 + jbMs + decodeMs;
+
+          logDiag(
+            `[DIAG] e2e≈${e2eMs.toFixed(0)}ms | RTT ${rttMs}ms | 抖动缓冲 ${jbMs.toFixed(0)}ms | ` +
+            `解码 ${decodeMs.toFixed(1)}ms | 帧间 ${(meanIf * 1000).toFixed(1)}±${(stdIf * 1000).toFixed(1)}ms | ` +
+            `jitter ${jitterMs.toFixed(1)}ms | fps ${actualFps.toFixed(1)} | ` +
+            `卡顿 +${dFreezeCnt}(${(dFreezeDur * 1000).toFixed(0)}ms) | 丢帧 +${dDropped}`
+          );
+        }
+
+        _prev.framesDecoded = vid.framesDecoded ?? 0;
+        _prev.jbDelay = vid.jitterBufferDelay ?? 0;
+        _prev.jbCount = vid.jitterBufferEmittedCount ?? 0;
+        _prev.interFrame = vid.totalInterFrameDelay ?? 0;
+        _prev.interFrameSq = vid.totalSquaredInterFrameDelay ?? 0;
+        _prev.decodeTime = vid.totalDecodeTime ?? 0;
+        _prev.freezeCount = vid.freezeCount ?? 0;
+        _prev.freezeDur = vid.totalFreezesDuration ?? 0;
+        _prev.framesDropped = vid.framesDropped ?? 0;
+        _prev.ready = true;
+      }
 
       // 更新實際 FPS
       const fpsEl = document.getElementById("val-metric-actual-fps");
