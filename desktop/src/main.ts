@@ -1433,6 +1433,27 @@ async function initStaticPassword() {
 // =========================================================================
 // 剪貼簿雙向同步
 // =========================================================================
+function showClipboardToast(text: string) {
+  const existing = document.getElementById("clipboard-toast");
+  if (existing) existing.remove();
+  const preview = text.length > 30 ? text.substring(0, 30) + "…" : text;
+  const toast = document.createElement("div");
+  toast.id = "clipboard-toast";
+  toast.style.cssText = "position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:9999;" +
+    "background:rgba(30,40,60,0.95);color:white;border:1px solid rgba(255,255,255,0.2);" +
+    "border-radius:12px;padding:12px 18px;font-size:14px;cursor:pointer;max-width:80vw;" +
+    "box-shadow:0 4px 20px rgba(0,0,0,0.5);touch-action:manipulation;text-align:center;";
+  toast.innerHTML = `📋 遠端複製：<b>${preview}</b><br><small style="opacity:0.7">點擊貼入本機剪貼板</small>`;
+  toast.addEventListener("click", () => {
+    navigator.clipboard.writeText(text).then(() => {
+      toast.innerHTML = "✅ 已貼入本機剪貼板";
+      setTimeout(() => toast.remove(), 1500);
+    }).catch(() => toast.remove());
+  });
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.parentNode) toast.remove(); }, 6000);
+}
+
 function initClipboardSync() {
   // 主控端複製文字時 → 推送至被控端
   const onCopy = async (e: ClipboardEvent) => {
@@ -2132,19 +2153,37 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
             audioEl.autoplay = true;
             document.body.appendChild(audioEl);
         }
-        
+
+        const btnAudioToggle = document.getElementById("btn-audio-toggle") as HTMLButtonElement;
+
         if (!audioEl.srcObject) {
-            audioEl.srcObject = event.streams && event.streams.length > 0 
-                ? event.streams[0] 
+            audioEl.srcObject = event.streams && event.streams.length > 0
+                ? event.streams[0]
                 : new MediaStream([event.track]);
-                
-            try {
-                audioEl.play().catch(err => {
-                    console.warn("[WebRTC] 音訊自動播放受阻，等待使用者互動:", err);
-                });
-            } catch (err) {
-                console.error("[WebRTC] 音訊播放調用失敗:", err);
-            }
+
+            // iOS Safari autoplay policy：先靜音播放，成功後顯示解除靜音提示
+            audioEl.muted = true;
+            audioEl.play().then(() => {
+                // 嘗試解除靜音；若被政策擋住則維持靜音，等使用者點按鈕
+                audioEl.muted = false;
+                if (btnAudioToggle) {
+                    btnAudioToggle.style.display = "block";
+                    btnAudioToggle.textContent = "🔊 Mute";
+                }
+            }).catch(() => {
+                // 自動播放受阻：顯示「點擊開聲音」提示，等使用者互動後再 unmute
+                if (btnAudioToggle) {
+                    btnAudioToggle.style.display = "block";
+                    btnAudioToggle.textContent = "🔇 點擊開聲音";
+                    const unlockAudio = () => {
+                        audioEl.muted = false;
+                        audioEl.play().catch(() => {});
+                        btnAudioToggle.textContent = "🔊 Mute";
+                        btnAudioToggle.removeEventListener("click", unlockAudio);
+                    };
+                    btnAudioToggle.addEventListener("click", unlockAudio);
+                }
+            });
         }
     }
   };
@@ -2193,8 +2232,11 @@ async function startCall(remoteId: string, pin: string) {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === "clipboard_push" && msg.text) {
-          navigator.clipboard.writeText(msg.text).catch(() => {});
           console.log(`[clipboard] 收到被控端剪貼簿: ${msg.text.substring(0, 40)}`);
+          // 桌面端直接寫入，iOS 需用戶手勢 → 顯示 toast 讓用戶點擊確認
+          navigator.clipboard.writeText(msg.text).catch(() => {
+            showClipboardToast(msg.text);
+          });
         }
       } catch {}
     };
