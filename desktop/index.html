@@ -200,6 +200,11 @@
             <div id="offline-sdp-panel" class="offline-panel-hidden" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px;">
               <button id="btn-gen-local-sdp" class="btn-secondary"><span id="txt-gen-sdp-btn">Generate & Copy Local SDP Offer</span></button>
               <textarea id="txt-local-sdp" readonly placeholder="Local SDP will be generated here" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 6px; border-radius: 6px; height: 70px; resize: none;"></textarea>
+              <!-- QR code 隱私模式：掃碼替代手動貼 SDP，完全不需要信令 server -->
+              <div id="sdp-qr-container" style="display:none; flex-direction:column; align-items:center; gap:6px; padding:8px; background:white; border-radius:8px;">
+                <canvas id="sdp-qr-canvas" width="200" height="200"></canvas>
+                <span style="color:#333; font-size:11px;">掃描 QR Code 完成配對（無需伺服器）</span>
+              </div>
               
               <label for="txt-remote-sdp" id="lbl-remote-sdp" style="font-size: 11px; color: var(--text-muted);"><span id="txt-enter-sdp-label">Enter Remote SDP Answer/Offer</span></label>
               <textarea id="txt-remote-sdp" placeholder="Paste Remote SDP here" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 6px; border-radius: 6px; height: 70px; resize: none;"></textarea>
@@ -231,7 +236,14 @@
             <div class="val-with-copy">
               <span id="val-my-id" class="code-text">Loading...</span>
               <button class="btn-copy" id="btn-copy-id" type="button" title="Copy">📋</button>
+              <button class="btn-copy" id="btn-qr-id" type="button" title="QR Code">⬛</button>
             </div>
+          </div>
+          <!-- QR code 彈出層：隱私模式，讓 iOS client 掃碼直接連線 -->
+          <div id="id-qr-popup" style="display:none; flex-direction:column; align-items:center; gap:6px;
+               padding:12px; background:white; border-radius:10px; margin-top:4px;">
+            <canvas id="id-qr-canvas" width="160" height="160"></canvas>
+            <span style="color:#333; font-size:11px; text-align:center;">用 iOS 相機掃描，免手動輸入 ID</span>
           </div>
           <div class="info-row">
             <span id="lbl-my-mac"><span id="txt-my-mac-label">My MAC:</span></span>

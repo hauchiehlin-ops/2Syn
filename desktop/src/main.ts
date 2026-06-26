@@ -3,6 +3,7 @@ import { setupFileTransferDropZone } from "./file_transfer";
 import { I18N_HELP_DOCS } from "./help_i18n";
 import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
+import QRCode from "qrcode";
 import pkg from "../package.json";
 
 // =============================================================================
@@ -3015,6 +3016,33 @@ function initOfflineSdpMode() {
             txtLocal.value = finalSdp;
             txtLocal.select();
             navigator.clipboard.writeText(finalSdp).catch(() => {});
+            // 同時壓縮 SDP 並顯示 QR code（隱私模式：掃碼替代貼上）
+            const qrContainer = document.getElementById("sdp-qr-container");
+            const qrCanvas = document.getElementById("sdp-qr-canvas") as HTMLCanvasElement;
+            if (qrContainer && qrCanvas) {
+              // 用 CompressionStream 壓縮 SDP 再 base64url encode
+              (async () => {
+                try {
+                  const enc = new TextEncoder();
+                  const cs = new CompressionStream("deflate-raw");
+                  const writer = cs.writable.getWriter();
+                  writer.write(enc.encode(finalSdp));
+                  writer.close();
+                  const compressed = await new Response(cs.readable).arrayBuffer();
+                  const b64 = btoa(String.fromCharCode(...new Uint8Array(compressed)))
+                    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+                  const qrData = `2syn://sdp/${b64}`;
+                  await QRCode.toCanvas(qrCanvas, qrData, {
+                    width: 200, margin: 1,
+                    errorCorrectionLevel: "L",
+                    color: { dark: "#000000", light: "#ffffff" }
+                  });
+                  qrContainer.style.display = "flex";
+                } catch (e) {
+                  console.warn("[QR] SDP QR code 生成失敗:", e);
+                }
+              })();
+            }
             alert(t("alert_sdp_success"));
           }
         };
@@ -3157,6 +3185,32 @@ function initClipboardCopy() {
         }, 1500);
       }).catch((err) => console.error("複製 ID 失敗:", err));
     });
+  }
+
+  // QR code：掃碼自動填入 ID，iOS client 免手動輸入
+  const btnQrId = document.getElementById("btn-qr-id");
+  const idQrPopup = document.getElementById("id-qr-popup");
+  const idQrCanvas = document.getElementById("id-qr-canvas") as HTMLCanvasElement;
+  if (btnQrId && idQrPopup && idQrCanvas && valMyId) {
+    btnQrId.addEventListener("click", () => {
+      const idText = valMyId.textContent?.trim() || "";
+      if (!idText || idText === "Loading...") return;
+      const visible = idQrPopup.style.display !== "none";
+      if (visible) { idQrPopup.style.display = "none"; return; }
+      // 編碼成 2syn://connect/ID 讓 iOS 相機 app 識別並開啟
+      QRCode.toCanvas(idQrCanvas, `2syn://connect/${idText}`, {
+        width: 160, margin: 1,
+        color: { dark: "#000000", light: "#ffffff" }
+      }).then(() => {
+        idQrPopup.style.display = "flex";
+      }).catch(console.error);
+    });
+    // 點擊外部關閉
+    document.addEventListener("click", (e) => {
+      if (!idQrPopup.contains(e.target as Node) && e.target !== btnQrId) {
+        idQrPopup.style.display = "none";
+      }
+    }, { capture: true });
   }
   
   if (btnCopyMac && valMyMac) {
@@ -4195,6 +4249,71 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   videoEl.addEventListener("pointerenter", (e) => {
     if (e.pointerType === "touch" || e.pointerType === "pen") return;
     isMouseInsideVideo = true;
+  });
+
+  // --- Apple Pencil / 觸控筆壓力感應 ---
+  // 偵測 pointerType==="pen"，傳送帶壓力的 PenMove 封包 (0x09) 到被控端
+  let _penDown = false;
+  const sendPenPacket = (e: PointerEvent) => {
+    if (!dataChannelUnreliable || dataChannelUnreliable.readyState !== "open") return;
+    const rect = videoEl.getBoundingClientRect();
+    const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+    const containerRatio = rect.width / rect.height;
+    let rw: number, rh: number, ox = 0, oy = 0;
+    if (containerRatio > videoRatio) {
+      rh = rect.height; rw = rh * videoRatio; ox = (rect.width - rw) / 2;
+    } else {
+      rw = rect.width; rh = rw / videoRatio; oy = (rect.height - rh) / 2;
+    }
+    const px = Math.max(0, Math.min(1, (e.clientX - rect.left - ox) / rw));
+    const py = Math.max(0, Math.min(1, (e.clientY - rect.top - oy) / rh));
+    const pressure = Math.round(e.pressure * 65535);
+    const tiltX = Math.round(Math.max(-90, Math.min(90, (e as any).tiltX || 0)));
+    const tiltY = Math.round(Math.max(-90, Math.min(90, (e as any).tiltY || 0)));
+    const buf = new ArrayBuffer(13);
+    const view = new DataView(buf);
+    view.setUint8(0, 0x09);
+    view.setFloat32(1, px, false);
+    view.setFloat32(5, py, false);
+    view.setUint16(9, pressure, false);
+    view.setInt8(11, tiltX);
+    view.setInt8(12, tiltY);
+    dataChannelUnreliable.send(buf);
+    updateCursorOverlay(px, py);
+  };
+
+  videoEl.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "pen") return;
+    e.preventDefault();
+    _penDown = true;
+    // 送出 MouseDown（複用現有封包，讓被控端知道筆尖按下）
+    const payload = new Uint8Array([1]); // Left button
+    sendInputPacket(buildInputPacket(0x02, payload));
+    sendPenPacket(e);
+  }, { passive: false });
+
+  videoEl.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "pen") return;
+    e.preventDefault();
+    sendPenPacket(e);
+  }, { passive: false });
+
+  videoEl.addEventListener("pointerup", (e) => {
+    if (e.pointerType !== "pen") return;
+    e.preventDefault();
+    _penDown = false;
+    sendPenPacket(e);
+    const payload = new Uint8Array([1]);
+    sendInputPacket(buildInputPacket(0x03, payload));
+  }, { passive: false });
+
+  videoEl.addEventListener("pointercancel", (e) => {
+    if (e.pointerType !== "pen") return;
+    if (_penDown) {
+      _penDown = false;
+      const payload = new Uint8Array([1]);
+      sendInputPacket(buildInputPacket(0x03, payload));
+    }
   });
 
   // --- 手勢辨識與狀態機 ---
