@@ -6,33 +6,6 @@ import { listen } from "@tauri-apps/api/event";
 import QRCode from "qrcode";
 import pkg from "../package.json";
 
-// =============================================================================
-// HUD 自檢心跳：放在模組最頂端、與所有初始化/連線/getStats 解耦，
-// 確保即使後續任何頂層程式碼在某些 WebView 拋錯中斷求值，setInterval 也已註冊。
-// 純粹確認「手機運行的就是最新打包」，並顯示打包時間戳以資辨識。
-// 真正的診斷數據開始輸出時（logDiag 設 dataset.live）即讓出畫面。
-// =============================================================================
-(function diagBootstrapHeartbeat() {
-  const BUILD_TAG = "BUILD-" + new Date().toISOString().slice(5, 19).replace("T", " ");
-  let n = 0;
-  const tick = () => {
-    n++;
-    const root = document.body || document.documentElement;
-    if (!root) return;
-    let hud = document.getElementById("diag-hud");
-    if (!hud) {
-      hud = document.createElement("div");
-      hud.id = "diag-hud";
-      hud.style.cssText = "position:fixed;top:max(env(safe-area-inset-top),8px);left:8px;z-index:2147483647;max-width:94vw;background:rgba(0,0,0,0.66);color:#7dd3fc;font-family:ui-monospace,monospace;font-size:10px;line-height:1.45;padding:6px 8px;border-radius:8px;pointer-events:none;white-space:pre-wrap;";
-      root.appendChild(hud);
-    }
-    if (!hud.dataset.live) {
-      hud.textContent = `HUD 自檢 ${BUILD_TAG} #${n}`;
-    }
-  };
-  tick();
-  setInterval(tick, 1000);
-})();
 
 function isDesktopTauri(): boolean {
   if (!isTauri()) return false;
@@ -2438,8 +2411,6 @@ function resetConnectionUI() {
   if (mainContent) {
     mainContent.style.display = "flex";
   }
-  // 移除診斷 HUD
-  document.getElementById("diag-hud")?.remove();
 
   const mobileControlOrb = document.getElementById("mobile-control-orb");
   if (mobileControlOrb) {
@@ -2775,33 +2746,6 @@ function startStatusPolling() {
     framesDropped: 0,
     ready: false,
   };
-  // 把診斷字串輸出到「浮動 HUD」。為求在任何情況下都看得到，HUD 直接掛在 document.body、
-  // 用 position:fixed + 最高 z-index，不依賴視訊容器的堆疊脈絡或顯示狀態。
-  // 同步寫入 debug overlay 與 console 以利桌面端排查。
-  const logDiag = (msg: string) => {
-    console.log(msg);
-    const overlay = document.getElementById("debug-overlay");
-    if (overlay) {
-      const line = document.createElement("div");
-      line.textContent = msg;
-      line.style.color = "#38bdf8";
-      overlay.appendChild(line);
-      while (overlay.children.length > 100) overlay.removeChild(overlay.firstChild!);
-      overlay.scrollTop = overlay.scrollHeight;
-    }
-    let hud = document.getElementById("diag-hud");
-    if (!hud) {
-      hud = document.createElement("div");
-      hud.id = "diag-hud";
-      hud.style.cssText = "position:fixed;top:max(env(safe-area-inset-top),8px);left:8px;z-index:2147483647;max-width:94vw;background:rgba(0,0,0,0.66);color:#7dd3fc;font-family:ui-monospace,monospace;font-size:10px;line-height:1.45;padding:6px 8px;border-radius:8px;pointer-events:none;white-space:pre-wrap;";
-      document.body.appendChild(hud);
-    }
-    hud.dataset.live = "1"; // 真正的診斷數據接管，自檢心跳讓出畫面
-    const prev = (hud.textContent || "").replace(/^HUD 自檢.*$/m, "").split("\n").filter(Boolean).slice(-3);
-    prev.push(msg.replace(/^\[DIAG\] /, ""));
-    hud.textContent = prev.slice(-4).join("\n");
-  };
-
   let _diagTick = 0;
   setInterval(async () => {
     _diagTick++;
@@ -2812,7 +2756,7 @@ function startStatusPolling() {
     try {
       statsReport = await peerConnection.getStats();
     } catch (err: any) {
-      logDiag(`[DIAG] #${_diagTick} getStats() 失敗: ${err?.message || err}`);
+      console.warn(`[Stats] #${_diagTick} getStats() 失敗: ${err?.message || err}`);
       return;
     }
     try {
@@ -2882,11 +2826,9 @@ function startStatusPolling() {
           // 端到端延迟估算 = 单程网路(RTT/2) + 抖动缓冲 + 解码（缺项以 0 计）
           const e2eMs = rttMs / 2 + (jbMs ?? 0) + (decodeMs ?? 0);
 
-          logDiag(
-            `[DIAG] e2e≈${e2eMs.toFixed(0)}ms | RTT ${fmt(rttMs || null, 0, "ms")} | 抖动缓冲 ${fmt(jbMs, 0, "ms")} | ` +
-            `解码 ${fmt(decodeMs, 1, "ms")} | 帧间 ${fmt(meanIfMs, 1)}±${fmt(stdIfMs, 1)}ms | ` +
-            `jitter ${fmt(jitterMs, 1, "ms")} | fps ${fps.toFixed(1)} | ` +
-            `卡顿 +${dFreezeCnt}(${(dFreezeDur * 1000).toFixed(0)}ms) | 丢帧 +${dDropped}`
+          console.log(
+            `[Stats] e2e≈${e2eMs.toFixed(0)}ms RTT ${fmt(rttMs || null, 0, "ms")} jb ${fmt(jbMs, 0, "ms")} ` +
+            `decode ${fmt(decodeMs, 1, "ms")} fps ${fps.toFixed(1)} freeze +${dFreezeCnt} drop +${dDropped}`
           );
         }
 
@@ -2901,8 +2843,7 @@ function startStatusPolling() {
         _prev.framesDropped = vid.framesDropped ?? 0;
         _prev.ready = true;
       } else {
-        // 沒有抓到 inbound-rtp video 統計：仍輸出一行，確認輪詢有在跑、並提示 RTT
-        logDiag(`[DIAG] 等待視訊統計… | RTT ${rttMs || "—"}ms`);
+        console.log(`[Stats] 等待視訊統計 RTT ${rttMs || "—"}ms`);
       }
 
       // 更新實際 FPS
@@ -2970,8 +2911,7 @@ function startStatusPolling() {
         floatingIndicator.style.backgroundColor = color;
       }
     } catch (e: any) {
-      // 統計處理過程出錯：顯示到 HUD 以利定位（不再靜默吞掉）
-      logDiag(`[DIAG] #${_diagTick} 統計處理錯誤: ${e?.message || e}`);
+      console.warn(`[Stats] #${_diagTick} 統計處理錯誤: ${e?.message || e}`);
     }
   }, 2000);
 }
