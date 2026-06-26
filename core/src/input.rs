@@ -34,6 +34,7 @@ pub enum InputEvent {
     KeyUp { keycode: u16, modifiers: u8 },
     MouseRelativeMove { dx: i32, dy: i32 }, // 相對位移，用於 Pointer Lock 支援原生滑鼠加速度
     TextInput { text: String }, // 原生字元注入 (Unicode)
+    PenMove { x: f32, y: f32, pressure: u16, tilt_x: i8, tilt_y: i8 }, // Apple Pencil / 觸控筆壓力感應
     ResetState,
 }
 
@@ -86,6 +87,14 @@ impl InputEvent {
             InputEvent::TextInput { text } => {
                 buffer.push(0x08);
                 buffer.extend_from_slice(text.as_bytes());
+            }
+            InputEvent::PenMove { x, y, pressure, tilt_x, tilt_y } => {
+                buffer.push(0x09);
+                buffer.extend_from_slice(&x.to_be_bytes());
+                buffer.extend_from_slice(&y.to_be_bytes());
+                buffer.extend_from_slice(&pressure.to_be_bytes());
+                buffer.push(*tilt_x as u8);
+                buffer.push(*tilt_y as u8);
             }
             InputEvent::ResetState => {
                 buffer.push(0xFF);
@@ -157,6 +166,15 @@ impl InputEvent {
                 let text = String::from_utf8(data[1..].to_vec())
                     .map_err(|_| CoreError::NetworkError("TextInput 封包非有效 UTF-8".to_string()))?;
                 Ok(InputEvent::TextInput { text })
+            }
+            0x09 => {
+                if data.len() < 13 { return Err(CoreError::NetworkError("PenMove 封包長度不足".to_string())); }
+                let x = f32::from_be_bytes(data[1..5].try_into().unwrap());
+                let y = f32::from_be_bytes(data[5..9].try_into().unwrap());
+                let pressure = u16::from_be_bytes(data[9..11].try_into().unwrap());
+                let tilt_x = data[11] as i8;
+                let tilt_y = data[12] as i8;
+                Ok(InputEvent::PenMove { x, y, pressure, tilt_x, tilt_y })
             }
             0xFF => {
                 Ok(InputEvent::ResetState)
@@ -271,6 +289,16 @@ impl InputEvent {
                             }
                         }
                         return Ok(());
+                    }
+                    InputEvent::PenMove { x, y, pressure: _, tilt_x: _, tilt_y: _ } => {
+                        // Windows 上暫時以普通 MouseMove 處理（不模擬 WinTab 壓力）
+                        input.r#type = INPUT_MOUSE;
+                        let flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                        let abs_x = (*x * 65535.0) as i32;
+                        let abs_y = (*y * 65535.0) as i32;
+                        input.Anonymous.mi.dx = abs_x;
+                        input.Anonymous.mi.dy = abs_y;
+                        input.Anonymous.mi.dwFlags = flags;
                     }
                     InputEvent::ResetState => {
                         input.r#type = INPUT_KEYBOARD;
@@ -608,6 +636,43 @@ impl InputEvent {
                                 event_up.post(CGEventTapLocation::HID);
                             }
                         }
+                    }
+                }
+                InputEvent::PenMove { x, y, pressure, tilt_x, tilt_y } => {
+                    // Apple Pencil / 觸控筆壓力感應：以 CGEvent 合成帶壓力的 Tablet 事件
+                    // kCGMouseEventSubtype = 38, NSTabletPointEventSubtype = 1
+                    // kCGTabletEventPointPressure = 14 (0-65535)
+                    // kCGTabletEventTiltX = 15, kCGTabletEventTiltY = 16 (-32767..32767)
+                    let tx = TARGET_MONITOR_X.load(Ordering::Relaxed);
+                    let ty = TARGET_MONITOR_Y.load(Ordering::Relaxed);
+                    let tw = TARGET_MONITOR_W.load(Ordering::Relaxed);
+                    let th = TARGET_MONITOR_H.load(Ordering::Relaxed);
+                    let point = if tw > 0 && th > 0 {
+                        core_graphics::geometry::CGPoint::new(
+                            tx as f64 + *x as f64 * tw as f64,
+                            ty as f64 + *y as f64 * th as f64,
+                        )
+                    } else {
+                        core_graphics::geometry::CGPoint::new(*x as f64 * screen_w, *y as f64 * screen_h)
+                    };
+                    set_global_cursor(*x, *y);
+
+                    let evt_type = if LEFT_BTN_DOWN.load(Ordering::Relaxed) {
+                        CGEventType::LeftMouseDragged
+                    } else {
+                        CGEventType::MouseMoved
+                    };
+                    if let Ok(event) = CGEvent::new_mouse_event(source, evt_type, point, CGMouseButton::Left) {
+                        // NSTabletPointEventSubtype = 1，讓 macOS app 識別為觸控筆事件
+                        event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_SUB_TYPE, 1);
+                        // TABLET_EVENT_POINT_PRESSURE (crate field 19): 0-65535
+                        event.set_integer_value_field(core_graphics::event::EventField::TABLET_EVENT_POINT_PRESSURE, *pressure as i64);
+                        // TABLET_EVENT_TILT_X/Y (fields 20/21): map i8 -90..90 → -32767..32767
+                        let tilt_x_val = (*tilt_x as i64) * 32767 / 90;
+                        let tilt_y_val = (*tilt_y as i64) * 32767 / 90;
+                        event.set_integer_value_field(core_graphics::event::EventField::TABLET_EVENT_TILT_X, tilt_x_val);
+                        event.set_integer_value_field(core_graphics::event::EventField::TABLET_EVENT_TILT_Y, tilt_y_val);
+                        event.post(CGEventTapLocation::HID);
                     }
                 }
                 InputEvent::ResetState => {

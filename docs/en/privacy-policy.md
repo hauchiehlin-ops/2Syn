@@ -1,51 +1,75 @@
 # 2syn Privacy Policy
 
-**Last Updated:** May 26, 2026
+**Last Updated:** June 26, 2026
 
-Welcome to 2syn ("Software" or "We"). This Privacy Policy explains how we collect, use, process, and protect your data. 2syn is a decentralized, high-performance remote desktop solution featuring end-to-end encryption. **We respect your privacy to the highest degree: We DO NOT intercept, store, or analyze your remote desktop screens, audio, or input data.**
+Welcome to **2syn** (hereinafter referred to as "the Software" or "we"). This Privacy Policy explains how the Software collects, uses, and protects your data.
 
-## 1. Information We Collect and Its Purpose
+**Core commitment: We do not intercept, store, or analyze any remote desktop screen, audio, or input data.**
 
-To ensure the legitimacy of software licensing and to provide basic connectivity services, we collect only the absolute minimum necessary information:
+---
 
-1. **Hardware ID (HWID)**:
-   * **Purpose**: Used for device binding of your Buyout License Key and anti-piracy verification.
-   * **Handling**: This code is a one-way hash generated from your local hardware attributes. We cannot reverse-engineer this to determine your real device serial numbers or personal identity. This information is only transmitted during signaling server verification.
-2. **Signaling Exchange Data (SDP/ICE Candidates)**:
-   * **Purpose**: Exclusively used to help your two devices (Host and Client) traverse firewalls and establish a WebRTC Peer-to-Peer (P2P) connection.
-   * **Handling**: This transient network data (including local or public IPs) is instantly destroyed after the connection is established. **Our Signaling Server NEVER logs or persistently stores any network handshake packets.**
+## 1. Data We Collect and Its Purpose
 
-## 2. Information We Do NOT Collect
+To provide basic connectivity services, we collect only the following minimum necessary information:
 
-Based on 2syn's End-to-End Encrypted (E2EE) decentralized architecture, we strictly guarantee the following:
+### 1. Signaling Exchange Data (SDP／ICE Candidates)
+- **Purpose**: To help your two devices (host and client) traverse firewalls and establish a WebRTC end-to-end (P2P) connection.
+- **Handling**: This transient network handshake data (including local or public IPs) is destroyed immediately after the connection is established. **Our signaling server never logs or persistently stores any network handshake packets.**
 
-1. **Remote Screen & Audio**: Your desktop video, webcam, and system audio are transmitted directly Point-to-Point between your devices. No third party (including us) can intercept or decrypt it.
-2. **Keyboard & Mouse Inputs**: All input commands are transmitted locally via P2P.
-3. **Personally Identifiable Information (PII)**: We do not require your name, email address, or phone number for you to use our buyout service.
+### 2. App Preferences
+- **Purpose**: To store your language settings, display mode, and other preferences for automatic application on the next launch.
+- **Handling**: Stored only on your device locally (iOS UserDefaults) and never sent to any server.
 
-## 3. Data Sharing & Third-Party Disclosure
+---
 
-We **NEVER sell, trade, or rent** your information to third parties.
-The only exception: If compelled by law (e.g., a court order), we may legally provide the HWID and license activation logs residing on our authorization server. Please note that we have zero technical ability to provide your remote screen data or transmission content.
+## 2. Data We Do NOT Collect
 
-## 4. Use of STUN/TURN Relay Servers
+Based on 2syn's decentralized E2EE architecture, we strictly guarantee:
 
-To allow devices to traverse complex network environments (e.g., Symmetric NAT), this Software uses public STUN servers by default (e.g., provided by Google) or allows you to configure custom TURN servers. These third-party servers only provide IP resolution and relay encrypted traffic; they cannot decrypt your connection content. Their privacy policies are governed by their respective providers.
+1. **Remote screen, video, and audio**: All streams are transmitted end-to-end directly between your two devices. No third party, including us, can intercept or decrypt them.
+2. **Keyboard, mouse, and touch input**: All input commands are transmitted locally via P2P and do not pass through any server.
+3. **Apple Pencil pressure and tilt data**: Stylus pressure data is transmitted directly between devices and is not retained on any server.
+4. **Personally Identifiable Information (PII)**: The Software does not require you to provide your name, email address, or phone number.
+5. **Location data**: The Software does not access your GPS or precise location.
+6. **Camera or microphone**: The iOS client does not access the camera or microphone.
 
-## 5. Data Security Measures
+---
 
-We have implemented industry-standard security measures:
-* The license verification process uses Ed25519 asymmetric cryptographic signatures.
-* End-to-end communication utilizes WebRTC's built-in DTLS/SRTP bank-grade encryption protocols.
+## 3. Data Sharing and Third-Party Disclosure
+
+We **never sell, trade, or rent** any of your information to third parties.
+
+The only exception: When legally compelled (e.g., by a court order), we may lawfully provide the minimal connection logs (connection timestamps) stored on the signaling server. However, we are technically unable to provide your remote screen or transmitted content.
+
+---
+
+## 4. Use of STUN Servers
+
+The Software uses public STUN servers (e.g., those provided by Google) to help devices discover their public IP addresses for NAT traversal. These servers only provide IP resolution and cannot access your connection content. Their privacy policies are governed by their respective providers.
+
+The Software uses a STUN-only architecture and **does not use TURN relay servers by default**. All connections are direct.
+
+---
+
+## 5. Data Security
+
+- End-to-end communication uses WebRTC's built-in DTLS 1.3 / SRTP encryption protocols.
+- App preferences are stored in the iOS system sandbox and protected by iOS native security.
+
+---
 
 ## 6. Children's Privacy
 
-Our Software is not designed for children under 13. We do not knowingly collect personal information from children under 13.
+The Software is designed for users aged 13 and above. We do not knowingly collect personal information from children under 13.
 
-## 7. Changes to this Policy
+---
 
-We reserve the right to modify this Privacy Policy at any time. For major changes, we will post announcements within the Software or on our official website. Continued use of the Software implies your acceptance of the updated Privacy Policy.
+## 7. Changes to This Policy
+
+If there are significant changes to this policy, we will post an announcement within the Software or on our official website. Continued use of the Software constitutes your acceptance of the updated policy.
+
+---
 
 ## 8. Contact Us
 
-If you have any questions regarding this Privacy Policy, please contact us through our official customer support channels.
+If you have any questions about this Privacy Policy, please contact us via the App Store review page or our official customer support channels.

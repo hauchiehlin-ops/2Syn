@@ -1,52 +1,126 @@
 # 2syn User Manual
 
-Welcome to 2syn! 2syn is a secure remote desktop control system that combines cross-platform native high-performance with WebRTC End-to-End Encryption. This manual will guide you through the initial setup, device pairing, and advanced performance tuning.
+Welcome to **2syn**! 2syn is a high-performance, secure remote desktop system combining WebRTC end-to-end encryption with adaptive bitrate technology, supporting cross-platform connections from macOS/Windows hosts to iOS/macOS clients.
 
-## 1. Quick Start & Device Authorization
+---
 
-### 1.1 Obtain and Enter License Key
-2syn utilizes a one-time buyout license mechanism. When you launch the application for the first time, you will be prompted to enter a License Key.
-1. Launch the 2syn application (Desktop or Mobile).
-2. Enter your key in the input field (For the testing phase, please use: `BUYOUT-KEY-12345`).
-3. The system will automatically capture your local Hardware ID (HWID) and complete the binding process with our signaling server. Each key supports up to 5 simultaneous devices.
+## 1. Connection Pairing
 
-### 1.2 Cross-Device Pairing
-For maximum security, 2syn uses a decentralized P2P architecture. Once both devices are authorized:
-1. **Host and Client**: On the "Connect" field, enter the ID of the Host device you want to control.
-2. **Automatic NAT Traversal**: The system will automatically use STUN servers to detect public IPs on both ends and establish an End-to-End direct channel. You do NOT need to configure Port Forwarding on your router.
+### 1.1 Get the Host ID
+Launch 2syn on the **host** (the computer to be controlled):
+- A 9-digit ID will appear in the「My ID」field at the top of the screen (e.g. `569-639-684`).
+- Click the 📋 button next to the ID to copy it, or click the ⬛ button to display a QR code.
 
-## 2. Interface Operation & Performance Tuning
+### 1.2 Connect from an iOS Device
+1. Launch the 2syn app on iOS.
+2. Manually enter the host ID in the「Connect to」field, or have the host display the QR code and scan it with the iOS native camera — the ID will be filled in automatically.
+3. Tap「Connect」. The system automatically performs NAT traversal via STUN and establishes a direct end-to-end connection — no router Port Forwarding required.
 
-### 2.1 Smart Optimization
-2syn features a built-in AI-level monitoring module. The system automatically detects network Latency (RTT) and Packet Loss every 500 milliseconds:
-* **Smooth Network (Latency < 30ms)**: Automatically switches to ultra-high quality (YUV444 lossless color format) and 144 FPS gaming-level refresh rate.
-* **Congested Network**: The system dynamically scales down the refresh rate (to 60 or 30 FPS) and switches to the YUV420 compression format to ensure uninterrupted connection and lag-free operation.
+---
 
-### 2.2 Collapsible Advanced Control Panel
-To maintain a clean user interface, advanced parameters that affect operation experience are hidden by default in a "Collapsible Panel". Click the gear icon or the "Advanced Settings" button to expand:
-* **Color Format**: Manually force YUV444 (High Quality) or YUV420 (Bandwidth Saving).
-* **Max Refresh Rate (FPS)**: Cap the frame rate transmission to save battery life.
-* **Max Bitrate**: Under mobile networks, you can cap the maximum transmission bandwidth (e.g., 5000 kbps) to prevent data overage.
+## 2. Remote Control
 
-### 2.3 File Transfer
-When the connection quality is stable (P2P mode with low packet loss), the file transfer button unlocks. You can drag and drop or click to transfer files between devices. All transfers are End-to-End Encrypted via WebRTC Data Channels.
+### 2.1 Switching Control Modes
+After connecting, tap the ⚙️ toolbar button in the upper right to expand the panel and switch between two control modes:
 
-## 3. Security & Privacy Features
+| Mode | Description |
+|---|---|
+| **Trackpad** | Drag finger = move cursor; single tap = left click; two-finger scroll = scroll; two-finger tap = right click |
+| **Direct Touch** | Touch coordinates map directly to host screen coordinates |
 
-### 3.1 Privacy Black Screen Mode
-When you are remotely controlling your office or home computer, and you do not want the physical monitor to display your actions to bystanders:
-1. Click the "Privacy Black Screen" button on the control bar.
-2. The system automatically inserts a fully virtual 1080p display via the Virtual Display Driver (IDD) and turns off output to your physical monitor.
+### 2.2 Two-Finger Scroll
+In Trackpad mode, slide two fingers up or down on the screen to send scroll events to the host. Works with all applications.
 
-## 4. Troubleshooting
+### 2.3 Keyboard Input
+1. Tap the keyboard icon in the toolbar to bring up the iOS on-screen keyboard.
+2. A modifier key toolbar (Esc, Tab, ⌃, ⌥, ⌘, ⇧, arrow keys) appears above the keyboard for sending keyboard shortcuts.
+3. Tap a modifier key once to lock it (lights up blue); it unlocks automatically after one key press. Tap again to unlock manually.
 
-**Q: The connection is stuck at "Handshaking SDP/ICE..."?**
-A: This usually means both devices are behind a strict firewall (Symmetric NAT), causing P2P hole-punching to fail.
-* **Solution**: 2syn supports TURN server relay fallback. In the final production version, the system will automatically downgrade to relay mode. During development, please ensure at least one device is using a less restrictive network (like 4G/5G mobile data or a standard home Wi-Fi).
+### 2.4 Apple Pencil Pressure Sensing
+On an iPad with Apple Pencil support, write directly on the screen with the Pencil. 2syn transmits:
+- Pressure value (0–100%)
+- Tilt angle (X/Y axis ±90°)
 
-**Q: I get the error "Maximum authorized devices reached (err_limit_exceeded)"?**
-A: Your License Key is already bound to 5 devices.
-* **Solution**: Go to a device you no longer use and click "Unbind". Note: Unbinding has a security cooldown period to prevent license abuse.
+to the host in real time. Professional apps such as Procreate and Adobe Photoshop will receive full pressure and tilt data.
 
-**Q: The screen looks blurry or the colors are washed out?**
-A: The system may have detected network instability and automatically enabled the `YUV420` fallback mode. If you are certain your bandwidth is sufficient, you can go into Advanced Settings and manually force it back to `YUV444`.
+---
+
+## 3. Audio Streaming
+
+The host's system audio (including app sounds, music, etc.) is automatically streamed to your iOS device.
+
+- **No sound on iOS**: Tap the「🔇 Tap to enable audio」button in the upper right (iOS browser security policy requires a user gesture before audio playback).
+- After connecting, tap「🔊 Mute」to toggle mute.
+
+---
+
+## 4. Clipboard Sync
+
+- **Host → iOS**: After copying text on the host, a Toast notification appears at the bottom of the iOS screen showing a preview of the copied content. Tap the Toast to write the text to the iOS local clipboard.
+- **iOS → Host**: Type in the iOS keyboard, then long-press to paste — the input is sent directly to the focused field on the host.
+
+---
+
+## 5. Display Size
+
+The「🔍 Original Size / Fit Screen」button in the toolbar switches between two display modes:
+
+| Mode | Description |
+|---|---|
+| **Fit Screen** | Host screen scaled to fill the entire iOS display |
+| **Original Size** | 1:1 pixel display with pan support, ideal for precision work |
+
+---
+
+## 6. Adaptive Bitrate (ABR)
+
+2syn has built-in automatic quality adjustment, detecting network RTT and packet loss every 500 ms:
+
+| Network Condition | Automatic Adjustment |
+|---|---|
+| Good (RTT < 80 ms, loss < 1%) | High quality, high frame rate |
+| Fair | Medium quality |
+| Poor (RTT > 200 ms or loss > 5%) | Reduced frame rate and bitrate to maintain connection stability |
+
+The dot indicator in the upper right (green / yellow / red) reflects connection quality in real time.
+
+---
+
+## 7. Privacy Screen Mode
+
+Check「Privacy Mode」in the **host** 2syn interface to black out the host screen, preventing bystanders from seeing your operations. Remote control continues to function normally.
+
+---
+
+## 8. File Transfer
+
+When the connection is stable (P2P direct connection), drag files into the 2syn window from either the iOS side or the host side to trigger a transfer. All transfers are end-to-end encrypted via WebRTC Data Channel.
+
+---
+
+## 9. Disconnect and Reconnect
+
+Tap ⚙️ → 「🚪 Sign out」in the toolbar to end the session. If the connection drops unexpectedly, the app will show a prompt — re-enter the ID to reconnect.
+
+---
+
+## 10. FAQ
+
+**Q: The connection is stuck at "Connecting..." and cannot be established?**
+A: Both parties being behind strict corporate firewalls (Symmetric NAT) may cause NAT traversal to fail. Try switching one side to a 4G/5G mobile network and retry.
+
+**Q: No audio on iOS?**
+A: Tap the「🔇 Tap to enable audio」button on screen. iOS requires a user gesture to unlock audio playback.
+
+**Q: Blurry or laggy video?**
+A: Adaptive Bitrate (ABR) automatically adjusts quality based on network conditions. Quality drops to maintain smoothness on poor networks and recovers automatically when the network improves.
+
+**Q: Apple Pencil has no pressure effect?**
+A: Ensure 2syn on your iPad is the latest version and that 2syn on the host has been updated to v3.5.11 or later.
+
+**Q: Cannot connect after scanning the QR code?**
+A: The QR code only contains the ID. Confirm that 2syn on the host is running and showing the same ID.
+
+---
+
+*2syn v3.5.11 · Support: contact us via App Store reviews or official channels*

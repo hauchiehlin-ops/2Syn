@@ -1,40 +1,72 @@
-# 2syn App Store / Google Play Listing Copy
+# 2syn — App Store Listing
 
 ## App Name
-2syn - Ultra-Smooth & Secure Remote Desktop
+2syn - Secure Remote Desktop
 
-## Subtitle / Short Description
-End-to-End Encrypted, 144Hz Gaming-Grade Refresh Rate. Seamlessly control your PC across platforms.
+## Subtitle (30 chars max)
+E2E Encrypted · P2P Direct · Low Latency
 
-## Full Description
+## Full Description (4000 chars max)
 
-**Redefining the Remote Desktop Experience**
-2syn is a remote desktop application engineered for those who demand ultimate performance and the highest privacy standards. Whether you are working remotely accessing company data, or playing PC games on your phone, 2syn provides a zero-latency experience just like sitting right in front of your computer.
+**Take full control of your Mac or PC — from anywhere, securely.**
 
-🚀 **Extreme Performance, Gaming-Grade Smoothness**
-* **144Hz Support**: Break the stuttering limits of traditional remote software and enjoy silky-smooth ultra-high refresh rates.
-* **YUV444 True Color**: Supports lossless color formats, ensuring no color distortion for remote photo editing or video production.
-* **Smart Network Optimization**: Built-in network monitoring automatically adjusts the bitrate and FPS when the network fluctuates, ensuring your connection never drops.
-
-🔒 **Military-Grade Privacy, Zero Data Leakage**
-* **100% Decentralized P2P Connection**: All your screens, keyboard/mouse inputs, and audio are transmitted via WebRTC End-to-End Encryption (E2EE) directly between your devices.
-* **Zero Data Retention**: Our signaling servers are strictly used to help establish the connection. We **NEVER** intercept, view, or store your screen or privacy data.
-* **Privacy Black Screen Mode**: Remotely turn off your physical monitor with one click and switch to a virtual display to prevent bystanders from snooping on your screen.
-
-💻 **One-Time Buyout, All Platforms Supported**
-* Say goodbye to endless subscription fees! 2syn uses a one-time buyout license. One key can be bound to up to 5 devices.
-* Perfectly supports seamless cross-platform remote control between Windows, macOS, Linux, iOS, and Android.
-
-🛠️ **Advanced & Professional Features**
-* Two-way drag-and-drop file transfer across devices.
-* Custom bitrate limits to prevent mobile data overage.
-* Smart fault tolerance supporting STUN and TURN server NAT traversal.
+2syn is a professional remote desktop app built on WebRTC peer-to-peer technology with end-to-end encryption. Everything you see, type, or hear streams directly between your devices — nothing passes through a server.
 
 ---
-**Privacy Policy & Terms of Service**
-* By downloading and using this application, you agree to our Terms of Service and Privacy Policy.
-* Privacy Policy: [Link to Website or GitHub]
-* Terms of Service: [Link to Website or GitHub]
+
+🔗 **Instant Pairing**
+Tap the QR code button on your host, scan it on your iPhone or iPad, and connect in seconds. No accounts, no subscriptions — just enter the 9-digit ID or scan.
+
+🔒 **True End-to-End Encryption**
+Your screen, audio, and input travel directly between devices via DTLS 1.3 / SRTP. Not even we can see your session.
+
+📱 **Built for iOS**
+• Trackpad mode: natural drag-to-move, tap-to-click, two-finger scroll
+• Direct touch mode: touch maps 1:1 to the host screen
+• Full modifier key bar (Ctrl, Alt, Cmd, Shift, Esc, Tab, arrows)
+• Apple Pencil full pressure & tilt support — Procreate, Photoshop ready
+
+🔊 **System Audio Streaming**
+Hear everything happening on your Mac or PC in real time. Music, notifications, video — it all comes through.
+
+📋 **Clipboard Sync**
+Copy text on your host, see a preview toast on iOS, tap to paste into your local clipboard. Effortless bi-directional sync.
+
+⚡ **Adaptive Quality (ABR)**
+Network quality is monitored every 500 ms. Frame rate and bitrate adjust automatically so your session stays smooth even on congested connections.
+
+🕶️ **Privacy Black Screen**
+Enable Privacy Mode on the host to black out its physical display. Keep your work private from anyone in the room while you stay in control remotely.
+
+📂 **File Transfer**
+Drag and drop files between your iOS device and host over an encrypted WebRTC data channel.
+
+🌐 **P2P Direct — No Relay Required**
+2syn uses STUN-only NAT traversal. Your data never routes through a relay server.
+
+---
+
+**Languages Supported**
+English, 繁體中文, 简体中文, 日本語, 한국어, Bahasa Melayu, Bahasa Indonesia, Deutsch, Español, Русский, ภาษาไทย
+
+---
+
+**Privacy & Security**
+2syn collects no screen data, no audio, no keystrokes. The only data that ever touches our server is the temporary SDP/ICE handshake needed to establish your P2P connection — deleted immediately after.
+
+Full Privacy Policy: https://github.com/drbarretlin-code/2syn/blob/main/docs/en/privacy-policy.md
 
 ## Keywords
-Remote Desktop, PC Remote, P2P, E2EE, WebRTC, Gaming Remote, Cross-Platform, Privacy Protection, Virtual Display, File Transfer, Screen Sharing
+remote desktop, screen share, pc remote, mac remote, WebRTC, P2P, encrypted, Apple Pencil, trackpad, file transfer
+
+## Support URL
+https://github.com/drbarretlin-code/2syn
+
+## Age Rating
+4+
+
+## Category
+Productivity
+
+## Pricing
+Paid (one-time purchase)
