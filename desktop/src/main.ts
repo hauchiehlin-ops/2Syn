@@ -3420,7 +3420,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
   const keyboardBar = document.getElementById("mobile-keyboard-bar") as HTMLDivElement;
   const mobileKeyboardInput = document.getElementById("mobile-keyboard-input") as HTMLInputElement;
-  const btnKeyboardSend = document.getElementById("btn-mobile-keyboard-send") as HTMLButtonElement;
+
   let isKeyboardActive = false;
   let openMobileKeyboard: (() => void) | null = null;
   // 釋放所有被按住的桌面修飾鍵（⌘⌃⌥⇧），供關閉鍵盤/失焦/斷線等路徑呼叫，避免修飾鍵卡死
@@ -4884,7 +4884,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   };
 
   // --- 行動端 Keyboard Bar 邏輯 ---
-  if (keyboardBar && mobileKeyboardInput && btnKeyboardSend) {
+  if (keyboardBar && mobileKeyboardInput) {
     let isResetting = false;
     let previousValueLength = 0;
 
@@ -4984,19 +4984,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       const payload = new TextEncoder().encode(text);
       sendInputPacket(buildInputPacket(0x08, payload));
     };
-
-    const sendText = () => {
-      const val = mobileKeyboardInput.value.replace(/​/g, "");
-      if (val.length > 0) {
-        sendTextChunk(val);
-        resetInput();
-      }
-    };
-
-    // 送出鈕保留為手動 flush（live 模式下欄位通常已即時清空）
-    btnKeyboardSend.addEventListener("click", () => {
-      sendText();
-    });
 
     // =========================================================================
     // 即時輸入（Live Typing）：邊打邊送到遠端焦點欄位

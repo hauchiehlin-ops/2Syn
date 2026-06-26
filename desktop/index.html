@@ -7,7 +7,7 @@
   <meta name="description" content="2syn_Duel — Secure WebRTC remote desktop with end-to-end encryption.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>2syn_Duel v3.5.7</title>
+  <title>2syn_Duel v3.5.10</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
@@ -62,14 +62,11 @@
       <button class="modkey" data-key="40">↓</button>
       <button class="modkey" data-key="39">→</button>
     </div>
-    <!-- 文字輸入列 -->
-    <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; width: 100%;">
-      <input type="text" id="mobile-keyboard-input" inputmode="text" placeholder="傳送文字..." style="flex: 1; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 20px; padding: 10px 16px; color: white; font-size: 16px; outline: none; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); transition: border-color 0.2s; touch-action: auto;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
-      <button id="btn-mobile-keyboard-send" style="background: var(--accent-blue); border: none; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.5); transition: transform 0.1s, opacity 0.2s;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-      </button>
-    </div>
   </div>
+  <!-- 隱形輸入框：iOS 需要 focus() 一個 input 元素才能彈出系統鍵盤，本身不可見 -->
+  <input id="mobile-keyboard-input" type="text" inputmode="text"
+    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+    style="position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:-9999px;left:-9999px;" />
   <!-- 行動端磨砂玻璃懸浮控制面板 -->
   <div id="mobile-control-orb" style="display: none !important; position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1100; flex-direction: column; align-items: center; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); touch-action: manipulation;">
     <!-- 懸浮控制柄 / 藥丸型手把 (Notch Handle) -->
@@ -111,7 +108,7 @@
     <header class="app-header">
       <div class="logo">
         <span class="logo-symbol">⚡</span>
-        <span class="logo-text" id="app-logo-text" style="display: flex; align-items: baseline; gap: 8px;">2syn_Duel v3.5.7</span>
+        <span class="logo-text" id="app-logo-text" style="display: flex; align-items: baseline; gap: 8px;">2syn_Duel v3.5.10</span>
       </div>
       <div class="header-actions">
         <button id="btn-show-help" class="help-trigger-btn" title="Help & Privacy">🛟</button>
