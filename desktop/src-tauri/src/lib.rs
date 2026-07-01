@@ -73,6 +73,24 @@ async fn delete_static_password() -> Result<(), String> {
     SecureStorage::delete_secret(STATIC_PWD_KEY).map_err(|e| e.to_string())
 }
 
+/// 開啟 macOS「系統設定 > 一般 > 登入項目與延伸功能」面板，
+/// 方便使用者設定「自動登入」，避免被控端登出後遠端連線中斷。
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn open_login_items_settings() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
+        .status()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+async fn open_login_items_settings() -> Result<(), String> {
+    Err("僅支援 macOS".to_string())
+}
+
 /// 讀取系統剪貼簿內容（純文字）
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
@@ -1216,6 +1234,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_device_hwid,
+            open_login_items_settings,
             set_static_password,
             verify_static_password,
             check_has_static_password,

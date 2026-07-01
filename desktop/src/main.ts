@@ -298,6 +298,11 @@ function translateLogMessage(msg: string, tFunc: (key: string) => string): strin
   const originalWarn = console.warn;
   const originalError = console.error;
   
+  // Expose original methods for debugging and logging bypass
+  (console as any).originalLog = originalLog;
+  (console as any).originalWarn = originalWarn;
+  (console as any).originalError = originalError;
+  
   function formatArg(a: any) {
     if (a instanceof Error) {
       return `${a.name}: ${a.message}\n${a.stack}`;
@@ -403,6 +408,7 @@ let dataChannelUnreliable: RTCDataChannel | null = null;
 let dataChannelClipboard: RTCDataChannel | null = null;
 let dataChannelFileTransfer: RTCDataChannel | null = null;
 let dataChannelSystemControl: RTCDataChannel | null = null;
+let remoteHostOs: "" | "macos" | "windows" | "linux" = ""; // 被控端 OS（host_info 訊息回報）
 let availableMonitors: any[] = [];
 let currentMonitorIndex: number = 0;
 let _clipboardPollInterval: ReturnType<typeof setInterval> | null = null;
@@ -1977,6 +1983,10 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
       dataChannelControl = ch;
       bindControlChannel(ch);
     }
+    // 被控端（Rust host）自建的 system-control 通道：接收 host_info / monitor_list
+    if (ch.label === "system-control") {
+      bindSystemControlChannel(ch);
+    }
   };
 
   // 接收遠端視訊軌道 (只會在 iPhone / Client 端發生，因為 Mac 是 Host)
@@ -2364,6 +2374,10 @@ function bindSystemControlChannel(ch: RTCDataChannel) {
   ch.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
+      if (msg.type === "host_info") {
+        remoteHostOs = msg.os || "";
+        console.log("[system-control] 被控端 OS:", remoteHostOs);
+      }
       if (msg.type === "monitor_list") {
         availableMonitors = msg.monitors;
         currentMonitorIndex = msg.current;
@@ -2385,6 +2399,7 @@ function bindSystemControlChannel(ch: RTCDataChannel) {
 
 // 重置連線相關 UI 狀態
 function resetConnectionUI() {
+  remoteHostOs = ""; // 避免跨連線沿用上一台被控端的 OS 資訊
   const btnConnect = document.getElementById("btn-connect");
   const btnText = document.getElementById("txt-btn-connect");
   if (btnConnect) btnConnect.removeAttribute("disabled");
@@ -2529,8 +2544,43 @@ function initConnectButton() {
 
   if (isDesktopTauri()) {
     // 監聽來自 Rust 的影像擷取與編碼狀態 (例如沒有權限、編碼失敗等)
+  let loggedOutWarningShown = false;
   listen<string>('rust-video-status', (event) => {
+    if (event.payload.includes('[DIAG]')) {
+      // 這是正常運作的診斷效能資訊，為避免洗板系統日誌及造成使用者誤判恐慌，僅輸出至開發者主控台，不寫入系統日誌
+      if ((console as any).originalLog) {
+        (console as any).originalLog(`[WebRTC-Video] ${event.payload}`);
+      } else {
+        console.debug(`[WebRTC-Video] ${event.payload}`);
+      }
+      return;
+    }
     console.error(`[WebRTC-Video] 影像處理發生問題: ${event.payload}`);
+    if (event.payload.startsWith('LOGGED_OUT:') && !loggedOutWarningShown) {
+      loggedOutWarningShown = true;
+      const container = document.getElementById('toast-container');
+      if (container) {
+        const toast = document.createElement('div');
+        toast.className = 'toast-msg';
+        toast.style.cursor = 'default';
+        toast.innerHTML = `
+          <div>偵測到被控端可能已登出，遠端畫面已無法擷取。</div>
+          <div style="margin-top:4px;">請改用「鎖定螢幕」而非「登出」；或於被控端啟用「自動登入」維持連線。</div>
+          <button id="btn-open-login-items" style="margin-top:8px;">開啟自動登入設定</button>
+        `;
+        container.appendChild(toast);
+        toast.querySelector('#btn-open-login-items')?.addEventListener('click', () => {
+          invoke('open_login_items_settings').catch((e) => console.warn('open_login_items_settings failed:', e));
+        });
+        setTimeout(() => {
+          toast.style.opacity = '0';
+          toast.style.transform = 'translateY(-20px)';
+          toast.style.transition = 'all 0.3s ease';
+          setTimeout(() => toast.remove(), 300);
+        }, 15000);
+        setTimeout(() => { loggedOutWarningShown = false; }, 60000);
+      }
+    }
   });
 
   listen<any>('rust-webrtc-state', (event) => {
@@ -3459,10 +3509,14 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   let isKeyboardActive = false;
   let openMobileKeyboard: (() => void) | null = null;
+  let closeMobileKeyboard: (() => void) | null = null;
   // 釋放所有被按住的桌面修飾鍵（⌘⌃⌥⇧），供關閉鍵盤/失焦/斷線等路徑呼叫，避免修飾鍵卡死
   let releaseAllHeldMods: (() => void) | null = null;
   // 觸發鍵盤的那一下點擊在螢幕上的 Y 座標（client px）；鍵盤彈出時據此把畫面上移到剛好露出焦點
   let kbFocusClientY = -1;
+  // visualViewport 平移重算函式的引用（於下方 visualViewport 區塊賦值），
+  // 供「鍵盤開著時點擊新焦點」等場景立即重算畫面上移量
+  let updateKeyboardPan: (() => void) | null = null;
   let lastBackspaceTime = 0;
   let isComposing = false;
   let lastValue = ""; // 用於追蹤鍵盤增量輸入框內容
@@ -3573,6 +3627,17 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       cycleDisplayMode();
       // applyDisplayMode 只會更新 btnDisplayMode 的文字，這裡同步浮動鈕
       if (btnDisplayMode) btnDisplayModeFloat.textContent = btnDisplayMode.textContent;
+    };
+  }
+
+  const btnToggleKeyboardFloat = document.getElementById("btn-toggle-keyboard-float") as HTMLButtonElement;
+  if (btnToggleKeyboardFloat) {
+    btnToggleKeyboardFloat.onclick = () => {
+      if (isKeyboardActive) {
+        closeMobileKeyboard?.();
+      } else {
+        openMobileKeyboard?.();
+      }
     };
   }
 
@@ -3843,29 +3908,43 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let lastTouchY = 0;
   let touchStartPos = { x: 0, y: 0 };
 
+  // 取得目前「點擊焦點」的螢幕 Y 座標（client px、未平移座標系），供鍵盤彈出時上移畫面用：
+  // Direct Touch 模式 = 手指點擊位置；Trackpad 模式 = 合成游標的視覺位置。
+  // 量測值落在「已平移」的畫面上，需扣除 keyboardOffsetUpdateY 還原為未平移座標，
+  // 否則鍵盤開著時再點新焦點會少移（上移量以未平移座標為基準計算）。
+  const getFocusClientY = (): number => {
+    if (isDirectTouchMode) {
+      return lastTapPos.y > 0 ? lastTapPos.y - keyboardOffsetUpdateY : -1;
+    }
+    const rect = videoEl.getBoundingClientRect();
+    if (!videoEl.videoWidth || !videoEl.videoHeight || !rect.height) return -1;
+    const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+    const containerRatio = rect.width / rect.height;
+    let renderedHeight: number, offsetY = 0;
+    if (containerRatio > videoRatio) {
+      renderedHeight = rect.height;
+    } else {
+      renderedHeight = rect.width / videoRatio;
+      offsetY = (rect.height - renderedHeight) / 2;
+    }
+    return rect.top + offsetY + trackpadCursorY * renderedHeight - keyboardOffsetUpdateY;
+  };
+
   const sendDoubleClickSequence = () => {
     triggerHaptic("medium");
+    // 呼叫此函式的手勢（tap-tap）中，第一次 tap 已即時送出一次完整單擊，
+    // 這裡只需補送「第二擊」：被控端（macOS 依 clickState 連擊追蹤、Windows
+    // 依系統雙擊計時）即可判定為雙擊。若補送兩擊會累積成三連擊，
+    // 導致 Finder / 檔案總管雙擊開啟資料夾失效。
     const payloadDown = new Uint8Array(1);
     payloadDown[0] = 1; // Left click down
     sendInputPacket(buildInputPacket(0x02, payloadDown));
-    
+
     setTimeout(() => {
       const payloadUp = new Uint8Array(1);
       payloadUp[0] = 1; // Left click up
       sendInputPacket(buildInputPacket(0x03, payloadUp));
-      
-      setTimeout(() => {
-        const payloadDown2 = new Uint8Array(1);
-        payloadDown2[0] = 1; // Left click down
-        sendInputPacket(buildInputPacket(0x02, payloadDown2));
-        
-        setTimeout(() => {
-          const payloadUp2 = new Uint8Array(1);
-          payloadUp2[0] = 1; // Left click up
-          sendInputPacket(buildInputPacket(0x03, payloadUp2));
-          console.log("[Gesture] 智慧雙擊序列發送完成");
-        }, 60);
-      }, 60);
+      console.log("[Gesture] 雙擊第二擊發送完成");
     }, 60);
   };
 
@@ -4067,13 +4146,15 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   // --- 滑鼠事件對應 (Pointer Lock 模式) ---
   let syntheticCursorPercentX = 0.5;
   let syntheticCursorPercentY = 0.5;
+  // iOS Safari 不支援 Pointer Lock，第一次失敗後設旗標避免重複嘗試
+  let pointerLockUnavailable = false;
 
   videoEl.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "touch" || e.pointerType === "pen") return;
     e.preventDefault();
     videoContainer?.focus();
-    if (!isDirectTouchMode && document.pointerLockElement !== videoEl) {
-      videoEl.requestPointerLock().catch(() => {});
+    if (!isDirectTouchMode && !pointerLockUnavailable && document.pointerLockElement !== videoEl) {
+      videoEl.requestPointerLock().catch(() => { pointerLockUnavailable = true; });
     }
     const payload = new Uint8Array(1);
     if (e.button === 0) payload[0] = 1;
@@ -4160,9 +4241,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
       x = Math.max(0, Math.min(1, x));
       y = Math.max(0, Math.min(1, y));
-      
+
       // 移除智能磁吸，提供完全原生的絕對座標映射
-      
+
       pendingMouseMoveX = x;
       pendingMouseMoveY = y;
       triggerMoveRaf();
@@ -4175,7 +4256,13 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
       currentCursorPercentX = x;
       currentCursorPercentY = y;
-      // 實體滑鼠不再更新與顯示合成游標，直接依賴原生游標
+      // 同步 synthetic cursor 位置，避免日後切換到 Pointer Lock 模式時產生跳位
+      syntheticCursorPercentX = x;
+      syntheticCursorPercentY = y;
+      // Pointer Lock 不可用時（如 iOS），顯示合成游標 overlay 以提供視覺回饋
+      if (pointerLockUnavailable) {
+        updateCursorOverlay(x, y);
+      }
     }
   });
 
@@ -4733,9 +4820,14 @@ function setupInputControl(videoEl: HTMLVideoElement) {
               payloadUp[0] = 1;
               sendInputPacket(buildInputPacket(0x03, payloadUp));
             }, 60);
-            
+
             lastTapTime = now;
             lastTapPos = { x: endX, y: endY };
+            // 鍵盤開著時點擊新焦點：更新焦點 Y 並立即重算畫面上移量
+            if (isKeyboardActive) {
+              kbFocusClientY = getFocusClientY();
+              if (updateKeyboardPan) updateKeyboardPan();
+            }
           }
         }
       } else {
@@ -4768,12 +4860,17 @@ function setupInputControl(videoEl: HTMLVideoElement) {
                   sendInputPacket(buildInputPacket(0x03, payloadUp));
                 }, 20);
 
-                // 單指點擊自動啟動鍵盤（虛擬或外接鍵盤皆適用），並記下點擊 Y 供自適應上移
-                kbFocusClientY = endY;
-                if (openMobileKeyboard) openMobileKeyboard();
+                // 註：先前曾在此處「單指點擊」就自動彈出虛擬鍵盤，
+                // 但軌跡板模式下任何一次點擊（點按鈕、點桌面圖示…）都會誤觸鍵盤，
+                // 嚴重壓縮可視範圍。改為僅透過工具列「⌨️ Keyboard」按鈕明確開啟。
 
                 lastTapTime = now;
                 lastTapPos = { x: endX, y: endY };
+                // 鍵盤開著時點擊新焦點：更新焦點 Y（軌跡板模式取游標位置）並立即重算上移量
+                if (isKeyboardActive) {
+                  kbFocusClientY = getFocusClientY();
+                  if (updateKeyboardPan) updateKeyboardPan();
+                }
               }
             }
           }
@@ -4786,7 +4883,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
       initialPinchDistance = -1;
       touchStartTime = 0;
-      lastTapTime = now;
+      // 注意：不在此無條件覆寫 lastTapTime。單擊分支已自行記錄，
+      // 雙擊分支則刻意重設為 0 防止第三次 tap 再串成一次雙擊。
       lastTouchX = 0;
       lastTouchY = 0;
       maxTouches = 0;
@@ -4857,15 +4955,14 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     e.preventDefault();
     const payload = new Uint8Array(4);
     const view = new DataView(payload.buffer);
-    const dx = Math.round(e.deltaX * -1); 
+    const dx = Math.round(e.deltaX * -1);
     const dy = Math.round(e.deltaY * -1);
-    
+
     view.setInt16(0, dx, false);
     view.setInt16(2, dy, false);
     sendInputPacket(buildInputPacket(0x04, payload)); // 0x04 is MouseScroll
-
-    // 觸發視覺預測 (Time Warping)
-    applyTimeWarping(-e.deltaX * 0.5, -e.deltaY * 0.5); // 0.5 為體感係數
+    // 滑鼠滾輪不做 Time Warping：applyTimeWarping 是給觸控平移用的，
+    // 在 wheel 事件呼叫會把 <video> 元素整個位移，造成畫面跳動
   }, { passive: false });
 
   const codeToKeyCode: Record<string, number> = {
@@ -4896,6 +4993,18 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   const activeKeys = new Set<string>();
 
+  // IME 組字完成 → 用 TextInput(0x08) 送出 Unicode 字元，繞過 keycode 限制
+  document.addEventListener("compositionend", (e) => {
+    if (!videoContainer || videoContainer.style.display === "none") return;
+    if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") return;
+    const text = (e as CompositionEvent).data;
+    if (!text) return;
+    const encoded = new TextEncoder().encode(text);
+    const payload = new Uint8Array(encoded.length);
+    payload.set(encoded);
+    sendInputPacket(buildInputPacket(0x08, payload));
+  });
+
   // 攔截鍵盤輸入 (直通 Scan Code 繞過輸入法)
   document.addEventListener("keydown", (e) => {
     if (!videoContainer || videoContainer.style.display === "none") return;
@@ -4903,14 +5012,21 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       // 正在輸入欄位時，交由輸入法與虛擬鍵盤處理
       return;
     }
-    
-    e.preventDefault(); 
-    
+
+    // IME 組字中（e.isComposing / keyCode 229）：放行讓系統輸入法處理，
+    // 組字結果由 compositionend 送出，不在此送原始 keycode
+    if (e.isComposing || e.keyCode === 229) return;
+
+    e.preventDefault();
+
     const code = e.code || `Key_${e.keyCode}`;
-    
-    // 防重複觸發 (OS Key Repeat)
-    if (activeKeys.has(code)) return;
-    activeKeys.add(code);
+
+    // 非 repeat 事件才加入 activeKeys（防 ghosting）；
+    // repeat 事件正常送出，讓遠端可以感應到按住按鍵（Key Repeat）
+    if (!e.repeat) {
+      if (activeKeys.has(code)) return;
+      activeKeys.add(code);
+    }
 
     const payload = new Uint8Array(3);
     const view = new DataView(payload.buffer);
@@ -4940,8 +5056,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "INPUT") {
       return;
     }
-    
-    e.preventDefault(); 
+    if (e.isComposing || e.keyCode === 229) return;
+
+    e.preventDefault();
     const code = e.code || `Key_${e.keyCode}`;
     activeKeys.delete(code);
 
@@ -5071,6 +5188,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       keyboardBar.style.opacity = "1";
       keyboardBar.style.pointerEvents = "auto";
 
+      // 記錄目前焦點（最後一次點擊 / 游標）的螢幕 Y：鍵盤彈出後
+      // visualViewport 回調據此把畫面上移，避免鍵盤遮住正在輸入的欄位
+      kbFocusClientY = getFocusClientY();
+
       // iOS Safari 強制要求：focus() 必須在使用者手勢的同步呼叫鏈內，
       // 且必須在任何 setTimeout 之前執行，否則虛擬鍵盤不會彈出。
       mobileKeyboardInput.focus();
@@ -5078,6 +5199,38 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       // focus 之後再重設 input 值（不影響鍵盤彈出）
       resetInput();
     };
+
+    closeMobileKeyboard = () => {
+      isKeyboardActive = false;
+      if (releaseAllHeldMods) releaseAllHeldMods();
+      keyboardBar.style.visibility = "hidden";
+      keyboardBar.style.opacity = "0";
+      keyboardBar.style.pointerEvents = "none";
+      const container = document.getElementById("remote-video-container");
+      if (container) {
+        container.style.height = "100vh";
+        container.style.top = "0px";
+      }
+      keyboardBar.style.top = "auto";
+      keyboardBar.style.bottom = "0";
+      kbFocusClientY = -1;
+      keyboardOffsetUpdateY = 0;
+      applyVideoTransform();
+      mobileKeyboardInput.blur();
+    };
+
+    // 鍵盤改為僅能透過此按鈕明確開關，不再由單指點擊隱性觸發（避免操作軌跡板時誤彈出鍵盤）
+    const btnToggleKeyboard = document.getElementById("btn-toggle-keyboard") as HTMLButtonElement;
+    if (btnToggleKeyboard) {
+      btnToggleKeyboard.onclick = (e) => {
+        e.stopPropagation();
+        if (isKeyboardActive) {
+          closeMobileKeyboard?.();
+        } else {
+          openMobileKeyboard?.();
+        }
+      };
+    }
 
     // 把一段文字以 String Packet (0x08) 即時注入被控端目前焦點欄位
     const sendTextChunk = (text: string) => {
@@ -5226,6 +5379,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
     window.visualViewport.addEventListener("resize", onViewportChange);
     window.visualViewport.addEventListener("scroll", onViewportChange);
+    // 供「鍵盤開著時點擊新焦點」等場景立即重算上移量
+    updateKeyboardPan = onViewportChange;
     // 初始化呼叫
     onViewportChange();
   }
@@ -5339,63 +5494,34 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         triggerHaptic("light");
-        
+
         const ctrlCode = 17;
         const winCode = 91;
         const cCode = 67;
         const vCode = 86;
         const aCode = 65;
 
-
+        // 依被控端 OS 送出「單一」正確的快捷鍵組合。
+        // 舊版為了雙系統相容同時送 Cmd+X 與 Ctrl+X，導致部分 app 兩組都觸發
+        // （貼上重複兩次、macOS Terminal 的 Ctrl+C 送出 SIGINT、Windows 的
+        // Win+V 打開剪貼簿歷史）。host_info 未知時保守預設 macOS。
+        const sendShortcut = (keyCode: number) => {
+          const modCode = remoteHostOs === "windows" || remoteHostOs === "linux" ? ctrlCode : winCode;
+          const modBit = modCode === ctrlCode ? 2 : 8;
+          pressKey(modCode, modBit);
+          pressKey(keyCode, modBit);
+          setTimeout(() => {
+            releaseKey(keyCode, modBit);
+            releaseKey(modCode, 0);
+          }, 20);
+        };
 
         if (opt.action === "copy") {
-          // macOS: Cmd + C, Windows: Ctrl + C (同時發送相容雙系統)
-          pressKey(winCode, 8); // Meta Down (Mac Cmd)
-          pressKey(cCode, 8);
-          setTimeout(() => {
-            releaseKey(cCode, 8);
-            releaseKey(winCode, 0);
-            
-            // Windows
-            pressKey(ctrlCode, 2);
-            pressKey(cCode, 2);
-            setTimeout(() => {
-              releaseKey(cCode, 2);
-              releaseKey(ctrlCode, 0);
-            }, 20);
-          }, 20);
+          sendShortcut(cCode);
         } else if (opt.action === "paste") {
-          // macOS: Cmd + V, Windows: Ctrl + V
-          pressKey(winCode, 8);
-          pressKey(vCode, 8);
-          setTimeout(() => {
-            releaseKey(vCode, 8);
-            releaseKey(winCode, 0);
-            
-            // Windows
-            pressKey(ctrlCode, 2);
-            pressKey(vCode, 2);
-            setTimeout(() => {
-              releaseKey(vCode, 2);
-              releaseKey(ctrlCode, 0);
-            }, 20);
-          }, 20);
+          sendShortcut(vCode);
         } else if (opt.action === "selectall") {
-          // macOS: Cmd + A, Windows: Ctrl + A
-          pressKey(winCode, 8);
-          pressKey(aCode, 8);
-          setTimeout(() => {
-            releaseKey(aCode, 8);
-            releaseKey(winCode, 0);
-            
-            // Windows
-            pressKey(ctrlCode, 2);
-            pressKey(aCode, 2);
-            setTimeout(() => {
-              releaseKey(aCode, 2);
-              releaseKey(ctrlCode, 0);
-            }, 20);
-          }, 20);
+          sendShortcut(aCode);
         } else if (opt.action === "rightclick") {
           const payloadDown = new Uint8Array(1);
           payloadDown[0] = 2; // Right click down

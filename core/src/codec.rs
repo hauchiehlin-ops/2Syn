@@ -181,7 +181,13 @@ impl AppleHardwareEncoder {
             VideoCodecType::H265 => videotoolbox::Codec::HEVC,
             _ => videotoolbox::Codec::H264, // 預設使用 H.264
         };
+        let fps = self.params.as_ref().map(|p| p.fps).unwrap_or(30).max(1);
+        let bitrate_kbps = self.params.as_ref().map(|p| p.bitrate_kbps).unwrap_or(4000);
         let builder = CompressionSession::builder(width as i32, height as i32, codec)
+            .with_real_time(true) // 即時擷取場景優先低延遲而非壓縮率，避免編碼耗時超過影格預算拖垮 FPS
+            .with_allow_frame_reordering(false) // 禁止 B-frame 重排，進一步降低編碼延遲
+            .with_expected_frame_rate(fps as f64)
+            .with_average_bit_rate((bitrate_kbps as i32).saturating_mul(1000))
             .with_max_keyframe_interval(30); // 每秒強制產生一個關鍵影格，避免網路掉包導致永久卡死
         if let Ok(session) = builder.build() {
             // 可在此進一步設定 bit rate (例如 session.set_average_bitrate(...))

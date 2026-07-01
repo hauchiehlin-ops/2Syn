@@ -97,21 +97,38 @@ impl AudioStreamer {
             }
 
             if let Some(audio_buffer_list) = sample.audio_buffer_list() {
-                for buffer in audio_buffer_list.iter() {
-                    let data = buffer.data();
-                    // Assume f32 interleaved for ScreenCaptureKit default
-                    // In SCStream, CoreAudio typically returns 32-bit float PCM
-                    let floats = unsafe {
-                        std::slice::from_raw_parts(
-                            data.as_ptr() as *const f32,
-                            data.len() / 4
-                        )
-                    };
-                    
-                    for &f in floats {
-                        // Convert f32 to i16
-                        let s = (f * 32767.0).clamp(-32768.0, 32767.0) as i16;
-                        pcm_buffer.push(s);
+                // ScreenCaptureKit 預設輸出 planar（非交錯）f32：每個聲道一個獨立 buffer。
+                // Opus 需要 interleaved 立體聲 [L,R,L,R,...]，必須手動交錯，
+                // 否則整段 L 接整段 R 會造成音訊完全失真。
+                let as_f32 = |data: &[u8]| unsafe {
+                    std::slice::from_raw_parts(data.as_ptr() as *const f32, data.len() / 4)
+                };
+                let to_i16 = |f: f32| (f * 32767.0).clamp(-32768.0, 32767.0) as i16;
+
+                let num_buffers = audio_buffer_list.num_buffers();
+                if num_buffers >= 2 {
+                    // Planar：取前兩個聲道交錯為立體聲
+                    let ch_l = audio_buffer_list.get(0).map(|b| as_f32(b.data())).unwrap_or(&[]);
+                    let ch_r = audio_buffer_list.get(1).map(|b| as_f32(b.data())).unwrap_or(&[]);
+                    let frames = ch_l.len().min(ch_r.len());
+                    for i in 0..frames {
+                        pcm_buffer.push(to_i16(ch_l[i]));
+                        pcm_buffer.push(to_i16(ch_r[i]));
+                    }
+                } else if let Some(buffer) = audio_buffer_list.get(0) {
+                    let floats = as_f32(buffer.data());
+                    if buffer.number_channels == 1 {
+                        // Mono：複製為左右聲道
+                        for &f in floats {
+                            let s = to_i16(f);
+                            pcm_buffer.push(s);
+                            pcm_buffer.push(s);
+                        }
+                    } else {
+                        // 單 buffer 多聲道 = interleaved，直接轉換
+                        for &f in floats {
+                            pcm_buffer.push(to_i16(f));
+                        }
                     }
                 }
             }
@@ -153,10 +170,6 @@ impl AudioStreamer {
         println!("[Audio] WASAPI Loopback device: {}, sample_rate: {}, channels: {}", 
                  device.name().unwrap_or_default(), sample_rate, channels);
                  
-        // We will need to resample if sample_rate != 48000, but for simplicity here we assume 48kHz
-        // or just pass it to Opus if it's 48kHz. If not 48kHz, Opus might distort it if we just feed it directly.
-        // For a robust implementation, a resampler (like rubato) is required, but let's do a basic direct feed.
-        
         let encoder_arc = Arc::clone(&self.encoder);
         let track_arc = Arc::clone(&self.track);
         
@@ -203,10 +216,54 @@ impl AudioStreamer {
         tokio::spawn(async move {
             // Keep stream alive
             let _stream = stream;
-            
-            while let Some(mut data) = rx.recv().await {
-                pcm_buffer.append(&mut data);
-                
+
+            // 裝置格式 → Opus 要求的 48kHz interleaved 立體聲
+            let src_rate = sample_rate as f64;
+            let ch = channels.max(1) as usize;
+            let mut resample_pos: f64 = 0.0;
+            let mut prev_frame: (i16, i16) = (0, 0);
+
+            while let Some(data) = rx.recv().await {
+                // 1) 聲道正規化為立體聲 frame（mono 複製、多聲道取前兩軌）
+                let mut stereo: Vec<(i16, i16)> = Vec::with_capacity(data.len() / ch + 1);
+                if ch == 1 {
+                    for &s in &data {
+                        stereo.push((s, s));
+                    }
+                } else {
+                    for frame in data.chunks_exact(ch) {
+                        stereo.push((frame[0], frame[1]));
+                    }
+                }
+
+                // 2) 取樣率轉換至 48kHz（線性內插；44.1kHz 等裝置直接餵 Opus 會失真）
+                if (src_rate - 48000.0).abs() < 1.0 {
+                    for (l, r) in stereo {
+                        pcm_buffer.push(l);
+                        pcm_buffer.push(r);
+                    }
+                } else {
+                    let step = src_rate / 48000.0;
+                    // 前置上一塊的最後一個 frame，讓內插跨資料塊連續
+                    let mut frames = Vec::with_capacity(stereo.len() + 1);
+                    frames.push(prev_frame);
+                    frames.extend_from_slice(&stereo);
+                    let mut pos = resample_pos;
+                    while pos + 1.0 < frames.len() as f64 {
+                        let idx = pos as usize;
+                        let frac = pos - idx as f64;
+                        let (l0, r0) = frames[idx];
+                        let (l1, r1) = frames[idx + 1];
+                        pcm_buffer.push((l0 as f64 + (l1 as f64 - l0 as f64) * frac) as i16);
+                        pcm_buffer.push((r0 as f64 + (r1 as f64 - r0 as f64) * frac) as i16);
+                        pos += step;
+                    }
+                    resample_pos = pos - (frames.len() as f64 - 1.0);
+                    if let Some(&last) = frames.last() {
+                        prev_frame = last;
+                    }
+                }
+
                 while pcm_buffer.len() >= samples_per_frame {
                     let chunk: Vec<i16> = pcm_buffer.drain(..samples_per_frame).collect();
                     let mut encoder = encoder_arc.lock().await;

@@ -337,10 +337,17 @@ impl InputEvent {
         {
             use core_graphics::event::{CGEvent, CGEventTapLocation, CGMouseButton, CGEventType};
             use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-            use std::sync::atomic::{AtomicBool, Ordering};
-            
+            use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+
             static LEFT_BTN_DOWN: AtomicBool = AtomicBool::new(false);
             static RIGHT_BTN_DOWN: AtomicBool = AtomicBool::new(false);
+
+            // 連擊偵測：macOS 的雙擊不是由 WindowServer 自動判定，而是要求事件本身
+            // 帶有 clickState=2（三擊=3）。若恆為 1，Finder 雙擊開啟資料夾等操作永遠無效。
+            static LAST_LEFT_DOWN_MS: AtomicU64 = AtomicU64::new(0);
+            static LAST_CLICK_X: AtomicI64 = AtomicI64::new(i64::MIN);
+            static LAST_CLICK_Y: AtomicI64 = AtomicI64::new(i64::MIN);
+            static CLICK_STATE: AtomicI64 = AtomicI64::new(1);
 
             let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
                 .map_err(|_| CoreError::SystemError("無法建立 CGEventSource".to_string()))?;
@@ -488,12 +495,37 @@ impl InputEvent {
                         },
                         MouseButton::Middle => (CGEventType::OtherMouseDown, CGMouseButton::Center),
                     };
+                    // 連擊判定：左鍵在 500ms 內、游標位移 <= 8px 視為連擊，clickState 遞增
+                    // （單擊=1、雙擊=2、三擊=3），否則重設為 1。MouseUp 沿用同一狀態。
+                    let click_state = if matches!(button, MouseButton::Left) {
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let px = current_point.x as i64;
+                        let py = current_point.y as i64;
+                        let last_ms = LAST_LEFT_DOWN_MS.swap(now_ms, Ordering::Relaxed);
+                        let lx = LAST_CLICK_X.swap(px, Ordering::Relaxed);
+                        let ly = LAST_CLICK_Y.swap(py, Ordering::Relaxed);
+                        let is_multi = now_ms.saturating_sub(last_ms) <= 500
+                            && (px - lx).abs() <= 8
+                            && (py - ly).abs() <= 8;
+                        let state = if is_multi {
+                            (CLICK_STATE.load(Ordering::Relaxed) % 3) + 1
+                        } else {
+                            1
+                        };
+                        CLICK_STATE.store(state, Ordering::Relaxed);
+                        state
+                    } else {
+                        1
+                    };
                     let event = CGEvent::new_mouse_event(source, evt_type, current_point, cg_button)
                         .map_err(|_| CoreError::SystemError("建立 macOS 按鍵壓下事件失敗".to_string()))?;
-                    // 設定 click state = 1：讓合成事件被視為「真實單擊」，
-                    // 確保點擊背景視窗時 WindowServer 正確觸發 click-to-front 視窗提升。
+                    // clickState >= 1：讓合成事件被視為「真實點擊」，確保點擊背景視窗時
+                    // WindowServer 正確觸發 click-to-front，且連擊時 app 能判定雙擊/三擊。
                     event.set_integer_value_field(
-                        core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
+                        core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, click_state);
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseUp { button } => {
@@ -526,8 +558,14 @@ impl InputEvent {
                     };
                     let event = CGEvent::new_mouse_event(source, evt_type, current_point, cg_button)
                         .map_err(|_| CoreError::SystemError("建立 macOS 按鍵放開事件失敗".to_string()))?;
+                    // MouseUp 必須帶與對應 MouseDown 相同的 clickState，否則雙擊判定失效
+                    let up_state = if matches!(button, MouseButton::Left) {
+                        CLICK_STATE.load(Ordering::Relaxed)
+                    } else {
+                        1
+                    };
                     event.set_integer_value_field(
-                        core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
+                        core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, up_state);
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseScroll { delta_x, delta_y } => {

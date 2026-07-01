@@ -450,6 +450,20 @@ impl WebRtcSession {
                 }
                 */
                 println!("[SystemControl] DataChannel opened (Monitor detection temporarily disabled to prevent crash)");
+
+                // 告知主控端被控端作業系統，讓主控端送出正確的快捷鍵組合
+                // （例如貼上：macOS 用 Cmd+V、Windows 用 Ctrl+V，避免雙組合鍵重複觸發）
+                let os = if cfg!(target_os = "macos") {
+                    "macos"
+                } else if cfg!(target_os = "windows") {
+                    "windows"
+                } else {
+                    "linux"
+                };
+                let msg = serde_json::json!({ "type": "host_info", "os": os });
+                if let Ok(json_str) = serde_json::to_string(&msg) {
+                    let _ = dc.send_text(json_str).await;
+                }
             })
         }));
 

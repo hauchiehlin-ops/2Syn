@@ -275,6 +275,10 @@ impl VideoStreamer {
 
             #[cfg(target_os = "macos")]
             let mut macos_stream: Option<screencapturekit::async_api::AsyncSCStream> = None;
+            // 節流：被控端登出（loginwindow，無 GUI session）時 ScreenCaptureKit 拿不到
+            // 任何 shareable content，與單純權限不足是不同情境，需要不同的提示文案。
+            #[cfg(target_os = "macos")]
+            let mut last_logged_out_warning = std::time::Instant::now() - std::time::Duration::from_secs(60);
 
             loop {
                 // catch_unwind 防線：確保任何內部 panic 不會傳播到 tao 主執行緒
@@ -355,8 +359,19 @@ impl VideoStreamer {
                         if let Some(stream) = macos_stream.take() {
                             let _ = stream.stop_capture();
                         }
-                        if let Ok(content) = screencapturekit::shareable_content::SCShareableContent::get() {
+                        match screencapturekit::shareable_content::SCShareableContent::get() {
+                        Ok(content) => {
                             let displays = content.displays();
+                            if displays.is_empty() {
+                                // 系統已登出（loginwindow）或正在快速切換使用者：沒有可分享的視窗內容。
+                                // 這跟「沒給螢幕錄製權限」不同，要給使用者不同的提示。
+                                if last_logged_out_warning.elapsed() >= std::time::Duration::from_secs(10) {
+                                    last_logged_out_warning = std::time::Instant::now();
+                                    let msg = "LOGGED_OUT: 偵測不到任何可擷取畫面，被控端可能已登出（非僅鎖定螢幕）。請改用「鎖定螢幕」而非「登出」以維持遠端連線，或於被控端啟用「自動登入」。".to_string();
+                                    eprintln!("[Video] {}", msg);
+                                    if let Some(tx) = &status_tx { let _ = tx.send(msg); }
+                                }
+                            }
                             if let Some(display) = displays.get(current_monitor_index.min(displays.len().saturating_sub(1))) {
                                 let frame = display.frame();
                                 crate::input::TARGET_MONITOR_X.store(frame.x as i32, std::sync::atomic::Ordering::Relaxed);
@@ -377,6 +392,17 @@ impl VideoStreamer {
                                 let _ = stream.start_capture();
                                 macos_stream = Some(stream);
                             }
+                        }
+                        Err(e) => {
+                            // 取得 shareable content 本身失敗：常見於登出狀態（loginwindow），
+                            // 因為當下沒有授權的 GUI session 可供 ScreenCaptureKit 查詢。
+                            if last_logged_out_warning.elapsed() >= std::time::Duration::from_secs(10) {
+                                last_logged_out_warning = std::time::Instant::now();
+                                let msg = format!("LOGGED_OUT: 無法取得螢幕內容（{:?}），被控端可能已登出（非僅鎖定螢幕）。請改用「鎖定螢幕」而非「登出」以維持遠端連線，或於被控端啟用「自動登入」。", e);
+                                eprintln!("[Video] {}", msg);
+                                if let Some(tx) = &status_tx { let _ = tx.send(msg); }
+                            }
+                        }
                         }
                     }
                 }

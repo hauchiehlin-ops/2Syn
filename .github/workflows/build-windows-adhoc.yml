@@ -1,0 +1,60 @@
+name: "Ad-hoc Windows Build (no release)"
+
+# 手動觸發，只把安裝檔上傳成 workflow artifact，不建立 GitHub Release、不需要打 tag。
+# 適合在正式發布前產生測試用的 Windows 安裝檔，供內部/小範圍試用。
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "要打包哪個版本"
+        required: true
+        default: "host"
+        type: choice
+        options:
+          - host
+          - client
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CARGO_HTTP_MULTIPLEXING: false
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Frontend Dependencies
+        working-directory: ./desktop
+        run: npm install
+
+      - name: Build (host)
+        if: ${{ inputs.target == 'host' }}
+        working-directory: ./desktop
+        run: npm run tauri:build:host
+
+      - name: Build (client)
+        if: ${{ inputs.target == 'client' }}
+        working-directory: ./desktop
+        run: npm run tauri:build:client
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 2syn-windows-${{ inputs.target }}-${{ github.run_number }}
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+          retention-days: 14
+          if-no-files-found: error
