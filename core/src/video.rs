@@ -155,6 +155,10 @@ impl VideoStreamer {
         config_rx: tokio::sync::watch::Receiver<crate::connection::QualityConfig>,
         monitor_rx: tokio::sync::watch::Receiver<usize>,
         active_webrtc: Arc<std::sync::atomic::AtomicBool>,
+        // 本 session 存活旗標：pc 關閉（Closed/Failed）時歸零，令擷取迴圈徹底結束，
+        // 避免每次連線/斷線循環累積永不退出的擷取執行緒（最終耗盡 blocking 執行緒池
+        // 與 CPU，拖垮信令心跳 → 被控端從伺服器掉線、client 顯示「Target offline」）。
+        session_alive: Arc<std::sync::atomic::AtomicBool>,
     ) {
         let encoder_arc = Arc::clone(&self.encoder);
         let track_arc = Arc::clone(&self.track);
@@ -281,6 +285,17 @@ impl VideoStreamer {
             let mut last_logged_out_warning = std::time::Instant::now() - std::time::Duration::from_secs(60);
 
             loop {
+                // 本 session 已結束（pc 關閉/失敗）→ 停止擷取並徹底退出此執行緒，釋放資源
+                if !session_alive.load(std::sync::atomic::Ordering::SeqCst) {
+                    #[cfg(target_os = "macos")]
+                    {
+                        if let Some(stream) = macos_stream.take() {
+                            let _ = stream.stop_capture();
+                        }
+                    }
+                    println!("[Video] session 已結束，擷取迴圈退出");
+                    break;
+                }
                 // catch_unwind 防線：確保任何內部 panic 不會傳播到 tao 主執行緒
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // 若目前 WebRTC 連線不活躍，則不執行擷取與編碼，直接休眠退避

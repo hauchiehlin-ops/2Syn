@@ -345,9 +345,28 @@ impl InputEvent {
             // 連擊偵測：macOS 的雙擊不是由 WindowServer 自動判定，而是要求事件本身
             // 帶有 clickState=2（三擊=3）。若恆為 1，Finder 雙擊開啟資料夾等操作永遠無效。
             static LAST_LEFT_DOWN_MS: AtomicU64 = AtomicU64::new(0);
-            static LAST_CLICK_X: AtomicI64 = AtomicI64::new(i64::MIN);
-            static LAST_CLICK_Y: AtomicI64 = AtomicI64::new(i64::MIN);
+            static LAST_CLICK_X: AtomicI64 = AtomicI64::new(0);
+            static LAST_CLICK_Y: AtomicI64 = AtomicI64::new(0);
             static CLICK_STATE: AtomicI64 = AtomicI64::new(1);
+
+            // 修飾鍵按住狀態：macOS 合成事件的修飾鍵「按下鍵碼」不會自動讓後續按鍵
+            // 帶上 flag（與實體鍵盤不同），因此必須自行追蹤按住的修飾鍵，
+            // 並在每個一般按鍵事件上明確 set_flags，否則 ⌘C 只會輸入字元 "c"。
+            static MOD_CMD_DOWN: AtomicBool = AtomicBool::new(false);
+            static MOD_SHIFT_DOWN: AtomicBool = AtomicBool::new(false);
+            static MOD_ALT_DOWN: AtomicBool = AtomicBool::new(false);
+            static MOD_CTRL_DOWN: AtomicBool = AtomicBool::new(false);
+
+            // 依目前按住的修飾鍵組出 CGEventFlags
+            fn current_mod_flags() -> core_graphics::event::CGEventFlags {
+                use core_graphics::event::CGEventFlags;
+                let mut flags = CGEventFlags::CGEventFlagNull;
+                if MOD_CMD_DOWN.load(Ordering::Relaxed) { flags |= CGEventFlags::CGEventFlagCommand; }
+                if MOD_SHIFT_DOWN.load(Ordering::Relaxed) { flags |= CGEventFlags::CGEventFlagShift; }
+                if MOD_ALT_DOWN.load(Ordering::Relaxed) { flags |= CGEventFlags::CGEventFlagAlternate; }
+                if MOD_CTRL_DOWN.load(Ordering::Relaxed) { flags |= CGEventFlags::CGEventFlagControl; }
+                flags
+            }
 
             let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
                 .map_err(|_| CoreError::SystemError("無法建立 CGEventSource".to_string()))?;
@@ -507,9 +526,12 @@ impl InputEvent {
                         let last_ms = LAST_LEFT_DOWN_MS.swap(now_ms, Ordering::Relaxed);
                         let lx = LAST_CLICK_X.swap(px, Ordering::Relaxed);
                         let ly = LAST_CLICK_Y.swap(py, Ordering::Relaxed);
-                        let is_multi = now_ms.saturating_sub(last_ms) <= 500
-                            && (px - lx).abs() <= 8
-                            && (py - ly).abs() <= 8;
+                        let dx = (px as i128 - lx as i128).unsigned_abs();
+                        let dy = (py as i128 - ly as i128).unsigned_abs();
+                        let is_multi = last_ms > 0
+                            && now_ms.saturating_sub(last_ms) <= 500
+                            && dx <= 8
+                            && dy <= 8;
                         let state = if is_multi {
                             (CLICK_STATE.load(Ordering::Relaxed) % 3) + 1
                         } else {
@@ -603,14 +625,33 @@ impl InputEvent {
                 }
                 InputEvent::KeyDown { keycode, modifiers: _ } => {
                     let mac_key = vk_to_mac_keycode(*keycode);
+                    // 更新修飾鍵按住狀態（55=Cmd, 56=Shift, 58=Alt, 59=Ctrl）
+                    match mac_key {
+                        55 => MOD_CMD_DOWN.store(true, Ordering::Relaxed),
+                        56 => MOD_SHIFT_DOWN.store(true, Ordering::Relaxed),
+                        58 => MOD_ALT_DOWN.store(true, Ordering::Relaxed),
+                        59 => MOD_CTRL_DOWN.store(true, Ordering::Relaxed),
+                        _ => {}
+                    }
                     let event = CGEvent::new_keyboard_event(source, mac_key, true)
                         .map_err(|_| CoreError::SystemError("建立 macOS 鍵盤按下事件失敗".to_string()))?;
+                    // 一般按鍵套用目前按住的修飾鍵 flag，讓 ⌘C/⌘V 等組合鍵生效
+                    // （修飾鍵本身也帶上 flag，符合真實鍵盤行為）
+                    event.set_flags(current_mod_flags());
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::KeyUp { keycode, modifiers: _ } => {
                     let mac_key = vk_to_mac_keycode(*keycode);
+                    match mac_key {
+                        55 => MOD_CMD_DOWN.store(false, Ordering::Relaxed),
+                        56 => MOD_SHIFT_DOWN.store(false, Ordering::Relaxed),
+                        58 => MOD_ALT_DOWN.store(false, Ordering::Relaxed),
+                        59 => MOD_CTRL_DOWN.store(false, Ordering::Relaxed),
+                        _ => {}
+                    }
                     let event = CGEvent::new_keyboard_event(source, mac_key, false)
                         .map_err(|_| CoreError::SystemError("建立 macOS 鍵盤放開事件失敗".to_string()))?;
+                    event.set_flags(current_mod_flags());
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseRelativeMove { dx, dy } => {
@@ -734,6 +775,12 @@ impl InputEvent {
                         event_mup.post(CGEventTapLocation::HID);
                     }
 
+                    // 清除修飾鍵追蹤狀態，避免斷線後殘留造成後續按鍵誤帶 flag
+                    MOD_CMD_DOWN.store(false, Ordering::Relaxed);
+                    MOD_SHIFT_DOWN.store(false, Ordering::Relaxed);
+                    MOD_ALT_DOWN.store(false, Ordering::Relaxed);
+                    MOD_CTRL_DOWN.store(false, Ordering::Relaxed);
+
                     // 釋放修飾鍵
                     // macOS Command (55), Shift (56), Option (58), Control (59)
                     let mac_keys_to_release = [55, 56, 58, 59];
@@ -803,20 +850,31 @@ impl SecureInputPacket {
         })
     }
 
-    /// 驗證封包安全性，防禦重放與過期封包
+    /// 重連時序號計數器重置的判定門檻：若收到的序號比目前最新序號低超過此值，
+    /// 視為「client 重新連線、計數器歸零」而非重放攻擊（重放封包的序號會貼近 last_seq）。
+    const SEQ_RESET_THRESHOLD: u32 = 256;
+
+    /// 驗證封包安全性，防禦重放與過期封包。
+    /// 回傳 Ok 表示放行；呼叫端應以 `sequence_number` 更新 last_seq。
     pub fn verify(&self, last_seq: u32) -> Result<(), CoreError> {
-        // 1. 驗證序號是否嚴格遞增
-        if self.sequence_number <= last_seq {
-            return Err(CoreError::NetworkError(format!(
-                "重放攻擊防禦：序號未遞增或過期 (收到: {}, 當前最新: {})",
-                self.sequence_number, last_seq
-            )));
+        // 正常情況：序號嚴格遞增
+        if self.sequence_number > last_seq {
+            return Ok(());
         }
-        
-        // 2. 移除時間戳記嚴格驗證，因為客戶端與伺服器之間的系統時鐘可能不同步
-        // 僅透過 sequence_number 已經足夠防禦重放攻擊
-        
-        Ok(())
+
+        // 重連容錯：iOS/行動端斷線重連後，client 端序號計數器會歸零重新遞增，
+        // 但 host 端若因為舊 session 洩漏而殘留高 last_seq，會把新連線的低序號
+        // 封包全部誤判為重放而靜默丟棄（症狀：重連後點擊完全失效、移動正常）。
+        // 判定：序號遠低於 last_seq（落差 > 門檻）→ 視為計數器重置，放行。
+        // 重放攻擊的封包序號會貼近 last_seq，落在門檻內仍會被擋下。
+        if last_seq.saturating_sub(self.sequence_number) > Self::SEQ_RESET_THRESHOLD {
+            return Ok(());
+        }
+
+        Err(CoreError::NetworkError(format!(
+            "重放攻擊防禦：序號未遞增或過期 (收到: {}, 當前最新: {})",
+            self.sequence_number, last_seq
+        )))
     }
 }
 

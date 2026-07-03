@@ -356,9 +356,15 @@ async fn handle_remote_offer_as_host(
     let app_state = app_handle.state::<AppState>();
     let active_webrtc = app_state.has_active_webrtc.clone();
     let active_webrtc_audio = active_webrtc.clone();
-    
+
+    // 本 session 專屬存活旗標：pc 關閉/失敗時歸零，令 video/audio 擷取迴圈徹底退出，
+    // 避免每次連線/斷線循環累積永不結束的擷取任務（耗盡 blocking 執行緒池與 CPU，
+    // 最終拖垮信令心跳 → 被控端掉線、client 顯示「Target offline」）。
+    let session_alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let session_alive_audio = Arc::clone(&session_alive);
+
     tokio::spawn(async move {
-        if let Err(e) = audio_streamer.start(active_webrtc_audio).await {
+        if let Err(e) = audio_streamer.start(active_webrtc_audio, session_alive_audio).await {
             eprintln!("[Audio] Failed to start audio streamer: {}", e);
         }
     });
@@ -392,10 +398,11 @@ async fn handle_remote_offer_as_host(
     );
 
     let active_webrtc = app_state.has_active_webrtc.clone();
+    let session_alive_video = Arc::clone(&session_alive);
     syn_core::debug_log!("TAURI", "Starting video capture loop");
-    
+
     streamer
-        .start_capture_loop(Some(status_tx), config_rx, monitor_rx, active_webrtc)
+        .start_capture_loop(Some(status_tx), config_rx, monitor_rx, active_webrtc, session_alive_video)
         .await;
     syn_core::debug_log!("TAURI", "Video capture loop started");
 
@@ -444,19 +451,59 @@ async fn handle_remote_offer_as_host(
     ));
 
     let app_clone2 = app_handle.clone();
+    // 捕捉本 session 的 pc identity：`has_active_webrtc` 是全域共享旗標，
+    // 若讓「洩漏的舊 session」或 iOS ICE 短暫抖動的斷線事件把它打成 false，
+    // 目前活躍 session 的 video 擷取迴圈會誤以為連線已斷而停止產生影格
+    // → 畫面凍結在 fps 0.0 且永不恢復（Connected 不會再次觸發）。
+    // 因此「設 false」必須限定於本 pc 確實是當前 active_pc 時才生效。
+    let pc_for_state = Arc::clone(&pc);
+    let session_alive_state = Arc::clone(&session_alive);
     pc.on_peer_connection_state_change(Box::new(
         move |state: webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState| {
             let _ = app_clone2.emit("rust-webrtc-state", state.to_string());
             let state_val = state;
             let app = app_clone2.clone();
+            let pc_self = Arc::clone(&pc_for_state);
+            let session_alive = Arc::clone(&session_alive_state);
             Box::pin(async move {
                 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
-                let active = matches!(state_val, RTCPeerConnectionState::Connected);
+                // 終態（Failed/Closed）→ 令本 session 的擷取迴圈退出，釋放資源。
+                // Disconnected 可能是短暫抖動、之後回到 Connected，故不在此終止迴圈。
+                if matches!(state_val, RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed) {
+                    session_alive.store(false, std::sync::atomic::Ordering::SeqCst);
+                    // Failed 時主動 close，讓 pc 轉為 Closed → ABR 監控任務跳出、
+                    // data channel 關閉、pc 的 Arc 得以釋放，徹底回收本 session。
+                    if matches!(state_val, RTCPeerConnectionState::Failed) {
+                        let pc_close = Arc::clone(&pc_self);
+                        tokio::spawn(async move { let _ = pc_close.close().await; });
+                    }
+                }
                 let app_state = app.state::<AppState>();
-                app_state
-                    .has_active_webrtc
-                    .store(active, std::sync::atomic::Ordering::SeqCst);
-                println!("WebRTC 狀態變更: {:?}, 是否活躍: {}", state_val, active);
+                if matches!(state_val, RTCPeerConnectionState::Connected) {
+                    // 連上：一律標記活躍（安全方向，讓影像流動）
+                    app_state
+                        .has_active_webrtc
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    println!("WebRTC 狀態變更: {:?}, 是否活躍: true", state_val);
+                } else {
+                    // 斷線/失敗/關閉：僅當本 pc 仍是當前 active session 時才標記非活躍，
+                    // 避免舊 session 的遲來斷線事件把正在運作的新 session 影像掐斷。
+                    let is_current = app_state
+                        .active_pc
+                        .lock()
+                        .await
+                        .as_ref()
+                        .map(|cur| Arc::ptr_eq(cur, &pc_self))
+                        .unwrap_or(false);
+                    if is_current {
+                        app_state
+                            .has_active_webrtc
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
+                        println!("WebRTC 狀態變更: {:?}, 是否活躍: false（當前 session）", state_val);
+                    } else {
+                        println!("WebRTC 狀態變更: {:?}（舊/非當前 session，忽略不影響活躍旗標）", state_val);
+                    }
+                }
             })
         },
     ));
@@ -470,10 +517,16 @@ async fn handle_remote_offer_as_host(
         println!("Rust 接收到 DataChannel: {}", label);
 
         if label == "input-control" {
+            println!("[input-control] 已綁定 on_message，等待接收點擊事件...");
             let last_seq = Arc::clone(&control_last_seq);
+            let msg_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
             d.on_message(Box::new(move |msg| {
                 let data = msg.data.to_vec();
                 let last_seq = Arc::clone(&last_seq);
+                let count = msg_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if count < 10 || count % 50 == 0 {
+                    println!("[input-control] 收到第 {} 筆訊息，長度={}", count + 1, data.len());
+                }
                 Box::pin(async move {
                     use std::sync::atomic::Ordering;
                     use syn_core::input::SecureInputPacket;
@@ -593,9 +646,23 @@ async fn handle_remote_offer_as_host(
         .await
         .map_err(|e| e.to_string())?;
 
-    // 儲存 pc 供 ICE 使用
+    // 儲存 pc 供 ICE 使用；先關閉並丟棄上一條連線，避免舊 session 洩漏。
+    // iOS WKWebView 斷線時常不乾淨關閉 SCTP/data channel，舊 host session 會殘留
+    // （video/audio 擷取迴圈、input-control on_message 與其 last_seq 皆還活著）。
+    // 重連建立新 session 後，殘留的舊 session 會與新 session 爭用全域輸入狀態與
+    // 序號體系，造成「重連後點擊失效、移動正常」等半失效症狀。Android 斷線清理
+    // 乾淨故不觸發。此處在換上新 pc 前主動 close 舊 pc，確保單一 active session。
     let state = app_handle.state::<AppState>();
-    *state.active_pc.lock().await = Some(Arc::clone(&pc));
+    let old_pc = state.active_pc.lock().await.replace(Arc::clone(&pc));
+    if let Some(old) = old_pc {
+        tokio::spawn(async move {
+            if let Err(e) = old.close().await {
+                eprintln!("[WebRTC] 關閉舊 session 失敗（可忽略）: {}", e);
+            } else {
+                println!("[WebRTC] 已關閉上一條殘留 session，確保單一 active 連線");
+            }
+        });
+    }
 
     // 建立 Local Answer
     let answer = pc.create_answer(None).await.map_err(|e| e.to_string())?;

@@ -28,25 +28,32 @@ impl AudioStreamer {
         })
     }
 
-    pub async fn start(&self, active_webrtc: Arc<std::sync::atomic::AtomicBool>) -> Result<(), String> {
+    pub async fn start(
+        &self,
+        active_webrtc: Arc<std::sync::atomic::AtomicBool>,
+        // 本 session 存活旗標：pc 關閉時歸零，令音訊擷取迴圈結束，避免連線循環累積殭屍任務
+        session_alive: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<(), String> {
         #[cfg(target_os = "macos")]
         {
-            self.start_macos(active_webrtc).await
+            self.start_macos(active_webrtc, session_alive).await
         }
-        
+
         #[cfg(target_os = "windows")]
         {
+            let _ = session_alive;
             self.start_windows().await
         }
-        
+
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
+            let _ = session_alive;
             Err("Audio capture is not supported on this platform".to_string())
         }
     }
 
     #[cfg(target_os = "macos")]
-    async fn start_macos(&self, active_webrtc: Arc<std::sync::atomic::AtomicBool>) -> Result<(), String> {
+    async fn start_macos(&self, active_webrtc: Arc<std::sync::atomic::AtomicBool>, session_alive: Arc<std::sync::atomic::AtomicBool>) -> Result<(), String> {
         use screencapturekit::async_api::{AsyncSCShareableContent, AsyncSCStream};
         use screencapturekit::stream::content_filter::SCContentFilter;
         use screencapturekit::stream::output_type::SCStreamOutputType;
@@ -86,10 +93,17 @@ impl AudioStreamer {
         let samples_per_frame = frame_size * 2; // Stereo
         
         let mut sample_count: u64 = 0;
+        let mut logged_format = false;
         while let Some(sample) = stream.next().await {
+            // 本 session 已結束（pc 關閉/失敗）→ 停止擷取並退出，釋放資源
+            if !session_alive.load(Ordering::SeqCst) {
+                println!("[Audio] session 已結束，音訊擷取迴圈退出");
+                let _ = stream.stop_capture();
+                break;
+            }
             sample_count += 1;
             if sample_count % 100 == 1 {
-                crate::debug_log!("AUDIO", "macOS audio sample_count={} active={}", sample_count, active_webrtc.load(Ordering::SeqCst));
+                crate::debug_log!("AUDIO", "macOS audio sample_count={} active={} pcm_buf={}", sample_count, active_webrtc.load(Ordering::SeqCst), pcm_buffer.len());
             }
             // 若連線不活躍，則直接丟棄音訊，防止 ScreenCaptureKit 內部緩衝區積壓導致記憶體洩漏與 CPU 暴衝
             if !active_webrtc.load(Ordering::SeqCst) {
@@ -97,6 +111,13 @@ impl AudioStreamer {
             }
 
             if let Some(audio_buffer_list) = sample.audio_buffer_list() {
+                if !logged_format {
+                    logged_format = true;
+                    let nb = audio_buffer_list.num_buffers();
+                    let ch0_len = audio_buffer_list.get(0).map(|b| b.data().len()).unwrap_or(0);
+                    let ch0_channels = audio_buffer_list.get(0).map(|b| b.number_channels).unwrap_or(0);
+                    println!("[Audio] SCK format: num_buffers={} buf0_bytes={} buf0_channels={}", nb, ch0_len, ch0_channels);
+                }
                 // ScreenCaptureKit 預設輸出 planar（非交錯）f32：每個聲道一個獨立 buffer。
                 // Opus 需要 interleaved 立體聲 [L,R,L,R,...]，必須手動交錯，
                 // 否則整段 L 接整段 R 會造成音訊完全失真。

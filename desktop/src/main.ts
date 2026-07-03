@@ -403,6 +403,7 @@ let iceCandidateQueue: RTCIceCandidateInit[] = [];
 let rustIceCandidateQueue: string[] = [];
 let isHostMode: boolean = false; // 標記目前是否為被控端
 let rustOfferProcessed: boolean = false; // 標記 Rust 是否已經處理完 Offer
+let remoteLogsTimeout: ReturnType<typeof setTimeout> | null = null; // 遠端日誌索取逾時計時器
 let dataChannelControl: RTCDataChannel | null = null;
 let dataChannelUnreliable: RTCDataChannel | null = null;
 let dataChannelClipboard: RTCDataChannel | null = null;
@@ -713,6 +714,9 @@ const fallbackTranslations: Record<string, string> = {
   "remote_logs_title": "Remote Host Diagnostic Logs",
   "remote_logs_help": "These are the real-time debug logs from the controlled host. If you see \"Screen capture failed\", it means the Mac host has Screen Recording permission checked but still rejected by OS. Please uncheck and recheck the permission, then restart the App.",
   "loading_remote_logs": "Loading remote logs...",
+  "remote_logs_no_signaling": "Not connected to the signaling server yet — cannot request remote logs.",
+  "remote_logs_no_target": "No target host ID found. Enter an ID and try connecting before diagnosing.",
+  "remote_logs_timeout": "Could not retrieve remote logs: the host did not respond. Likely causes: the host app is not running, is offline, or the two devices cannot reach each other. Make sure the host is running and on the same network, then retry.",
   "ts_guide_title": "Tailscale Zero-Configuration Guide",
   "ts_guide_desc": "Due to ISP Symmetric NAT and firewall limitations on WebRTC, it is highly recommended to install Tailscale, a free and secure virtual private network tool, on both devices to ensure a 100% P2P ultra-low latency connection.",
   "ts_step_1_title": "Step 1: Download & Install",
@@ -1839,9 +1843,12 @@ function initSignalingClient() {
         break;
       case "custom_response_logs":
         {
+          // 收到回覆：取消逾時計時器
+          if (remoteLogsTimeout) { clearTimeout(remoteLogsTimeout); remoteLogsTimeout = null; }
           const remoteLogs = msg.logs || [];
           const container = document.getElementById("remote-logs-container");
           if (container) {
+            container.style.color = ""; // 還原逾時時設的黃色
             if (remoteLogs.length === 0) {
               container.textContent = "No log records received from remote host.";
             } else {
@@ -1936,6 +1943,12 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
     dataChannelControl = null;
     iceCandidateQueue = [];
   }
+
+  // 每次新連線把輸入序號計數器歸零，與 host 新 session 的 last_seq=0 對齊。
+  // 搭配 host 端 verify 的重連容錯（序號大幅下降視為重置），確保 iOS/行動端
+  // 斷線重連後，reliable 通道的點擊/鍵盤封包不會被舊 session 殘留序號誤判為重放而丟棄。
+  controlSeqNumber = 0;
+  unreliableSeqNumber = 0;
 
   currentRemoteId = remoteId;
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
@@ -2119,6 +2132,31 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
             }
           }, 4000);
 
+          // 持續偵測影片凍結並自動恢復：iOS WKWebView 的 <video> 在背景切換、
+          // jitter buffer 清空、或解碼器暫停後可能靜默停止渲染但不觸發任何事件。
+          // 每 2 秒檢查 currentTime 是否有推進，若凍結超過 4 秒自動 play()。
+          let lastCurrentTime = 0;
+          let freezeDetectCount = 0;
+          const freezeWatchdog = setInterval(() => {
+            if (!videoEl.srcObject) { clearInterval(freezeWatchdog); return; }
+            const ct = videoEl.currentTime;
+            if (ct === lastCurrentTime && ct > 0 && !videoEl.paused) {
+              freezeDetectCount++;
+              if (freezeDetectCount >= 2) {
+                console.warn("[Video] 偵測到影片凍結，嘗試恢復播放...");
+                videoEl.play().catch(() => {});
+                freezeDetectCount = 0;
+              }
+            } else {
+              freezeDetectCount = 0;
+            }
+            if (videoEl.paused && hasPlayed) {
+              console.warn("[Video] 影片意外暫停，恢復播放...");
+              videoEl.play().catch(() => {});
+            }
+            lastCurrentTime = ct;
+          }, 2000);
+
           try {
             videoEl.play().catch(err => {
               console.warn("[WebRTC] 視訊自動播放受阻，等待手動啟動或黑屏提示:", err);
@@ -2130,6 +2168,16 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         }
     } else if (event.track.kind === "audio") {
         console.log("[WebRTC] 收到遠端音訊軌道");
+        // 音訊也壓低 jitter buffer，降低音訊延遲
+        try {
+          const r = event.receiver as any;
+          if (r) {
+            if ("jitterBufferTarget" in r) r.jitterBufferTarget = 0;
+            if ("playoutDelayHint" in r) r.playoutDelayHint = 0;
+          }
+        } catch (e) {
+          console.warn("[WebRTC] 音訊 jitter buffer 設定失敗:", e);
+        }
         let audioEl = document.getElementById("remote-audio") as HTMLAudioElement;
         if (!audioEl) {
             audioEl = document.createElement("audio");
@@ -3409,6 +3457,11 @@ function sendInputPacket(packet: Uint8Array) {
   }
   if (dataChannelControl && dataChannelControl.readyState === "open") {
     dataChannelControl.send(packet as any);
+    if (eventType === 0x02 || eventType === 0x03) {
+      console.log(`[Input] 已送出點擊事件 0x${eventType.toString(16).padStart(2,'0')} seq=${new DataView(packet.buffer).getUint32(0, false)}`);
+    }
+  } else if (eventType !== 0x01 && eventType !== 0x07) {
+    console.warn(`[Input] 可靠通道未開啟，丟棄事件 0x${eventType.toString(16).padStart(2,'0')} (state=${dataChannelControl?.readyState ?? 'null'})`);
   }
 }
 
@@ -3914,10 +3967,14 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   // 否則鍵盤開著時再點新焦點會少移（上移量以未平移座標為基準計算）。
   const getFocusClientY = (): number => {
     if (isDirectTouchMode) {
-      return lastTapPos.y > 0 ? lastTapPos.y - keyboardOffsetUpdateY : -1;
+      if (lastTapPos.y > 0) return lastTapPos.y - keyboardOffsetUpdateY;
+      // 尚未點擊任何位置（例如透過按鈕開啟鍵盤），預設取畫面中央
+      return window.innerHeight * 0.45;
     }
     const rect = videoEl.getBoundingClientRect();
-    if (!videoEl.videoWidth || !videoEl.videoHeight || !rect.height) return -1;
+    if (!videoEl.videoWidth || !videoEl.videoHeight || !rect.height) {
+      return window.innerHeight * 0.45;
+    }
     const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
     const containerRatio = rect.width / rect.height;
     let renderedHeight: number, offsetY = 0;
@@ -5345,20 +5402,19 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           keyboardBar.style.bottom = "auto";
         }
 
-        // Android WebView 會原生縮放 layout viewport，自行手動平移反而導致黑屏，故不上移
-        if (/android/i.test(navigator.userAgent)) {
-          keyboardOffsetUpdateY = 0;
-          applyVideoTransform();
-          window.scrollTo(0, 0);
-          return;
-        }
-
         // 可見區下緣（工具列上方）。若點擊焦點落在它之下，往上平移剛好露出焦點。
+        // 註：Android 過去假設 WebView 原生縮放 layout viewport 而不手動平移，
+        // 但實測 Tauri Android WebView 不會自動上移，鍵盤直接蓋住輸入欄位。
+        // visualViewport.height 在 Android 確實會縮小（keyboard bar 定位正常即證明），
+        // 故改為與 iOS 共用同一套手動平移邏輯。
         const visibleBottom = barTop;
         const margin = 24; // 焦點與工具列之間留一點呼吸空間
         let pan = 0;
-        if (kbFocusClientY >= 0 && kbFocusClientY > visibleBottom - margin) {
-          pan = kbFocusClientY - (visibleBottom - margin);
+        // Android 開鍵盤但尚未點擊過焦點時，kbFocusClientY 可能為 -1，
+        // 退回用畫面中央偏下位置確保仍會上移露出輸入區
+        const focusY = kbFocusClientY >= 0 ? kbFocusClientY : window.innerHeight * 0.45;
+        if (focusY > visibleBottom - margin) {
+          pan = focusY - (visibleBottom - margin);
         }
         // 上移量不超過被鍵盤遮蔽的高度，避免把畫面推過頭
         const maxPan = window.innerHeight - vv.height + barHeight;
@@ -5628,37 +5684,58 @@ function initRemoteLogsDiagnostics() {
 
   if (btnDiagnose) {
     btnDiagnose.addEventListener("click", () => {
-      if (signalingWs && signalingWs.readyState === WebSocket.OPEN && currentRemoteId) {
-        console.log(`[Diagnostic] 發送遠端主機除錯日誌索取請求給 ${currentRemoteId}`);
-        signalingWs.send(JSON.stringify({
-          type: "custom_request_logs",
-          target: currentRemoteId,
-          source: myId
-        }));
-        
-        if (container) {
-          container.textContent = t("loading_remote_logs") || "Loading remote logs...";
-        }
-        if (modal) {
-          modal.style.display = "flex";
-        }
-      } else {
-        showToast("Signaling channel not available or remote ID not found.");
+      // 索取遠端日誌依賴：①信令通道連通 ②已有目標遠端 ID ③被控端在線並會回覆。
+      // 若被控端根本離線（往往正是連不上的原因），請求送不到、也永遠等不到回覆，
+      // 故不能無限期停在「載入中」，需給定逾時與明確失敗說明。
+      if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
+        showToast(t("remote_logs_no_signaling") || "尚未連上信令伺服器，無法索取遠端日誌。");
+        return;
       }
+      if (!currentRemoteId) {
+        showToast(t("remote_logs_no_target") || "找不到目標被控端 ID，請先輸入 ID 嘗試連線後再診斷。");
+        return;
+      }
+
+      console.log(`[Diagnostic] 發送遠端主機除錯日誌索取請求給 ${currentRemoteId}`);
+      signalingWs.send(JSON.stringify({
+        type: "custom_request_logs",
+        target: currentRemoteId,
+        source: myId
+      }));
+
+      if (container) {
+        container.textContent = t("loading_remote_logs") || "Loading remote logs...";
+      }
+      if (modal) {
+        modal.style.display = "flex";
+      }
+
+      // 逾時保護：8 秒內未收到 custom_response_logs 即判定被控端無回應
+      if (remoteLogsTimeout) clearTimeout(remoteLogsTimeout);
+      remoteLogsTimeout = setTimeout(() => {
+        remoteLogsTimeout = null;
+        const c = document.getElementById("remote-logs-container");
+        if (c) {
+          c.textContent = t("remote_logs_timeout")
+            || "無法取得遠端日誌：被控端沒有回應。可能原因：被控端 App 未執行、已離線、或雙方網路無法互通。請確認被控端已開啟且與本機在同一網路，再重試。";
+          (c as HTMLElement).style.color = "#fbbf24";
+        }
+      }, 8000);
     });
   }
 
+  const dismissLogsModal = () => {
+    if (remoteLogsTimeout) { clearTimeout(remoteLogsTimeout); remoteLogsTimeout = null; }
+    if (modal) modal.style.display = "none";
+  };
+
   if (btnCloseLogs && modal) {
-    btnCloseLogs.addEventListener("click", () => {
-      modal.style.display = "none";
-    });
+    btnCloseLogs.addEventListener("click", dismissLogsModal);
   }
 
   if (modal) {
     modal.addEventListener("click", (e) => {
-      if (e.target === modal) {
-        modal.style.display = "none";
-      }
+      if (e.target === modal) dismissLogsModal();
     });
   }
 }
