@@ -20,6 +20,16 @@
 
 # 歷程
 
+## 2026-07-05 — 修正 Android 端連線逾時相容性問題 (WebRTC connectionState)
+
+- **問題/目標**：解決 Android Client 成功連線後瞬間斷開（約 0.24 秒）的問題，確保 Android WebView 環境下連線穩定性。
+- **根因/做法**：
+  1. **API 不支援**：部分 Android System WebView 版本不支援 `RTCPeerConnection.connectionState` 屬性，回傳 `undefined`。這使得我們新增的 15 秒連線逾時計時器在檢查 `peerConnection.connectionState !== "connected"` 時恆為 `true`，從而在時間截止時（正好是 Client 點擊連線後的第 15 秒，此時 Host 通常才連上 0.2 秒）誤判並主動斷開連線。
+  2. **相容性修復**：修改 [main.ts](file:///Users/barretlin/GitProjects/2syn/desktop/src/main.ts) 的 `connectionTimeoutTimer` 邏輯，將檢查條件擴展至相容性更佳的 `iceConnectionState`，同時檢查兩個狀態：`cState !== "connected" && iceState !== "connected" && iceState !== "completed"`。
+  3. **雙狀態主動清除**：在 `oniceconnectionstatechange` 與 `onconnectionstatechange` 的成功或終態事件中，均加上對 `connectionTimeoutTimer` 的清除邏輯，確保定時器能在連線成功時即時被註銷。
+- **教訓**：
+  - 各平台 WebView 容器對 WebRTC 新 API（如 `connectionState`）的支援度存在差異。對於涉及連線斷開的關鍵判定，應優先使用相容性更好、歷史更久的 `iceConnectionState` 作為後備。
+
 ## 2026-07-05 — 重新設計並替換為 3D 應用程式圖示
 
 - **問題/目標**：原本的黃色鎖頭圖示過於單調，需要重新設計為具有 3D 質感、能傳達遠端連線同步概念的應用程式圖示。
