@@ -1996,7 +1996,17 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
 
   // --- WebRTC State Debug Listeners ---
   pc.oniceconnectionstatechange = () => {
-    console.log(`[WebRTC] ICE Connection State: ${pc.iceConnectionState}`);
+    const iceState = pc.iceConnectionState;
+    console.log(`[WebRTC] ICE Connection State: ${iceState}`);
+    if (iceState === "connected" || iceState === "completed" || iceState === "failed" || iceState === "disconnected" || iceState === "closed") {
+      if (connectionTimeoutTimer) {
+        clearTimeout(connectionTimeoutTimer);
+        connectionTimeoutTimer = null;
+      }
+    }
+    if (iceState === "failed") {
+      updateConnectionStatusUI("failed");
+    }
   };
   pc.onconnectionstatechange = () => {
     console.log(`[WebRTC] Connection State: ${pc.connectionState}`);
@@ -2027,6 +2037,12 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
   pc.onconnectionstatechange = () => {
     const state = pc.connectionState;
     console.log(t("log_webrtc_state"), state);
+    if (state === "connected" || state === "failed" || state === "disconnected" || state === "closed") {
+      if (connectionTimeoutTimer) {
+        clearTimeout(connectionTimeoutTimer);
+        connectionTimeoutTimer = null;
+      }
+    }
     updateConnectionStatusUI(state);
   };
 
@@ -2302,9 +2318,13 @@ async function startCall(remoteId: string, pin: string) {
     // 設置 15 秒連線逾時器
     if (connectionTimeoutTimer) clearTimeout(connectionTimeoutTimer);
     connectionTimeoutTimer = setTimeout(() => {
-      if (peerConnection && peerConnection.connectionState !== "connected") {
-        console.warn("[WebRTC] 連線逾時 (15秒未成功建立)");
-        updateConnectionStatusUI("failed");
+      if (peerConnection) {
+        const cState = peerConnection.connectionState;
+        const iceState = peerConnection.iceConnectionState;
+        if (cState !== "connected" && iceState !== "connected" && iceState !== "completed") {
+          console.warn("[WebRTC] 連線逾時 (15秒未成功建立)");
+          updateConnectionStatusUI("failed");
+        }
       }
     }, 15000);
   } catch (e) {
