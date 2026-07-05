@@ -20,6 +20,38 @@
 
 # 歷程
 
+## 2026-07-05 — 重新設計並替換為 3D 應用程式圖示
+
+- **問題/目標**：原本的黃色鎖頭圖示過於單調，需要重新設計為具有 3D 質感、能傳達遠端連線同步概念的應用程式圖示。
+- **根因/做法**：
+  1. 使用 Image Generator 工具生成了三款 3D 風格的圖示提案，使用者選定了「提案三：雙端串流投影」（由 3D 顯示器與智慧型手機組成，中間連接著霓虹數據串流）。
+  2. 使用 macOS 的 `sips` 工具將所選 JPG 圖片格式轉換為 PNG（`icon_option_3.png`）。
+  3. 透過 Tauri CLI `tauri icon` 命令，重新生成適用於 Host 與 Client 等所有主要平台（macOS、Windows、iOS、Android）之 50+ 個縮放尺寸的圖示，分別輸出至 `desktop/src-tauri/icons/` 與 `desktop/src-tauri/icons-client/` 目錄中。
+
+## 2026-07-05 — 移除黑屏錯誤覆蓋層、新增 15 秒連線逾時機制與全面支援多國語系
+
+- **問題/目標**：
+  1. 連線中/黑屏時顯示的「強制播放、播放主機日誌、關閉」覆蓋層被證明在 ICE 協商期間太早觸發（第 4 秒），干擾且誤導使用者。
+  2. 需要在連線無法建立時設定自動逾時，防止介面無限期停留在 `Connecting`。
+  3. 部分動態產生的 UI 按鈕與對話框提示詞（如檔案傳輸、登出按鈕等）未套用多國語系。
+- **根因/做法**：
+  1. **移除黑屏覆蓋層**：刪除了 `index.html` 中的 `video-error-overlay` DOM 結構，並清除了 `main.ts` 內 `ontrack` 的 4 秒黑屏檢測與按鈕監聽器。
+  2. **15 秒連線逾時**：在 `startCall` 發起連線時加上 15 秒的 `setTimeout`，逾時若未進入 `connected`，則主動轉化連線狀態為 `failed` 並 Alert 提示；同時在連線成功與 `resetConnectionUI` 時確實清除定時器。
+  3. **語系全面化**：實作了 `syncStatefulLabels` 動態語意更新函式，確保直控/軌跡板、鍵盤、靜音、登出等按鈕隨語言及狀態即時更新；同時將寫死的 `alert` 與 `showToast` 全面改為 `t(...)` 取值，並將新增的 14 個翻譯鍵追加至所有 11 國語系檔（`desktop/public/locales/*.json`）與 `fallbackTranslations` 中。
+- **教訓**：
+  - WebRTC 連線可能受到打洞速度影響，過於武斷的黑屏計時器（例如 4 秒）容易在 ICE 正常協商完成前就誤報錯誤。應使用總體連線逾時機制（例如 15 秒）來代替提前黑屏判斷。
+  - 對於帶有狀態的 UI 標籤，需要一個統一的狀態更新函式，以確保當語系或元件狀態變更時，顯示文字能始終保持一致且即時翻譯。
+
+## 2026-07-05 — 行動端/窄螢幕下快顯功能選單無法關閉且部分選項裁切
+
+- **問題/目標**：行動裝置上使用觸控時，快顯功能選單點擊外部無法關閉，且在窄螢幕或偏邊緣點擊時，選單超出螢幕邊界被裁切（導致取消 `✕` 等按鈕無法點擊）。
+- **根因/做法**：
+  1. **無法關閉**：`videoEl` 在觸控事件（`touchstart` / `touchend`）中呼叫了 `e.preventDefault()` 阻止了滑鼠事件模擬，導致全域僅監聽 `click` 事件來關閉選單失效。在 `document` 上同步註冊 `touchstart` 監聽器（並將 dismiss 邏輯統整為 `dismissFloatingMenu`）解決此問題（[main.ts:5622](desktop/src/main.ts#L5622)）。
+  2. **選單裁切**：選單固定使用 `fixed` 且橫向置中於點擊處。在 `showFloatingMenu` 建立選單並 `appendChild` 後，即時以 `getBoundingClientRect()` 取得其實際寬高，進行左右與上下邊界安全檢測（限制邊距 `12px`），超出時自動偏移（[main.ts:5604](desktop/src/main.ts#L5604)）。
+- **教訓**：
+  - 行動端的 `touchstart` / `touchend` 攔截 `preventDefault()` 會直接阻斷瀏覽器模擬的 `click` 事件向上氣泡傳播，因此全域 dismiss 類型的偵聽器必須同時涵蓋 `touchstart` 與 `click`。
+  - 對於浮動定位的選單，特別是在窄螢幕或行動端環境下，必須在 DOM 渲染後立即測量尺寸並進行 Viewport 安全邊界校正，以免 UI 溢出造成無法還原的死局。
+
 ## 2026-07-03 — 連線循環數次後被控端掉線「Target offline」（session 擷取任務洩漏）
 
 - **問題**：連線登入/登出數次後，最終無法登入，client 顯示類似「HOST 不在線上（Target offline）」。

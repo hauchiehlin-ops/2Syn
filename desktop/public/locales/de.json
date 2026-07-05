@@ -361,5 +361,19 @@
   "ui_permission_warning": "Unzureichende macOS-Systemberechtigungen führen während der Fernsteuerung zu einem schwarzen Bildschirm!",
   "ui_dl_hint": "Sowohl Host- als auch Client-Geräte müssen die Anwendung herunterladen und installieren.",
   "ui_sys_auto_adj": "Das System passt sich automatisch an. Netzwerk- und Stream-Qualität befinden sich in einem optimalen Zustand.",
-  "ui_sim_relay_mode": "Relay-Modus simulieren"
+  "ui_sim_relay_mode": "Relay-Modus simulieren",
+  "ui_keyboard": "Keyboard",
+  "ui_shortcuts": "Shortcuts",
+  "ui_direct_touch": "Direct Touch",
+  "ui_trackpad": "Trackpad",
+  "ui_trackpad_mode": "Trackpad Mode",
+  "ui_mute": "Mute",
+  "ui_unmute": "Unmute",
+  "ui_btn_logout": "Log Out",
+  "ui_sdp_qr_hint": "Scan QR Code to pair (no server needed)",
+  "ui_id_qr_hint": "Scan with iOS Camera to bypass manual ID entry",
+  "alert_transfer_complete": "Transfer Complete!",
+  "alert_permissions_granted": "Permissions granted successfully! Application is ready.",
+  "alert_permissions_missing": "Permissions still missing. Please ensure they are checked in macOS System Settings.",
+  "toast_turn_saved": "TURN Servers saved! Reloading..."
 }

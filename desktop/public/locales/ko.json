@@ -361,5 +361,19 @@
   "ui_permission_warning": "macOS 시스템 권한이 부족하면 원격 제어 중에 검은색 화면이 나타납니다!",
   "ui_dl_hint": "호스트와 클라이언트 기기 모두 응용 프로그램을 다운로드하여 설치해야 합니다.",
   "ui_sys_auto_adj": "시스템이 자동으로 조정 중입니다. 네트워크 및 스트림 품질이 최적 상태입니다.",
-  "ui_sim_relay_mode": "중계 모드 시뮬레이션"
+  "ui_sim_relay_mode": "중계 모드 시뮬레이션",
+  "ui_keyboard": "Keyboard",
+  "ui_shortcuts": "Shortcuts",
+  "ui_direct_touch": "Direct Touch",
+  "ui_trackpad": "Trackpad",
+  "ui_trackpad_mode": "Trackpad Mode",
+  "ui_mute": "Mute",
+  "ui_unmute": "Unmute",
+  "ui_btn_logout": "Log Out",
+  "ui_sdp_qr_hint": "Scan QR Code to pair (no server needed)",
+  "ui_id_qr_hint": "Scan with iOS Camera to bypass manual ID entry",
+  "alert_transfer_complete": "Transfer Complete!",
+  "alert_permissions_granted": "Permissions granted successfully! Application is ready.",
+  "alert_permissions_missing": "Permissions still missing. Please ensure they are checked in macOS System Settings.",
+  "toast_turn_saved": "TURN Servers saved! Reloading..."
 }

@@ -30,16 +30,7 @@
     <div id="pointer-lock-tooltip" style="display: none; position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 110; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); color: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; pointer-events: none; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: opacity 0.3s ease;">
       Pointer locked. Press ESC to exit.
     </div>
-    <!-- Video Stream Failure Overlay (Autoplay blocked or Permission missing warning) -->
-    <div id="video-error-overlay" style="display: none; position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 120; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(239, 68, 68, 0.4); color: white; padding: 14px 20px; border-radius: 12px; font-size: 13px; max-width: 90%; box-shadow: 0 10px 25px rgba(0,0,0,0.5); flex-direction: column; gap: 8px; align-items: center;">
-      <span style="font-weight: 600; color: #fca5a5; text-align: center;" id="txt-video-error-title">⚠️ No Video Stream Detected</span>
-      <span style="font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.4; display: block;" id="txt-video-error-desc">If the remote device is macOS, please ensure "Screen Recording" and "Accessibility" permissions are granted in System Settings.</span>
-      <div style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; justify-content: center;">
-        <button id="btn-video-retry-play" style="background: var(--accent-color, #3b82f6); border: none; color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;"><span id="txt-force-play-btn">Force Play</span></button>
-        <button id="btn-video-diagnose" style="background: #10b981; border: none; color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Diagnose Host</button>
-        <button id="btn-video-error-close" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Dismiss</button>
-    </div>
-  </div>
+
   </div>
   <!-- 行動端實體鍵盤輸入列 (Mobile Keyboard Bar) - 必須在 remote-video-container 外部，避免繼承 touch-action:none 導致虛擬鍵盤無法彈出 -->
   <style>
@@ -110,7 +101,7 @@
     <header class="app-header">
       <div class="logo">
         <span class="logo-symbol">⚡</span>
-        <span class="logo-text" id="app-logo-text" style="display: flex; align-items: baseline; gap: 8px;">2syn_Duel v3.6.9</span>
+        <span class="logo-text" id="app-logo-text">2syn_Duel <small class="app-version">v3.6.9</small></span>
       </div>
       <div class="header-actions">
         <button id="btn-show-help" class="help-trigger-btn" title="Help & Privacy">🛟</button>
@@ -205,7 +196,7 @@
               <!-- QR code 隱私模式：掃碼替代手動貼 SDP，完全不需要信令 server -->
               <div id="sdp-qr-container" style="display:none; flex-direction:column; align-items:center; gap:6px; padding:8px; background:white; border-radius:8px;">
                 <canvas id="sdp-qr-canvas" width="200" height="200"></canvas>
-                <span style="color:#333; font-size:11px;">掃描 QR Code 完成配對（無需伺服器）</span>
+                <span id="txt-sdp-qr-hint" style="color:#333; font-size:11px;">掃描 QR Code 完成配對（無需伺服器）</span>
               </div>
               
               <label for="txt-remote-sdp" id="lbl-remote-sdp" style="font-size: 11px; color: var(--text-muted);"><span id="txt-enter-sdp-label">Enter Remote SDP Answer/Offer</span></label>
@@ -245,7 +236,7 @@
           <div id="id-qr-popup" style="display:none; flex-direction:column; align-items:center; gap:6px;
                padding:12px; background:white; border-radius:10px; margin-top:4px;">
             <canvas id="id-qr-canvas" width="160" height="160"></canvas>
-            <span style="color:#333; font-size:11px; text-align:center;">用 iOS 相機掃描，免手動輸入 ID</span>
+            <span id="txt-id-qr-hint" style="color:#333; font-size:11px; text-align:center;">用 iOS 相機掃描，免手動輸入 ID</span>
           </div>
           <div class="info-row">
             <span id="lbl-my-mac"><span id="txt-my-mac-label">My MAC:</span></span>

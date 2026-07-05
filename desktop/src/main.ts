@@ -404,6 +404,8 @@ let rustIceCandidateQueue: string[] = [];
 let isHostMode: boolean = false; // 標記目前是否為被控端
 let rustOfferProcessed: boolean = false; // 標記 Rust 是否已經處理完 Offer
 let remoteLogsTimeout: ReturnType<typeof setTimeout> | null = null; // 遠端日誌索取逾時計時器
+let connectionTimeoutTimer: ReturnType<typeof setTimeout> | null = null; // 連線逾時計時器
+let activeSyncStatefulLabels: (() => void) | null = null; // 動態語意狀態標籤同步回調
 let dataChannelControl: RTCDataChannel | null = null;
 let dataChannelUnreliable: RTCDataChannel | null = null;
 let dataChannelClipboard: RTCDataChannel | null = null;
@@ -793,6 +795,20 @@ const fallbackTranslations: Record<string, string> = {
   "ui_sim_relay_mode": "Simulate Relay Mode",
   "ui_btn_disconnect": "Disconnect",
   "ui_confirm_disconnect": "Are you sure you want to disconnect?",
+  "ui_keyboard": "Keyboard",
+  "ui_shortcuts": "Shortcuts",
+  "ui_direct_touch": "Direct Touch",
+  "ui_trackpad": "Trackpad",
+  "ui_trackpad_mode": "Trackpad Mode",
+  "ui_mute": "Mute",
+  "ui_unmute": "Unmute",
+  "ui_btn_logout": "Log Out",
+  "ui_sdp_qr_hint": "Scan QR Code to pair (no server needed)",
+  "ui_id_qr_hint": "Scan with iOS Camera to bypass manual ID entry",
+  "alert_transfer_complete": "Transfer Complete!",
+  "alert_permissions_granted": "Permissions granted successfully! Application is ready.",
+  "alert_permissions_missing": "Permissions still missing. Please ensure they are checked in macOS System Settings.",
+  "toast_turn_saved": "TURN Servers saved! Reloading...",
 };
 
 // 統一翻譯取值函數
@@ -1123,6 +1139,31 @@ function updateDomTranslations() {
   setTextContent("txt-ts-step-3-title", t("ts_step_3_title"));
   setTextContent("txt-ts-step-3-desc", t("ts_step_3_desc"));
   setTextContent("txt-ts-step-4-desc", t("ts_step_4_desc"));
+
+  // QR Code 與新增介面元素翻譯
+  setTextContent("txt-sdp-qr-hint", t("ui_sdp_qr_hint"));
+  setTextContent("txt-id-qr-hint", t("ui_id_qr_hint"));
+
+  if (activeSyncStatefulLabels) {
+    activeSyncStatefulLabels();
+  } else {
+    // 尚未連線時，靜態翻譯預設標籤
+    const btnTouchModeFloat = document.getElementById("btn-touch-mode-float");
+    if (btnTouchModeFloat) btnTouchModeFloat.textContent = "🖱️ " + t("ui_trackpad");
+    const btnToggleKeyboardFloat = document.getElementById("btn-toggle-keyboard-float");
+    if (btnToggleKeyboardFloat) btnToggleKeyboardFloat.textContent = "⌨️ " + t("ui_keyboard");
+    const btnDisplayModeFloat = document.getElementById("btn-display-mode-float");
+    if (btnDisplayModeFloat) btnDisplayModeFloat.textContent = "🔍 " + t("btn_original_size");
+    
+    const btnTouchMode = document.getElementById("btn-touch-mode");
+    if (btnTouchMode) btnTouchMode.textContent = "🖱️ " + t("ui_trackpad_mode");
+    const btnToggleKeyboard = document.getElementById("btn-toggle-keyboard");
+    if (btnToggleKeyboard) btnToggleKeyboard.textContent = "⌨️ " + t("ui_keyboard");
+    const btnSendKeys = document.getElementById("btn-send-keys");
+    if (btnSendKeys) btnSendKeys.textContent = "⌨️ " + t("ui_shortcuts");
+    const btnSessionDisconnect = document.getElementById("btn-session-disconnect");
+    if (btnSessionDisconnect) btnSessionDisconnect.textContent = "🚪 " + t("ui_btn_logout");
+  }
 
   // 切換 PIN 顯示按鈕翻譯更新
   const btnTogglePin = document.getElementById("btn-toggle-pin");
@@ -2084,16 +2125,10 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
           videoEl.muted = true; // 雙重保障：iOS 自動播放安全策略必須為靜音
           videoEl.disablePictureInPicture = true;
           
-          // 註冊黑屏偵測與強制播放處理
-          const videoErrorOverlay = document.getElementById("video-error-overlay");
-          const btnVideoRetryPlay = document.getElementById("btn-video-retry-play");
-          const btnVideoErrorClose = document.getElementById("btn-video-error-close");
-          
           let hasPlayed = false;
           
           videoEl.onplaying = () => {
             hasPlayed = true;
-            if (videoErrorOverlay) videoErrorOverlay.style.display = "none";
             // 連線後立即在畫面中央顯示游標，讓使用者知道游標位置
             if (!HOST_RENDERS_CURSOR && !isDesktopTauri()) {
               const rc = document.getElementById("remote-cursor-indicator");
@@ -2105,32 +2140,6 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
               }
             }
           };
-          
-          if (btnVideoRetryPlay) {
-            btnVideoRetryPlay.onclick = () => {
-              videoEl.play().then(() => {
-                hasPlayed = true;
-                if (videoErrorOverlay) videoErrorOverlay.style.display = "none";
-              }).catch(err => {
-                console.error("[WebRTC] 強制手動播放失敗:", err);
-                alert("Autoplay blocked. Please click the screen to allow video playback.");
-              });
-            };
-          }
-          
-          if (btnVideoErrorClose) {
-            btnVideoErrorClose.onclick = () => {
-              if (videoErrorOverlay) videoErrorOverlay.style.display = "none";
-            };
-          }
-          
-          // 4 秒後偵測是否仍在黑屏狀態
-          setTimeout(() => {
-            if (!hasPlayed || videoEl.paused || videoEl.currentTime === 0) {
-              console.warn(t("log_webrtc_black_screen"));
-              if (videoErrorOverlay) videoErrorOverlay.style.display = "flex";
-            }
-          }, 4000);
 
           // 持續偵測影片凍結並自動恢復：iOS WKWebView 的 <video> 在背景切換、
           // jitter buffer 清空、或解碼器暫停後可能靜默停止渲染但不觸發任何事件。
@@ -2289,6 +2298,15 @@ async function startCall(remoteId: string, pin: string) {
       pin: pin,
       sdp: offer.sdp,
     }));
+
+    // 設置 15 秒連線逾時器
+    if (connectionTimeoutTimer) clearTimeout(connectionTimeoutTimer);
+    connectionTimeoutTimer = setTimeout(() => {
+      if (peerConnection && peerConnection.connectionState !== "connected") {
+        console.warn("[WebRTC] 連線逾時 (15秒未成功建立)");
+        updateConnectionStatusUI("failed");
+      }
+    }, 15000);
   } catch (e) {
     console.error("[WebRTC] startCall 嚴重錯誤:", e);
     alert(t("alert_connect_failed") + String(e));
@@ -2448,6 +2466,11 @@ function bindSystemControlChannel(ch: RTCDataChannel) {
 // 重置連線相關 UI 狀態
 function resetConnectionUI() {
   remoteHostOs = ""; // 避免跨連線沿用上一台被控端的 OS 資訊
+  activeSyncStatefulLabels = null; // 清除狀態標籤同步回調
+  if (connectionTimeoutTimer) {
+    clearTimeout(connectionTimeoutTimer);
+    connectionTimeoutTimer = null;
+  }
   const btnConnect = document.getElementById("btn-connect");
   const btnText = document.getElementById("txt-btn-connect");
   if (btnConnect) btnConnect.removeAttribute("disabled");
@@ -2513,6 +2536,12 @@ function resetConnectionUI() {
 
 // 依照 WebRTC connectionState 更新 UI 提示
 function updateConnectionStatusUI(state: string) {
+  if (state === "connected" || state === "failed" || state === "disconnected" || state === "closed") {
+    if (connectionTimeoutTimer) {
+      clearTimeout(connectionTimeoutTimer);
+      connectionTimeoutTimer = null;
+    }
+  }
   const statusMap: Record<string, string> = {
     connecting: t("conn_connecting"),
     connected:  t("conn_connected"),
@@ -3397,7 +3426,7 @@ function startTransferPolling(taskId: string) {
           clearInterval(transferPollingInterval!);
           setTimeout(() => {
             if (progressContainer) progressContainer.style.display = "none";
-            alert("Transfer Complete!");
+            alert(t("alert_transfer_complete"));
           }, 1000);
         } else if (myTask.status === "Cancelled" || myTask.status === "Failed") {
           clearInterval(transferPollingInterval!);
@@ -3667,19 +3696,65 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     applyDisplayMode();
   };
 
+  // 定義並註冊動態狀態標籤同步函式
+  const syncStatefulLabels = () => {
+    // 1. Touch Mode
+    if (btnTouchModeFloat) {
+      btnTouchModeFloat.textContent = isDirectTouchMode ? "👆 " + t("ui_direct_touch") : "🖱️ " + t("ui_trackpad");
+    }
+    const orbBtn = document.getElementById("btn-touch-mode");
+    if (orbBtn) {
+      orbBtn.textContent = isDirectTouchMode ? "👆 " + t("ui_direct_touch") : "🖱️ " + t("ui_trackpad_mode");
+    }
+
+    // 2. Keyboard Buttons
+    const btnToggleKeyboardFloat = document.getElementById("btn-toggle-keyboard-float");
+    if (btnToggleKeyboardFloat) {
+      btnToggleKeyboardFloat.textContent = "⌨️ " + t("ui_keyboard");
+    }
+    const btnToggleKeyboard = document.getElementById("btn-toggle-keyboard");
+    if (btnToggleKeyboard) {
+      btnToggleKeyboard.textContent = "⌨️ " + t("ui_keyboard");
+    }
+    const btnSendKeys = document.getElementById("btn-send-keys");
+    if (btnSendKeys) {
+      btnSendKeys.textContent = "⌨️ " + t("ui_shortcuts");
+    }
+
+    // 3. Audio Toggle
+    const btnAudioToggle = document.getElementById("btn-audio-toggle");
+    if (btnAudioToggle) {
+      const audioEl = document.getElementById("remote-audio") as HTMLAudioElement;
+      const isMuted = audioEl ? audioEl.muted : true;
+      btnAudioToggle.textContent = isMuted ? "🔇 " + t("ui_unmute") : "🔊 " + t("ui_mute");
+    }
+
+    // 4. Display Mode (re-apply to get the translated label)
+    applyDisplayMode();
+    const btnDisplayModeFloat = document.getElementById("btn-display-mode-float");
+    const btnDisplayMode = document.getElementById("btn-display-mode");
+    if (btnDisplayModeFloat && btnDisplayMode) {
+      btnDisplayModeFloat.textContent = btnDisplayMode.textContent;
+    }
+
+    // 5. Logout Button
+    const btnSessionDisconnect = document.getElementById("btn-session-disconnect");
+    if (btnSessionDisconnect) {
+      btnSessionDisconnect.textContent = "🚪 " + t("ui_btn_logout");
+    }
+  };
+  activeSyncStatefulLabels = syncStatefulLabels;
+
   if (btnDisplayMode) {
-    btnDisplayMode.textContent = "🔍 " + t("btn_original_size");
     btnDisplayMode.onclick = cycleDisplayMode;
   }
 
   // --- 取代 Quick Menu 的獨立浮動控制鈕 ---
   const btnDisplayModeFloat = document.getElementById("btn-display-mode-float") as HTMLButtonElement;
   if (btnDisplayModeFloat) {
-    btnDisplayModeFloat.textContent = btnDisplayMode ? btnDisplayMode.textContent : "🔍 " + t("btn_original_size");
     btnDisplayModeFloat.onclick = () => {
       cycleDisplayMode();
-      // applyDisplayMode 只會更新 btnDisplayMode 的文字，這裡同步浮動鈕
-      if (btnDisplayMode) btnDisplayModeFloat.textContent = btnDisplayMode.textContent;
+      syncStatefulLabels();
     };
   }
 
@@ -3695,20 +3770,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   }
 
   const btnTouchModeFloat = document.getElementById("btn-touch-mode-float") as HTMLButtonElement;
-  const syncTouchModeLabel = () => {
-    if (btnTouchModeFloat) {
-      btnTouchModeFloat.textContent = isDirectTouchMode ? "👆 Direct Touch" : "🖱️ Trackpad";
-    }
-  };
   if (btnTouchModeFloat) {
-    syncTouchModeLabel();
     btnTouchModeFloat.onclick = () => {
       isDirectTouchMode = !isDirectTouchMode;
       console.log("[FloatControls] Touch mode toggled, isDirectTouchMode:", isDirectTouchMode);
-      syncTouchModeLabel();
-      // 同步舊 Quick Menu 內按鈕文字（雖已隱藏，保持狀態一致）
-      const orbBtn = document.getElementById("btn-touch-mode");
-      if (orbBtn) orbBtn.textContent = isDirectTouchMode ? "👆 Direct Touch" : "🖱️ Trackpad Mode";
+      syncStatefulLabels();
       // 切到直控模式時隱藏合成游標；切到軌跡板模式則於下次移動時重新顯示
       if (isDirectTouchMode) {
         const rc = document.getElementById("remote-cursor-indicator");
@@ -3723,10 +3789,13 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       const audioEl = document.getElementById("remote-audio") as HTMLAudioElement;
       if (audioEl) {
         audioEl.muted = !audioEl.muted;
-        btnAudioToggle.textContent = audioEl.muted ? "🔇 Unmute" : "🔊 Mute";
+        syncStatefulLabels();
       }
     };
   }
+
+  // 初始執行一次同步
+  syncStatefulLabels();
 
   const btnSwitchMonitor = document.getElementById("btn-switch-monitor") as HTMLButtonElement;
   if (btnSwitchMonitor) {
@@ -5501,7 +5570,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     // 毛玻璃玻璃擬態 Glassmorphism 精美樣式
     menu.style.position = "fixed";
     menu.style.left = `${x}px`;
-    menu.style.top = `${y - 65}px`; // 顯示在點擊位置上方 65 像素
+    menu.style.top = `${y - 65}px`; // 預設顯示在點擊位置上方 65 像素
     menu.style.transform = "translateX(-50%) scale(0.9)";
     menu.style.opacity = "0";
     menu.style.transition = "all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)";
@@ -5602,6 +5671,30 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     });
 
     document.body.appendChild(menu);
+
+    // 限制選單不要超出螢幕左右與上下邊界
+    const rect = menu.getBoundingClientRect();
+    const menuWidth = rect.width;
+    const halfWidth = menuWidth / 2;
+    const padding = 12; // 邊距 px
+    let targetLeft = x;
+
+    if (x - halfWidth < padding) {
+      targetLeft = halfWidth + padding;
+    } else if (x + halfWidth > window.innerWidth - padding) {
+      targetLeft = window.innerWidth - halfWidth - padding;
+    }
+    menu.style.left = `${targetLeft}px`;
+
+    let targetTop = y - 65;
+    const menuHeight = rect.height;
+    if (targetTop < padding) {
+      // 若上方空間不足，則顯示在點擊位置下方 25 像素
+      targetTop = y + 25;
+    } else if (targetTop + menuHeight > window.innerHeight - padding) {
+      targetTop = window.innerHeight - menuHeight - padding;
+    }
+    menu.style.top = `${targetTop}px`;
     
     // 觸發進場動畫
     requestAnimationFrame(() => {
@@ -5610,8 +5703,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     });
   };
 
-  // 全局點擊時關閉懸浮選單
-  document.addEventListener("click", (e) => {
+  // 全局點擊/觸控時關閉懸浮選單
+  const dismissFloatingMenu = (e: Event) => {
     if (activeFloatingMenu && !activeFloatingMenu.contains(e.target as Node)) {
       const menu = activeFloatingMenu;
       menu.style.transform = "translateX(-50%) scale(0.9)";
@@ -5621,7 +5714,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         if (activeFloatingMenu === menu) activeFloatingMenu = null;
       }, 200);
     }
-  });
+  };
+  document.addEventListener("click", dismissFloatingMenu);
+  document.addEventListener("touchstart", dismissFloatingMenu, { passive: true });
 
 }
 
@@ -5784,7 +5879,7 @@ function initTailscaleGuide() {
           if (!Array.isArray(parsed)) throw new Error("Not an array");
           localStorage.setItem("custom_turn_servers", JSON.stringify(parsed));
         }
-        showToast("TURN Servers saved! Reloading...");
+        showToast(t("toast_turn_saved"));
         setTimeout(() => window.location.reload(), 1000);
       } catch (e) {
         alert(t("alert_turn_json_error"));
@@ -5878,10 +5973,14 @@ function initQuickMenu() {
     btnTouchMode.onclick = () => {
       isDirectTouchMode = !isDirectTouchMode;
       console.log("[QuickMenu] Touch mode toggled, isDirectTouchMode:", isDirectTouchMode);
-      if (isDirectTouchMode) {
-        btnTouchMode.textContent = "👆 Direct Touch";
+      if (activeSyncStatefulLabels) {
+        activeSyncStatefulLabels();
       } else {
-        btnTouchMode.textContent = "🖱️ Trackpad Mode";
+        if (isDirectTouchMode) {
+          btnTouchMode.textContent = "👆 " + t("ui_direct_touch");
+        } else {
+          btnTouchMode.textContent = "🖱️ " + t("ui_trackpad_mode");
+        }
       }
     };
   }

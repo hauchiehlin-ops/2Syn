@@ -363,5 +363,19 @@
   "ui_permission_warning": "macOSのシステム権限が不十分な場合、リモートコントロール中に黒い画面が表示されます！",
   "ui_dl_hint": "ホストとクライアントの両方のデバイスで、アプリケーションをダウンロードしてインストールする必要があります。",
   "ui_sys_auto_adj": "システムは自動的に調整されています。ネットワークとストリームの品質は最適な状態です。",
-  "ui_sim_relay_mode": "リレーモードをシミュレート"
+  "ui_sim_relay_mode": "リレーモードをシミュレート",
+  "ui_keyboard": "Keyboard",
+  "ui_shortcuts": "Shortcuts",
+  "ui_direct_touch": "Direct Touch",
+  "ui_trackpad": "Trackpad",
+  "ui_trackpad_mode": "Trackpad Mode",
+  "ui_mute": "Mute",
+  "ui_unmute": "Unmute",
+  "ui_btn_logout": "Log Out",
+  "ui_sdp_qr_hint": "Scan QR Code to pair (no server needed)",
+  "ui_id_qr_hint": "Scan with iOS Camera to bypass manual ID entry",
+  "alert_transfer_complete": "Transfer Complete!",
+  "alert_permissions_granted": "Permissions granted successfully! Application is ready.",
+  "alert_permissions_missing": "Permissions still missing. Please ensure they are checked in macOS System Settings.",
+  "toast_turn_saved": "TURN Servers saved! Reloading..."
 }

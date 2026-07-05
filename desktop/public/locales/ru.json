@@ -361,5 +361,19 @@
   "ui_permission_warning": "Недостаточные системные разрешения macOS приведут к черному экрану во время удаленного управления!",
   "ui_dl_hint": "Обоим устройствам, хосту и клиенту, необходимо загрузить и установить приложение.",
   "ui_sys_auto_adj": "Система настраивается автоматически. Сеть и качество потока находятся в оптимальном состоянии.",
-  "ui_sim_relay_mode": "Имитация режима ретрансляции"
+  "ui_sim_relay_mode": "Имитация режима ретрансляции",
+  "ui_keyboard": "Keyboard",
+  "ui_shortcuts": "Shortcuts",
+  "ui_direct_touch": "Direct Touch",
+  "ui_trackpad": "Trackpad",
+  "ui_trackpad_mode": "Trackpad Mode",
+  "ui_mute": "Mute",
+  "ui_unmute": "Unmute",
+  "ui_btn_logout": "Log Out",
+  "ui_sdp_qr_hint": "Scan QR Code to pair (no server needed)",
+  "ui_id_qr_hint": "Scan with iOS Camera to bypass manual ID entry",
+  "alert_transfer_complete": "Transfer Complete!",
+  "alert_permissions_granted": "Permissions granted successfully! Application is ready.",
+  "alert_permissions_missing": "Permissions still missing. Please ensure they are checked in macOS System Settings.",
+  "toast_turn_saved": "TURN Servers saved! Reloading..."
 }

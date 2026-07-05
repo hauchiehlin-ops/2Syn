@@ -361,5 +361,19 @@
   "ui_permission_warning": "Kebenaran sistem macOS yang tidak mencukupi akan menyebabkan skrin hitam semasa kawalan jauh!",
   "ui_dl_hint": "Kedua-dua peranti tuan rumah dan pelanggan perlu memuat turun dan memasang aplikasi.",
   "ui_sys_auto_adj": "Sistem melaras secara automatik. Rangkaian dan kualiti strim berada dalam keadaan optimum.",
-  "ui_sim_relay_mode": "Simulasi Mod Relay"
+  "ui_sim_relay_mode": "Simulasi Mod Relay",
+  "ui_keyboard": "Keyboard",
+  "ui_shortcuts": "Shortcuts",
+  "ui_direct_touch": "Direct Touch",
+  "ui_trackpad": "Trackpad",
+  "ui_trackpad_mode": "Trackpad Mode",
+  "ui_mute": "Mute",
+  "ui_unmute": "Unmute",
+  "ui_btn_logout": "Log Out",
+  "ui_sdp_qr_hint": "Scan QR Code to pair (no server needed)",
+  "ui_id_qr_hint": "Scan with iOS Camera to bypass manual ID entry",
+  "alert_transfer_complete": "Transfer Complete!",
+  "alert_permissions_granted": "Permissions granted successfully! Application is ready.",
+  "alert_permissions_missing": "Permissions still missing. Please ensure they are checked in macOS System Settings.",
+  "toast_turn_saved": "TURN Servers saved! Reloading..."
 }

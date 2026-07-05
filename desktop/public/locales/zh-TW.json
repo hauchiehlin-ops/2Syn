@@ -394,5 +394,19 @@
   "ui_permission_warning": "macOS 系統權限不足，將導致遠端控制黑屏！",
   "ui_dl_hint": "被控端與主控端設備均需下載安裝。",
   "ui_sys_auto_adj": "系統已自動動態變頻。網路與畫質處於最佳化狀態。",
-  "ui_sim_relay_mode": "模擬 Relay 中繼模式"
+  "ui_sim_relay_mode": "模擬 Relay 中繼模式",
+  "ui_keyboard": "鍵盤",
+  "ui_shortcuts": "快捷鍵",
+  "ui_direct_touch": "直控模式",
+  "ui_trackpad": "軌跡板",
+  "ui_trackpad_mode": "軌跡板模式",
+  "ui_mute": "靜音",
+  "ui_unmute": "取消靜音",
+  "ui_btn_logout": "登出",
+  "ui_sdp_qr_hint": "掃描 QR Code 完成配對（無需伺服器）",
+  "ui_id_qr_hint": "用 iOS 相機掃描，免手動輸入 ID",
+  "alert_transfer_complete": "檔案傳輸完成！",
+  "alert_permissions_granted": "已成功取得系統權限！應用程式已準備就緒。",
+  "alert_permissions_missing": "系統權限仍不足。請確保已在 macOS 系統設定中勾選。",
+  "toast_turn_saved": "中繼伺服器已儲存！即將重新載入..."
 }
