@@ -6071,6 +6071,10 @@ async function initializeApp() {
   if (pkg.version) {
     // 同步更新網頁標題，讓 Mac/Windows 原生視窗的標題列也能顯示版本號
     document.title = `2syn_Duel v${pkg.version}`;
+    // 同步更新介面中的版本號標籤，避免硬編碼顯示與實際版號不符
+    document.querySelectorAll(".app-version").forEach(el => {
+      el.textContent = `v${pkg.version}`;
+    });
   }
   setupFileTransferDropZone(() => dataChannelFileTransfer);
   initDeviceBook();
