@@ -27,8 +27,10 @@ pub fn get_global_cursor() -> (f32, f32) {
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputEvent {
     MouseMove { x: f32, y: f32 }, // 支援浮點數比例座標，適應不同解析度
-    MouseDown { button: MouseButton },
-    MouseUp { button: MouseButton },
+    // 按下/放開自帶座標，避免與 MouseMove（走獨立的 unreliable channel）之間
+    // 因跨 channel 到達順序不保證而產生的點擊位置競態（見 DEVLOG）
+    MouseDown { button: MouseButton, x: f32, y: f32 },
+    MouseUp { button: MouseButton, x: f32, y: f32 },
     MouseScroll { delta_x: i16, delta_y: i16 },
     KeyDown { keycode: u16, modifiers: u8 },
     KeyUp { keycode: u16, modifiers: u8 },
@@ -56,13 +58,17 @@ impl InputEvent {
                 buffer.extend_from_slice(&x.to_be_bytes());
                 buffer.extend_from_slice(&y.to_be_bytes());
             }
-            InputEvent::MouseDown { button } => {
+            InputEvent::MouseDown { button, x, y } => {
                 buffer.push(0x02);
                 buffer.push(*button as u8);
+                buffer.extend_from_slice(&x.to_be_bytes());
+                buffer.extend_from_slice(&y.to_be_bytes());
             }
-            InputEvent::MouseUp { button } => {
+            InputEvent::MouseUp { button, x, y } => {
                 buffer.push(0x03);
                 buffer.push(*button as u8);
+                buffer.extend_from_slice(&x.to_be_bytes());
+                buffer.extend_from_slice(&y.to_be_bytes());
             }
             InputEvent::MouseScroll { delta_x, delta_y } => {
                 buffer.push(0x04);
@@ -118,24 +124,28 @@ impl InputEvent {
                 Ok(InputEvent::MouseMove { x, y })
             }
             0x02 => {
-                if data.len() < 2 { return Err(CoreError::NetworkError("MouseDown 封包長度不足".to_string())); }
+                if data.len() < 10 { return Err(CoreError::NetworkError("MouseDown 封包長度不足".to_string())); }
                 let button = match data[1] {
                     1 => MouseButton::Left,
                     2 => MouseButton::Right,
                     3 => MouseButton::Middle,
                     _ => return Err(CoreError::NetworkError("無效的滑鼠按鍵值".to_string())),
                 };
-                Ok(InputEvent::MouseDown { button })
+                let x = f32::from_be_bytes(data[2..6].try_into().unwrap());
+                let y = f32::from_be_bytes(data[6..10].try_into().unwrap());
+                Ok(InputEvent::MouseDown { button, x, y })
             }
             0x03 => {
-                if data.len() < 2 { return Err(CoreError::NetworkError("MouseUp 封包長度不足".to_string())); }
+                if data.len() < 10 { return Err(CoreError::NetworkError("MouseUp 封包長度不足".to_string())); }
                 let button = match data[1] {
                     1 => MouseButton::Left,
                     2 => MouseButton::Right,
                     3 => MouseButton::Middle,
                     _ => return Err(CoreError::NetworkError("無效的滑鼠按鍵值".to_string())),
                 };
-                Ok(InputEvent::MouseUp { button })
+                let x = f32::from_be_bytes(data[2..6].try_into().unwrap());
+                let y = f32::from_be_bytes(data[6..10].try_into().unwrap());
+                Ok(InputEvent::MouseUp { button, x, y })
             }
             0x04 => {
                 if data.len() < 5 { return Err(CoreError::NetworkError("MouseScroll 封包長度不足".to_string())); }
@@ -190,6 +200,39 @@ impl InputEvent {
             use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
             use std::mem::size_of;
 
+            // 將正規化座標 (0..1) 轉為 SendInput 的絕對座標 dx/dy（與 MouseMove 相同換算邏輯），
+            // 讓 MouseDown/MouseUp 不必依賴另一個 channel 送來的 MouseMove 副作用去定位游標。
+            fn absolute_mouse_dxdy(x: f32, y: f32) -> (i32, i32, u32) {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{
+                    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN
+                };
+                let clamped_x = x.clamp(0.0, 1.0);
+                let clamped_y = y.clamp(0.0, 1.0);
+                let tx = TARGET_MONITOR_X.load(Ordering::Relaxed);
+                let ty = TARGET_MONITOR_Y.load(Ordering::Relaxed);
+                let tw = TARGET_MONITOR_W.load(Ordering::Relaxed);
+                let th = TARGET_MONITOR_H.load(Ordering::Relaxed);
+                let mut flags = MOUSEEVENTF_ABSOLUTE;
+                if tw > 0 && th > 0 {
+                    flags |= MOUSEEVENTF_VIRTUALDESKTOP;
+                    let abs_x = tx + (clamped_x as f64 * tw as f64) as i32;
+                    let abs_y = ty + (clamped_y as f64 * th as f64) as i32;
+                    unsafe {
+                        let vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+                        let vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+                        let vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+                        let vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+                        let dx = if vw > 1 { ((abs_x - vx) * 65535) / (vw - 1) } else { 0 };
+                        let dy = if vh > 1 { ((abs_y - vy) * 65535) / (vh - 1) } else { 0 };
+                        (dx, dy, flags)
+                    }
+                } else {
+                    let dx = (clamped_x * 65535.0) as i32;
+                    let dy = (clamped_y * 65535.0) as i32;
+                    (dx, dy, flags)
+                }
+            }
+
             unsafe {
                 let mut input = std::mem::zeroed::<INPUT>();
                 
@@ -234,21 +277,29 @@ impl InputEvent {
                         input.Anonymous.mi.dy = dy;
                         input.Anonymous.mi.dwFlags = flags;
                     }
-                    InputEvent::MouseDown { button } => {
+                    InputEvent::MouseDown { button, x, y } => {
                         input.r#type = INPUT_MOUSE;
-                        input.Anonymous.mi.dwFlags = match button {
+                        let (dx, dy, mut flags) = absolute_mouse_dxdy(*x, *y);
+                        flags |= match button {
                             MouseButton::Left => MOUSEEVENTF_LEFTDOWN,
                             MouseButton::Right => MOUSEEVENTF_RIGHTDOWN,
                             MouseButton::Middle => MOUSEEVENTF_MIDDLEDOWN,
                         };
+                        input.Anonymous.mi.dx = dx;
+                        input.Anonymous.mi.dy = dy;
+                        input.Anonymous.mi.dwFlags = flags;
                     }
-                    InputEvent::MouseUp { button } => {
+                    InputEvent::MouseUp { button, x, y } => {
                         input.r#type = INPUT_MOUSE;
-                        input.Anonymous.mi.dwFlags = match button {
+                        let (dx, dy, mut flags) = absolute_mouse_dxdy(*x, *y);
+                        flags |= match button {
                             MouseButton::Left => MOUSEEVENTF_LEFTUP,
                             MouseButton::Right => MOUSEEVENTF_RIGHTUP,
                             MouseButton::Middle => MOUSEEVENTF_MIDDLEUP,
                         };
+                        input.Anonymous.mi.dx = dx;
+                        input.Anonymous.mi.dy = dy;
+                        input.Anonymous.mi.dwFlags = flags;
                     }
                     InputEvent::MouseScroll { delta_x: _, delta_y } => {
                         input.r#type = INPUT_MOUSE;
@@ -484,10 +535,11 @@ impl InputEvent {
                     
                     event.post(CGEventTapLocation::HID);
                 }
-                InputEvent::MouseDown { button } => {
-                    // 直接使用已存全域游標座標計算點擊位置，避免從 CGEvent 非同步查詢可能造成
-                    // 的時序競爭，確保點擊精確落在目標視窗上以觸發視窗提升（Raise）行為
-                    let (gx, gy) = get_global_cursor();
+                InputEvent::MouseDown { button, x, y } => {
+                    // 使用封包自帶座標計算點擊位置，而非另外追蹤的全域游標狀態：
+                    // MouseMove 走 unreliable channel、MouseDown 走 reliable channel，
+                    // 兩者到達順序沒有保證，依賴共享的全域游標會有競爭導致點擊位置偏移。
+                    let (gx, gy) = (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0));
                     let tx = TARGET_MONITOR_X.load(Ordering::Relaxed);
                     let ty = TARGET_MONITOR_Y.load(Ordering::Relaxed);
                     let tw = TARGET_MONITOR_W.load(Ordering::Relaxed);
@@ -550,8 +602,8 @@ impl InputEvent {
                         core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, click_state);
                     event.post(CGEventTapLocation::HID);
                 }
-                InputEvent::MouseUp { button } => {
-                    let (gx, gy) = get_global_cursor();
+                InputEvent::MouseUp { button, x, y } => {
+                    let (gx, gy) = (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0));
                     let tx = TARGET_MONITOR_X.load(Ordering::Relaxed);
                     let ty = TARGET_MONITOR_Y.load(Ordering::Relaxed);
                     let tw = TARGET_MONITOR_W.load(Ordering::Relaxed);

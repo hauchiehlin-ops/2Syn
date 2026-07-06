@@ -85,6 +85,26 @@ fn composite_cursor_rgba(bytes: &mut [u8], width: usize, height: usize, cx: i32,
     }
 }
 
+/// 在像素預算內求出符合顯示器長寬比的偶數輸出尺寸。
+/// SCStreamConfiguration 預設輸出 1920×1080（16:9），當被控端螢幕不是 16:9
+/// （MacBook 內建螢幕約 1.54:1）時，ScreenCaptureKit 會把畫面等比縮放後
+/// 置中、左右補黑邊烘進影格。client 端把整張影格當成螢幕做比例映射，
+/// 就會產生「越靠螢幕左右邊緣偏移越大」的系統性游標偏移。
+/// 解法：擷取輸出與編碼器尺寸都跟著顯示器長寬比走，讓影格內容佔滿整張影格。
+fn fit_to_aspect(budget_w: u32, budget_h: u32, aspect: f64) -> (u32, u32) {
+    let bw = budget_w.max(2) as f64;
+    let bh = budget_h.max(2) as f64;
+    let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { bw / bh };
+    let (w, h) = if bw / bh > aspect {
+        (bh * aspect, bh)
+    } else {
+        (bw, bw / aspect)
+    };
+    // YUV 4:2:0 要求偶數尺寸
+    let even = |v: f64| ((v as u32) & !1).max(2);
+    (even(w), even(h))
+}
+
 pub struct VideoStreamer {
     track: Arc<TrackLocalStaticSample>,
     encoder: Arc<Mutex<Box<dyn VideoHardwareEncoder + Send + Sync>>>,
@@ -317,17 +337,39 @@ impl VideoStreamer {
                 let target_fps = current_config.target_fps.min(30).max(1); // 為防止 Mac 死機，硬性限制最高 30 FPS
                 let frame_time = std::time::Duration::from_millis((1000 / target_fps) as u64);
                 
+                // ABR 目標解析度以顯示器實際長寬比修正（16:9 預設值只當像素預算用），
+                // 避免非 16:9 螢幕（MacBook 內建螢幕）被烘進黑邊造成游標比例座標偏移
+                let (target_width, target_height) = {
+                    let tw = crate::input::TARGET_MONITOR_W.load(std::sync::atomic::Ordering::Relaxed);
+                    let th = crate::input::TARGET_MONITOR_H.load(std::sync::atomic::Ordering::Relaxed);
+                    if tw > 0 && th > 0 {
+                        fit_to_aspect(current_config.target_width, current_config.target_height, tw as f64 / th as f64)
+                    } else {
+                        (current_config.target_width, current_config.target_height)
+                    }
+                };
+
                 // 若 ABR 觸發了品質變更，通知硬體編碼器動態調整
-                if current_config.bitrate_limit_kbps != last_applied_bitrate || target_fps != last_applied_fps || current_config.target_width != last_applied_width || current_config.target_height != last_applied_height {
+                if current_config.bitrate_limit_kbps != last_applied_bitrate || target_fps != last_applied_fps || target_width != last_applied_width || target_height != last_applied_height {
                     if let Ok(mut encoder_guard) = encoder_arc.try_lock() {
-                        if let Err(e) = encoder_guard.reconfigure(current_config.bitrate_limit_kbps, target_fps, current_config.target_width, current_config.target_height) {
+                        if let Err(e) = encoder_guard.reconfigure(current_config.bitrate_limit_kbps, target_fps, target_width, target_height) {
                             eprintln!("[Video] 動態調整編碼器失敗: {}", e);
                         } else {
+                            #[cfg(target_os = "macos")]
+                            let resolution_changed = target_width != last_applied_width || target_height != last_applied_height;
                             last_applied_bitrate = current_config.bitrate_limit_kbps;
                             last_applied_fps = target_fps;
-                            last_applied_width = current_config.target_width;
-                            last_applied_height = current_config.target_height;
+                            last_applied_width = target_width;
+                            last_applied_height = target_height;
                             let _ = encoder_guard.force_intra_frame();
+                            // macOS：SCK 擷取輸出尺寸是建立 stream 時固定的，解析度變更時
+                            // 必須重建 stream，讓擷取輸出與編碼器 session 尺寸保持一致
+                            #[cfg(target_os = "macos")]
+                            if resolution_changed {
+                                if let Some(stream) = macos_stream.take() {
+                                    let _ = stream.stop_capture();
+                                }
+                            }
                         }
                     }
                 }
@@ -393,7 +435,29 @@ impl VideoStreamer {
                                 crate::input::TARGET_MONITOR_Y.store(frame.y as i32, std::sync::atomic::Ordering::Relaxed);
                                 crate::input::TARGET_MONITOR_W.store(frame.width as u32, std::sync::atomic::Ordering::Relaxed);
                                 crate::input::TARGET_MONITOR_H.store(frame.height as u32, std::sync::atomic::Ordering::Relaxed);
-                                
+
+                                // 擷取輸出尺寸必須明確設定為「符合顯示器長寬比」：
+                                // SCStreamConfiguration 預設 1920×1080，非 16:9 螢幕會被烘入黑邊，
+                                // 導致 client 比例座標系統性偏移（詳見 fit_to_aspect 註解）。
+                                let (out_w, out_h) = fit_to_aspect(
+                                    current_config.target_width,
+                                    current_config.target_height,
+                                    frame.width as f64 / (frame.height as f64).max(1.0),
+                                );
+                                // 編碼器 session 與擷取輸出尺寸保持一致，避免 VT 再次縮放變形
+                                if out_w != last_applied_width || out_h != last_applied_height {
+                                    if let Ok(mut encoder_guard) = encoder_arc.try_lock() {
+                                        if encoder_guard.reconfigure(current_config.bitrate_limit_kbps, target_fps, out_w, out_h).is_ok() {
+                                            last_applied_bitrate = current_config.bitrate_limit_kbps;
+                                            last_applied_fps = target_fps;
+                                            last_applied_width = out_w;
+                                            last_applied_height = out_h;
+                                            let _ = encoder_guard.force_intra_frame();
+                                        }
+                                    }
+                                }
+                                println!("[Video] SCK 擷取輸出 {}x{}（顯示器 {}x{} points）", out_w, out_h, frame.width, frame.height);
+
                                 let filter = screencapturekit::stream::content_filter::SCContentFilter::builder().display(display).build();
                                 let min_frame_interval = screencapturekit::cm::CMTime::new(1, target_fps as i32);
                                 let config = screencapturekit::stream::configuration::SCStreamConfiguration::new()
@@ -401,6 +465,10 @@ impl VideoStreamer {
                                     // 被控端不再把硬體游標烘焙進畫面，避免與前端本地游標形成雙游標。
                                     // 代價是失去原生游標外形，由前端統一畫箭頭。
                                     .with_shows_cursor(false)
+                                    .with_width(out_w)
+                                    .with_height(out_h)
+                                    // 輸出與來源長寬比已一致，scales_to_fit 只是保險（防偶數修整的 1px 差）
+                                    .with_scales_to_fit(true)
                                     .with_pixel_format(screencapturekit::stream::configuration::PixelFormat::YCbCr_420v)
                                     .with_minimum_frame_interval(&min_frame_interval);
                                 let stream = screencapturekit::async_api::AsyncSCStream::new(&filter, &config, 5, screencapturekit::stream::output_type::SCStreamOutputType::Screen);

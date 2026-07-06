@@ -20,6 +20,23 @@
 
 # 歷程
 
+## 2026-07-06 — 修正 MacBook Air 游標偏移真正根因（SCK 擷取黑邊，非競態）
+
+- **問題/目標**：前一筆「跨 channel 競態」修正上線後，MacBook Air host 的游標偏移**沒有改善**——固定約 1 公分、穩定重現，代表是系統性映射錯誤，不是時序競態。
+- **根因/做法**：
+  1. `core/src/video.rs` 建立 SCK stream 時**從未設定輸出寬高**，`SCStreamConfiguration` 使用 Apple 預設 1920×1080（16:9）。MacBook 內建螢幕是 ~1.54:1（Air 13 吋 2560×1664），ScreenCaptureKit 會把畫面等比縮放後置中、**左右補黑邊烘進影格**。client 把整張 16:9 影格當成螢幕做比例映射，於是產生水平方向的系統性偏移：螢幕中央為 0、越靠左右邊緣越大（理論最大 ~6.7% 寬 ≈ 2cm）。Mac mini 接 16:9 外接螢幕時長寬比剛好一致、無黑邊，所以完全準確——這就是「一台準一台不準」的真正原因。
+  2. **修法**（`core/src/video.rs`）：新增 `fit_to_aspect()`，把 ABR 的 16:9 目標解析度當「像素預算」，實際輸出尺寸依 `display.frame()` 的長寬比修正（偶數對齊）；SCK config 明確 `with_width/with_height`（加 `scales_to_fit(true)` 保險）；編碼器 session 同步 reconfigure 成相同尺寸避免 VT 二次縮放；ABR 解析度變更時強制重建 SCK stream 保持兩者一致。
+- **教訓**：「固定、可穩定重現」的偏移是映射鏈某一段的長寬比/座標系不一致，「時好時壞」才可能是競態。下次先量化偏移的空間分佈（中央 vs 邊緣、水平 vs 垂直）再下診斷——本例「中央準、越往兩側越偏」一測就能直指黑邊。前一筆點擊帶座標的協定修正仍保留（它修掉的是真實存在的另一個潛在競態）。
+
+## 2026-07-06 — 修正滑鼠點擊位置偏移（MouseDown/Up 跨 channel 座標競態）
+
+- **問題/目標**：遠端連線到 Mac mini 時滑鼠定位準確，但連線到 MacBook Air 時點擊位置與實際指向點相差約 1 公分。
+- **根因/做法**：
+  1. 先排除了 Retina/DPI 縮放假設——`core/src/input.rs` 的座標換算本就是用 points（`CGDisplay`/`SCDisplay.frame()`）而非 pixel，且 client 端是比例對比例映射，理論上與 scale factor 無關；也排除了多螢幕假設（MacBook Air 並未外接螢幕）。
+  2. 真正根因：`MouseDown`/`MouseUp` 封包本身不帶座標，host 端點擊時讀取的是另外追蹤的「上一筆 `MouseMove` 座標」（`get_global_cursor()`）。但 `MouseMove` 走 `input-unreliable` data channel，`MouseDown`/`MouseUp` 走 `input-control`（reliable）——WebRTC 的兩個 data channel 之間**沒有到達順序保證**。若 `MouseDown` 比最後一筆 `MouseMove`更早送達 host，點擊就會用到舊座標，偏移量恰好等於「這段時間游標移動的距離」。兩台 host 因為網路/編碼負載造成的相對抖動不同，競態觸發機率也不同，導致只有一台觀察到偏移。
+  3. **修法**：讓 `MouseDown`/`MouseUp` 封包自帶座標（`core/src/input.rs`：payload 由 1 byte 的 button 擴充為 `button + x(4B) + y(4B)`；macOS 端 `simulate()` 直接用封包座標建 `CGPoint`，不再呼叫 `get_global_cursor()`；Windows 端同步补上 `MOUSEEVENTF_ABSOLUTE` 絕對定位，之前完全沒有設定位置）。Client 端（`desktop/src/main.ts`）新增 `buildMouseButtonPayload()`，所有 ~20 處觸發點擊/放開的呼叫點都改用手勢當下已知的正規化座標（`currentCursorPercentX/Y`、`trackpadCursorX/Y`，或該手勢分支剛算出的 `x,y`）打包送出，不再依賴跨 channel 的共享狀態。
+- **教訓**：任何「按鈕事件依賴另一個獨立訊息流之前已同步的狀態」的設計，只要那個獨立訊息流走的是不同 channel/不保證順序的傳輸，就有競態風險；出現「時好時壞、隨網路環境變化」的小幅度定位誤差時，比起怀疑座標換算公式，更該先怀疑「跨 channel/跨事件的隱含時序假設」。
+
 ## 2026-07-05 — 修正 Android 端連線逾時相容性問題 (WebRTC connectionState)
 
 - **問題/目標**：解決 Android Client 成功連線後瞬間斷開（約 0.24 秒）的問題，確保 Android WebView 環境下連線穩定性。

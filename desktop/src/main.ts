@@ -3496,6 +3496,20 @@ function buildInputPacket(eventType: number, payload: Uint8Array): Uint8Array {
   return packet;
 }
 
+// MouseDown/MouseUp 自帶座標（button + x + y），而非只送按鍵：
+// MouseMove 走 input-unreliable channel、MouseDown/Up 走 input-control channel，
+// 兩個 data channel 之間沒有到達順序保證，若點擊只依賴 host 端另外追蹤的「上一筆
+// MouseMove 座標」，會在網路抖動時使用到舊座標，導致點擊位置偏移。改成座標隨封包
+// 一起送，host 端就不必依賴任何跨 channel 的共享狀態。
+function buildMouseButtonPayload(button: number, x: number, y: number): Uint8Array {
+  const payload = new Uint8Array(9);
+  const view = new DataView(payload.buffer);
+  payload[0] = button;
+  view.setFloat32(1, Math.max(0, Math.min(1, x)), false);
+  view.setFloat32(5, Math.max(0, Math.min(1, y)), false);
+  return payload;
+}
+
 function sendInputPacket(packet: Uint8Array) {
   const eventType = packet[12];
   if (eventType === 0x01 || eventType === 0x07) {
@@ -4082,14 +4096,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     // 這裡只需補送「第二擊」：被控端（macOS 依 clickState 連擊追蹤、Windows
     // 依系統雙擊計時）即可判定為雙擊。若補送兩擊會累積成三連擊，
     // 導致 Finder / 檔案總管雙擊開啟資料夾失效。
-    const payloadDown = new Uint8Array(1);
-    payloadDown[0] = 1; // Left click down
-    sendInputPacket(buildInputPacket(0x02, payloadDown));
+    const clickX = currentCursorPercentX, clickY = currentCursorPercentY;
+    sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, clickX, clickY)));
 
     setTimeout(() => {
-      const payloadUp = new Uint8Array(1);
-      payloadUp[0] = 1; // Left click up
-      sendInputPacket(buildInputPacket(0x03, payloadUp));
+      sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, clickX, clickY)));
       console.log("[Gesture] 雙擊第二擊發送完成");
     }, 60);
   };
@@ -4139,9 +4150,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   // 先釋放左鍵並清除單指狀態，避免「左鍵卡住」污染後續的雙指捲動/捏合或三指手勢。
   const releaseSingleFingerDragIfActive = () => {
     if (isDragging || hasTriggeredLongPress) {
-      const payload = new Uint8Array(1);
-      payload[0] = 1; // Left button up
-      sendInputPacket(buildInputPacket(0x03, payload));
+      sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, currentCursorPercentX, currentCursorPercentY)));
       console.log("[Gesture] 多指轉換：釋放單指拖曳殘留的左鍵，避免誤判");
     }
     if (longPressTimer) {
@@ -4302,23 +4311,23 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (!isDirectTouchMode && !pointerLockUnavailable && document.pointerLockElement !== videoEl) {
       videoEl.requestPointerLock().catch(() => { pointerLockUnavailable = true; });
     }
-    const payload = new Uint8Array(1);
-    if (e.button === 0) payload[0] = 1;
-    else if (e.button === 2) payload[0] = 2;
-    else if (e.button === 1) payload[0] = 3;
+    let btn = 0;
+    if (e.button === 0) btn = 1;
+    else if (e.button === 2) btn = 2;
+    else if (e.button === 1) btn = 3;
     else return;
-    sendInputPacket(buildInputPacket(0x02, payload));
+    sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(btn, currentCursorPercentX, currentCursorPercentY)));
   });
 
   videoEl.addEventListener("pointerup", (e) => {
     if (e.pointerType === "touch" || e.pointerType === "pen") return;
     e.preventDefault();
-    const payload = new Uint8Array(1);
-    if (e.button === 0) payload[0] = 1;
-    else if (e.button === 2) payload[0] = 2;
-    else if (e.button === 1) payload[0] = 3;
+    let btn = 0;
+    if (e.button === 0) btn = 1;
+    else if (e.button === 2) btn = 2;
+    else if (e.button === 1) btn = 3;
     else return;
-    sendInputPacket(buildInputPacket(0x03, payload));
+    sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(btn, currentCursorPercentX, currentCursorPercentY)));
   });
 
   videoEl.addEventListener("pointermove", (e) => {
@@ -4427,8 +4436,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   // --- Apple Pencil / 觸控筆壓力感應 ---
   // 偵測 pointerType==="pen"，傳送帶壓力的 PenMove 封包 (0x09) 到被控端
   let _penDown = false;
-  const sendPenPacket = (e: PointerEvent) => {
-    if (!dataChannelUnreliable || dataChannelUnreliable.readyState !== "open") return;
+  const sendPenPacket = (e: PointerEvent): { px: number, py: number } => {
     const rect = videoEl.getBoundingClientRect();
     const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
     const containerRatio = rect.width / rect.height;
@@ -4440,29 +4448,33 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
     const px = Math.max(0, Math.min(1, (e.clientX - rect.left - ox) / rw));
     const py = Math.max(0, Math.min(1, (e.clientY - rect.top - oy) / rh));
-    const pressure = Math.round(e.pressure * 65535);
-    const tiltX = Math.round(Math.max(-90, Math.min(90, (e as any).tiltX || 0)));
-    const tiltY = Math.round(Math.max(-90, Math.min(90, (e as any).tiltY || 0)));
-    const buf = new ArrayBuffer(13);
-    const view = new DataView(buf);
-    view.setUint8(0, 0x09);
-    view.setFloat32(1, px, false);
-    view.setFloat32(5, py, false);
-    view.setUint16(9, pressure, false);
-    view.setInt8(11, tiltX);
-    view.setInt8(12, tiltY);
-    dataChannelUnreliable.send(buf);
+    if (dataChannelUnreliable && dataChannelUnreliable.readyState === "open") {
+      const pressure = Math.round(e.pressure * 65535);
+      const tiltX = Math.round(Math.max(-90, Math.min(90, (e as any).tiltX || 0)));
+      const tiltY = Math.round(Math.max(-90, Math.min(90, (e as any).tiltY || 0)));
+      const buf = new ArrayBuffer(13);
+      const view = new DataView(buf);
+      view.setUint8(0, 0x09);
+      view.setFloat32(1, px, false);
+      view.setFloat32(5, py, false);
+      view.setUint16(9, pressure, false);
+      view.setInt8(11, tiltX);
+      view.setInt8(12, tiltY);
+      dataChannelUnreliable.send(buf);
+    }
     updateCursorOverlay(px, py);
+    currentCursorPercentX = px;
+    currentCursorPercentY = py;
+    return { px, py };
   };
 
   videoEl.addEventListener("pointerdown", (e) => {
     if (e.pointerType !== "pen") return;
     e.preventDefault();
     _penDown = true;
+    const { px, py } = sendPenPacket(e);
     // 送出 MouseDown（複用現有封包，讓被控端知道筆尖按下）
-    const payload = new Uint8Array([1]); // Left button
-    sendInputPacket(buildInputPacket(0x02, payload));
-    sendPenPacket(e);
+    sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, px, py)));
   }, { passive: false });
 
   videoEl.addEventListener("pointermove", (e) => {
@@ -4475,17 +4487,15 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (e.pointerType !== "pen") return;
     e.preventDefault();
     _penDown = false;
-    sendPenPacket(e);
-    const payload = new Uint8Array([1]);
-    sendInputPacket(buildInputPacket(0x03, payload));
+    const { px, py } = sendPenPacket(e);
+    sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, px, py)));
   }, { passive: false });
 
   videoEl.addEventListener("pointercancel", (e) => {
     if (e.pointerType !== "pen") return;
     if (_penDown) {
       _penDown = false;
-      const payload = new Uint8Array([1]);
-      sendInputPacket(buildInputPacket(0x03, payload));
+      sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, currentCursorPercentX, currentCursorPercentY)));
     }
   });
 
@@ -4542,10 +4552,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         wasLongPressDrag = true;
         
         // 發送滑鼠左鍵按下
-        const payload = new Uint8Array(1);
-        payload[0] = 1; // Left click down
-        sendInputPacket(buildInputPacket(0x02, payload));
-        
+        sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, currentCursorPercentX, currentCursorPercentY)));
+
         triggerHaptic("heavy");
         console.log("[Gesture] 單指長按重壓，觸發左鍵拖曳模式");
       }, 500); // 400→500ms：降低「手指稍停就誤觸拖曳/框選」的機率
@@ -4739,10 +4747,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
               pendingMouseMoveX = startPctX;
               pendingMouseMoveY = startPctY;
               triggerMoveRaf();
-              
-              const payload = new Uint8Array(1);
-              payload[0] = 1; // Left click down
-              sendInputPacket(buildInputPacket(0x02, payload));
+              currentCursorPercentX = startPctX;
+              currentCursorPercentY = startPctY;
+
+              sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, startPctX, startPctY)));
             }
           } else {
             // 普通單指滑動：只發送滑鼠移動，不觸發框選 (MouseDown)
@@ -4767,9 +4775,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           if (moveDist > 12) {
             isDragging = true;
             isPotentialDrag = false;
-            const payload = new Uint8Array(1);
-            payload[0] = 1; // Left click down
-            sendInputPacket(buildInputPacket(0x02, payload));
+            sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, currentCursorPercentX, currentCursorPercentY)));
             console.log("[Gesture] 雙擊拖曳模式激活");
           }
         }
@@ -4844,14 +4850,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     // 雙指輕觸判定：無兩指大幅滑動 (!twoFingerHasMoved) 時，在第一根手指抬起時觸發右鍵
     if (maxTouches === 2) {
       if (touchStartTime > 0 && now - touchStartTime < 350 && !isLocalPinching && !twoFingerHasMoved) {
-        const payloadDown = new Uint8Array(1);
-        payloadDown[0] = 2; // Right click down
-        sendInputPacket(buildInputPacket(0x02, payloadDown));
-        
+        const rClickX = currentCursorPercentX, rClickY = currentCursorPercentY;
+        sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(2, rClickX, rClickY)));
+
         setTimeout(() => {
-          const payloadUp = new Uint8Array(1);
-          payloadUp[0] = 2; // Right click up
-          sendInputPacket(buildInputPacket(0x03, payloadUp));
+          sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(2, rClickX, rClickY)));
           console.log("[Gesture] 雙指輕點，發送右鍵釋送完成");
         }, 60);
         
@@ -4888,6 +4891,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           mobileKeyboardInput.blur();
         }
       }
+      const releaseX = currentCursorPercentX, releaseY = currentCursorPercentY;
       currentCursorPercentX = 0.5;
       currentCursorPercentY = 0.5;
       // 手指離開螢幕：停止邊緣自動平移
@@ -4896,9 +4900,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
       if (hasTriggeredLongPress) {
         // 長按重壓拖曳結束：釋放滑鼠左鍵，並彈出懸浮選項選單
-        const payload = new Uint8Array(1);
-        payload[0] = 1; // Left click release
-        sendInputPacket(buildInputPacket(0x03, payload));
+        sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, releaseX, releaseY)));
         isDragging = false;
         
         const clientX = e.changedTouches.length > 0 ? e.changedTouches[0].clientX : window.innerWidth / 2;
@@ -4920,9 +4922,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       
       if (isDirectTouchMode) {
         if (isDragging) {
-          const payload = new Uint8Array(1);
-          payload[0] = 1; // Left click release
-          sendInputPacket(buildInputPacket(0x03, payload));
+          sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, releaseX, releaseY)));
           isDragging = false;
           // 註：一般拖曳（拖視窗、捲動、移動圖示）結束不再彈出懸浮選單，
           // 懸浮選單只在「長按」這個明確手勢後出現（見上方 hasTriggeredLongPress 分支），避免太容易誤觸。
@@ -4956,15 +4956,13 @@ function setupInputControl(videoEl: HTMLVideoElement) {
             pendingMouseMoveX = x;
             pendingMouseMoveY = y;
             triggerMoveRaf();
-            
-            const payloadDown = new Uint8Array(1);
-            payloadDown[0] = 1;
-            sendInputPacket(buildInputPacket(0x02, payloadDown));
+            currentCursorPercentX = x;
+            currentCursorPercentY = y;
+
+            sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, x, y)));
             triggerHaptic("light");
             setTimeout(() => {
-              const payloadUp = new Uint8Array(1);
-              payloadUp[0] = 1;
-              sendInputPacket(buildInputPacket(0x03, payloadUp));
+              sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, x, y)));
             }, 60);
 
             lastTapTime = now;
@@ -4978,9 +4976,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         }
       } else {
         if (isDragging) {
-          const payload = new Uint8Array(1);
-          payload[0] = 1; // Left click release
-          sendInputPacket(buildInputPacket(0x03, payload));
+          sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, releaseX, releaseY)));
           isDragging = false;
           // 註：軌跡板一般拖曳結束不再彈出懸浮選單，只在「長按」手勢後出現（避免誤觸）。
         } else if (isPotentialDrag) {
@@ -4996,14 +4992,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
                 sendDoubleClickSequence();
                 lastTapTime = 0;
               } else {
-                const payloadDown = new Uint8Array(1);
-                payloadDown[0] = 1;
-                sendInputPacket(buildInputPacket(0x02, payloadDown));
+                const trackTapX = trackpadCursorX, trackTapY = trackpadCursorY;
+                sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, trackTapX, trackTapY)));
                 triggerHaptic("light");
                 setTimeout(() => {
-                  const payloadUp = new Uint8Array(1);
-                  payloadUp[0] = 1;
-                  sendInputPacket(buildInputPacket(0x03, payloadUp));
+                  sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, trackTapX, trackTapY)));
                 }, 20);
 
                 // 註：先前曾在此處「單指點擊」就自動彈出虛擬鍵盤，
@@ -5051,19 +5044,15 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       longPressTimer = null;
     }
     hasTriggeredLongPress = false;
+    const cancelX = currentCursorPercentX, cancelY = currentCursorPercentY;
     currentCursorPercentX = 0.5;
     currentCursorPercentY = 0.5;
     // 觸控取消：停止邊緣自動平移
     isMouseInsideVideo = false;
     hasMouseMoved = false;
 
-    const payloadLeft = new Uint8Array(1);
-    payloadLeft[0] = 1;
-    sendInputPacket(buildInputPacket(0x03, payloadLeft));
-
-    const payloadRight = new Uint8Array(1);
-    payloadRight[0] = 2;
-    sendInputPacket(buildInputPacket(0x03, payloadRight));
+    sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, cancelX, cancelY)));
+    sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(2, cancelX, cancelY)));
 
     isDragging = false;
     isPotentialDrag = false;
@@ -5668,13 +5657,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         } else if (opt.action === "selectall") {
           sendShortcut(aCode);
         } else if (opt.action === "rightclick") {
-          const payloadDown = new Uint8Array(1);
-          payloadDown[0] = 2; // Right click down
-          sendInputPacket(buildInputPacket(0x02, payloadDown));
+          const menuClickX = currentCursorPercentX, menuClickY = currentCursorPercentY;
+          sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(2, menuClickX, menuClickY)));
           setTimeout(() => {
-            const payloadUp = new Uint8Array(1);
-            payloadUp[0] = 2; // Right click up
-            sendInputPacket(buildInputPacket(0x03, payloadUp));
+            sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(2, menuClickX, menuClickY)));
           }, 60);
         }
 
