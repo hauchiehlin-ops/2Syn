@@ -874,37 +874,18 @@ function showDiagnosticResult() {
 async function initI18n() {
   const langSelect = document.getElementById("language-select") as HTMLSelectElement;
   
-  // 監聽選擇變更
+  // 監聽選擇變更（並記住使用者的選擇，重啟後沿用）
   langSelect.addEventListener("change", async (e) => {
     const target = e.target as HTMLSelectElement;
+    localStorage.setItem("2syn_lang", target.value);
     await loadLanguage(target.value);
   });
 
-  // 預設偵測系統語系或採用繁體中文
-  const systemLang = navigator.language;
-  let defaultLang = "zh-TW";
-  
-  if (systemLang.startsWith("zh-CN")) {
-    defaultLang = "zh-CN";
-  } else if (systemLang.startsWith("ja")) {
-    defaultLang = "ja";
-  } else if (systemLang.startsWith("ko")) {
-    defaultLang = "ko";
-  } else if (systemLang.startsWith("de")) {
-    defaultLang = "de";
-  } else if (systemLang.startsWith("th")) {
-    defaultLang = "th";
-  } else if (systemLang.startsWith("id")) {
-    defaultLang = "id";
-  } else if (systemLang.startsWith("ms")) {
-    defaultLang = "ms";
-  } else if (systemLang.startsWith("ru")) {
-    defaultLang = "ru";
-  } else if (systemLang.startsWith("es")) {
-    defaultLang = "es";
-  } else if (systemLang.startsWith("en") || !systemLang.startsWith("zh")) {
-    defaultLang = "en";
-  }
+  // 預設英文；使用者手動切換過則沿用上次選擇
+  const savedLang = localStorage.getItem("2syn_lang");
+  const isValidLang = savedLang !== null &&
+    Array.from(langSelect.options).some((o) => o.value === savedLang);
+  const defaultLang = isValidLang ? savedLang! : "en";
 
   langSelect.value = defaultLang;
   await loadLanguage(defaultLang);
@@ -1479,12 +1460,46 @@ function showClipboardToast(text: string) {
   setTimeout(() => { if (toast.parentNode) toast.remove(); }, 6000);
 }
 
+async function readLocalClipboard(): Promise<string> {
+  if (isDesktopTauri()) {
+    try {
+      return await invoke<string>("read_clipboard");
+    } catch (e) {
+      console.warn("[clipboard] readLocalClipboard tauri error:", e);
+    }
+  }
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    try {
+      return await navigator.clipboard.readText();
+    } catch (e) {
+      console.warn("[clipboard] readLocalClipboard browser error:", e);
+    }
+  }
+  return "";
+}
+
+async function pushClipboardToHost() {
+  if (!dataChannelClipboard || dataChannelClipboard.readyState !== "open") return;
+  try {
+    const text = await readLocalClipboard();
+    if (text && text !== _lastRemoteClipboard) {
+      _lastRemoteClipboard = text;
+      const msg = JSON.stringify({ type: "clipboard_push", text });
+      dataChannelClipboard.send(msg);
+      console.log(t("log_clip_push_client"), text.substring(0, 40));
+    }
+  } catch (e) {
+    console.warn("[clipboard] pushClipboardToHost error:", e);
+  }
+}
+
 function initClipboardSync() {
   // 主控端複製文字時 → 推送至被控端
   const onCopy = async (e: ClipboardEvent) => {
     const text = e.clipboardData?.getData("text/plain") || "";
     if (!text || !dataChannelClipboard || dataChannelClipboard.readyState !== "open") return;
     try {
+      _lastRemoteClipboard = text;
       const msg = JSON.stringify({ type: "clipboard_push", text });
       dataChannelClipboard.send(msg);
       console.log(t("log_clip_push_client"), text.substring(0, 40));
@@ -1492,23 +1507,11 @@ function initClipboardSync() {
   };
   document.addEventListener("copy", onCopy);
 
-  // 被控端剪貼簿輪詢（每 1.5 秒透過 Tauri read_clipboard 讀取被控端）
+  // 定期輪詢剪貼簿變化並推送（每 1.5 秒）
   if (_clipboardPollInterval) clearInterval(_clipboardPollInterval);
   if (isDesktopTauri()) {
     _clipboardPollInterval = setInterval(async () => {
-      if (!dataChannelClipboard || dataChannelClipboard.readyState !== "open") return;
-      try {
-        const remoteText = await invoke<string>("read_clipboard");
-        if (remoteText && remoteText !== _lastRemoteClipboard) {
-          _lastRemoteClipboard = remoteText;
-          // 同步至主控端（Tauri 是被控端，推送至主控端的 DataChannel）
-          // 注意：此路徑只在 Tauri Host 模式下運行
-          // 被控端讀到自己的剪貼簿後推送給主控端
-          const msg = JSON.stringify({ type: "clipboard_push", text: remoteText });
-          dataChannelClipboard.send(msg);
-          console.log(t("log_clip_push_host"), remoteText.substring(0, 40));
-        }
-      } catch {}
+      await pushClipboardToHost();
     }, 1500);
   }
 
@@ -2290,6 +2293,7 @@ async function startCall(remoteId: string, pin: string) {
         const msg = JSON.parse(ev.data);
         if (msg.type === "clipboard_push" && msg.text) {
           console.log(`[clipboard] 收到被控端剪貼簿: ${msg.text.substring(0, 40)}`);
+          _lastRemoteClipboard = msg.text;
           // 桌面端直接寫入，iOS 需用戶手勢 → 顯示 toast 讓用戶點擊確認
           navigator.clipboard.writeText(msg.text).catch(() => {
             showClipboardToast(msg.text);
@@ -3517,6 +3521,12 @@ function sendInputPacket(packet: Uint8Array) {
       dataChannelUnreliable.send(packet as any);
       return;
     }
+    // 後備：unreliable 通道未開時改走 reliable 通道，但序號必須改用 reliable
+    // 計數器——host 端兩條通道各自追蹤 last_seq，若帶著 unreliable 序號混入，
+    // 會污染 input-control 的 last_seq，讓後續鍵盤/點擊封包（序號差 ≤256 時）
+    // 被重放防禦誤判丟棄。
+    controlSeqNumber++;
+    new DataView(packet.buffer, packet.byteOffset).setUint32(0, controlSeqNumber, false);
   }
   if (dataChannelControl && dataChannelControl.readyState === "open") {
     dataChannelControl.send(packet as any);
@@ -5152,6 +5162,26 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     // 組字結果由 compositionend 送出，不在此送原始 keycode
     if (e.isComposing || e.keyCode === 229) return;
 
+    const isPaste = ((e.ctrlKey && !e.altKey && !e.shiftKey) || (e.metaKey && !e.altKey && !e.shiftKey)) && (e.code === "KeyV" || e.keyCode === 86);
+    if (isPaste) {
+      e.preventDefault();
+      const ctrlCode = 17;
+      const winCode = 91;
+      const vCode = 86;
+      const modCode = remoteHostOs === "windows" || remoteHostOs === "linux" ? ctrlCode : winCode;
+      const modBit = modCode === ctrlCode ? 2 : 8;
+
+      pushClipboardToHost().finally(() => {
+        pressKey(modCode, modBit);
+        pressKey(vCode, modBit);
+        setTimeout(() => {
+          releaseKey(vCode, modBit);
+          releaseKey(modCode, 0);
+        }, 20);
+      });
+      return;
+    }
+
     e.preventDefault();
 
     const code = e.code || `Key_${e.keyCode}`;
@@ -5376,24 +5406,62 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
     // =========================================================================
     // 即時輸入（Live Typing）：邊打邊送到遠端焦點欄位
-    // - 中文/日文等以 IME 組字：組字中不送，compositionend 時整段送出
+    // - CJK IME 組字（注音/拼音候選中）：組字中不送，compositionend 時整段送出
+    // - 拉丁字母組字：Android 的 Gboard/三星鍵盤即使 autocorrect="off" 也把一般
+    //   英文打字放在組字狀態、按到空白/標點才 commit。若等 compositionend 才送，
+    //   整個單字期間遠端完全沒反應（體感「打字傳很慢」）。因此拉丁組字改為
+    //   「邊打邊串流」：每次組字內容變化就送出與已串流內容的差異（共同前綴保留、
+    //   其餘退格重送），compositionend 時再對最終字串補一次差異（自動修正）。
     // - 一般字元 / 退格 / 換行：input 當下即時送，並把欄位清回 sentinel，
     //   讓下一次 input 只攜帶「新輸入的增量」。
     // =========================================================================
     let imeComposing = false;
+    let streamedComposition = ""; // 組字期間已即時串流到遠端的內容（僅拉丁字串會串流）
+
+    // 僅對「純拉丁」組字串流：注音符號/漢字等組字中間狀態不可打到遠端
+    const isLatinText = (s: string) => /^[\x20-\x7E\u00A0-\u024F\u2018-\u201D\u2026]*$/.test(s);
+
+    const commonPrefixLength = (a: string, b: string) => {
+      const max = Math.min(a.length, b.length);
+      let i = 0;
+      while (i < max && a[i] === b[i]) i++;
+      return i;
+    };
+
+    // 把遠端已輸入內容從 streamedComposition 修正為 target：退格刪掉差異、補送新字
+    const reconcileStreamed = (target: string) => {
+      if (target === streamedComposition) return;
+      const common = commonPrefixLength(streamedComposition, target);
+      for (let i = streamedComposition.length - common; i > 0; i--) sendKeyStroke(8);
+      if (target.length > common) sendTextChunk(target.slice(common));
+      streamedComposition = target;
+    };
+
     mobileKeyboardInput.addEventListener("compositionstart", () => {
       imeComposing = true;
     });
     mobileKeyboardInput.addEventListener("compositionend", (e) => {
       imeComposing = false;
       const data = (e as CompositionEvent).data || "";
-      if (data) sendTextChunk(data); // 注音/拼音組好的字整段送出
+      if (streamedComposition) {
+        // 組字期間已串流：只補「串流內容 → 最終確認字串」的差異
+        // （涵蓋自動修正 teh→the、以及拼音字母→漢字 commit 的替換）
+        reconcileStreamed(data);
+        streamedComposition = "";
+      } else if (data) {
+        sendTextChunk(data); // 注音/拼音組好的字整段送出
+      }
       resetInput();
     });
 
     mobileKeyboardInput.addEventListener("input", (e) => {
       const ie = e as InputEvent;
-      if (imeComposing || ie.isComposing) return; // 組字中，等 compositionend
+      if (imeComposing || ie.isComposing) {
+        // 組字中：拉丁內容即時串流，CJK 組字等 compositionend
+        const composing = mobileKeyboardInput.value.replace(/​/g, "");
+        if (isLatinText(composing)) reconcileStreamed(composing);
+        return;
+      }
       const it = ie.inputType || "";
       if (it.startsWith("delete")) {
         sendKeyStroke(8); // 退格即時送
@@ -5653,7 +5721,9 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         if (opt.action === "copy") {
           sendShortcut(cCode);
         } else if (opt.action === "paste") {
-          sendShortcut(vCode);
+          pushClipboardToHost().finally(() => {
+            sendShortcut(vCode);
+          });
         } else if (opt.action === "selectall") {
           sendShortcut(aCode);
         } else if (opt.action === "rightclick") {

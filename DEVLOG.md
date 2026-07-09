@@ -20,6 +20,39 @@
 
 # 歷程
 
+## 2026-07-09 — 剪貼簿同步優化：解決本地複製文字無法在遠端貼上之問題
+
+- **問題/目標**：解決主控端複製文字後，無法在被控端貼上的問題。
+- **根因/做法**：
+  1. 網頁版主控端因為瀏覽器安全性限制，沒有背景輪詢本機剪貼簿的功能，而原有 `copy` 事件監聽僅限於網頁 DOM 內觸發的複製，外部複製無從得知。
+  2. 桌面端（Tauri）雖有 1.5 秒輪詢，但若在外部複製後立即按下貼上，會遇到輪詢尚未觸發的時間差（Lag）。
+  3. 懸浮選單與快速鍵貼上時，並未在送出 Ctrl+V/Cmd+V 前強制讀取並推播最新剪貼簿。
+  4. 主控端收到被控端推播剪貼簿時未更新 `_lastRemoteClipboard`，導致後續輪詢時引發不必要的二次回傳環路。
+  - **做法**：
+    - 於 `desktop/src/main.ts` 新增 `readLocalClipboard` 與 `pushClipboardToHost` 輔助函式，支援自動在 Tauri `read_clipboard` 與瀏覽器 `navigator.clipboard.readText()` 之間降級。
+    - 攔截 `keydown` 監聽中的 `Ctrl+V` 與 `Cmd+V` 快速鍵，以及懸浮選單的「貼上」按鈕，執行 `pushClipboardToHost().finally(...)`，確保在模擬快速鍵送給被控端之前，先將本機最新剪貼簿內容完成推播同步。
+
+## 2026-07-07 — 語系切換「當下有效、重開程式後失效」：dist 建置產物過舊（非邏輯 bug）
+
+- **問題/目標**：上一筆語系持久化修正上線後，使用者回報「切換語系當下沒問題，但退出程式重開後又回到修改前的語系，沒有記住上次選擇」。
+- **根因/做法**：先用 preview 工具在瀏覽器內對新程式碼實測（設定語系 → `localStorage` → `location.reload()`），確認邏輯本身完全正常、能正確沿用。真正問題是 `desktop/src-tauri/tauri.conf.json` **沒有設定 `devUrl`**——Tauri 視窗因此無論 `tauri dev` 或正式建置，一律直接讀取 `desktop/dist/` 這份**靜態建置檔**，不會走 vite dev server 的即時熱重載。而 `dist/assets/*.js` 是修正前（7/6 18:41）的舊建置，反組譯確認裡面仍是舊版 `navigator.language` 系統語系偵測、完全沒有本次新增的 `2syn_lang` 持久化邏輯——使用者測到的其實是**舊版程式碼**的行為（切換當下靠舊版 `loadLanguage()` 即時生效，重開後舊版邏輯重新偵測系統語系，從未寫入任何持久化紀錄）。
+- **修法**：執行 `npm run build` 重新產生 `dist/`，並反組譯新產物確認含有 `2syn_lang`、不再含 `navigator.language`。
+- **教訓**：這個專案的 `tauri.conf.json` 缺少 `devUrl`，代表**改 `desktop/src/main.ts` 後必須手動 `npm run build`** 才會反映到實際執行的 app（`./dev.sh`／`tauri dev`／已安裝的正式版皆同），單純改原始碼、重開程式測試是不夠的。日後遇到「程式碼看起來對、但實際行為像舊版」的落差，先比對 `dist/assets/*.js` 的建置時間戳與原始碼修改時間。
+
+## 2026-07-07 — UI 預設語系改為英文（並記住使用者選擇）
+
+- **問題/目標**：應用程式 UI 介面語系預設改為英文。
+- **根因/做法**：`initI18n()`（[main.ts:874](desktop/src/main.ts:874)）原本依 `navigator.language` 偵測系統語系、fallback 繁體中文。改為一律預設 `en`，並把語系下拉選單的變更寫入 `localStorage`（key：`2syn_lang`，載入時驗證仍是有效選項），使用者手動切換過的語系重啟後沿用。`fallbackTranslations` 與 `index.html` 靜態文字本就是英文，無需改動。
+
+## 2026-07-07 — 修正 client 打字傳到 host 時快時慢（Android 鍵盤組字緩衝）
+
+- **問題/目標**：client 鍵盤輸入文字傳到 host 有時候非常慢（非網路問題）。
+- **根因/做法**：
+  1. **主因**：Android 的 Gboard/三星鍵盤即使 `autocorrect="off"` 也把一般英文打字放在 IME 組字（composing span）狀態，要按到空白鍵/標點才 commit。而 `main.ts` 行動端鍵盤的 input handler 遇到 `isComposing` 一律 `return` 等 `compositionend`——結果整個單字期間 host 完全收不到字，按空白後才一次爆出來，體感「打字很慢」。iOS 英文輸入不走組字所以正常——這就是「有時候慢」的原因（平台/鍵盤模式相依，與網路無關）。
+  2. **修法**（[main.ts:5382](desktop/src/main.ts:5382)）：拉丁字母組字改為「邊打邊串流」——每次組字內容變化即送出與已串流內容的差異（`reconcileStreamed`：保留共同前綴、其餘退格重送），`compositionend` 時再對最終字串補一次差異，天然涵蓋自動修正（teh→the）與拼音字母→漢字 commit 的替換。CJK 組字（注音符號等非拉丁內容）維持等 `compositionend` 才送，避免把組字中間狀態打到遠端。
+  3. **順手修**：`sendInputPacket`（[main.ts:3513](desktop/src/main.ts:3513)）在 unreliable 通道未開時會把 MouseMove fallback 到 reliable 通道，但封包帶的是 unreliable 序號計數器——會污染 host 端 `input-control` 的 `last_seq`，讓後續鍵盤/點擊封包在序號差 ≤256 時被重放防禦（`SecureInputPacket::verify` 的 `SEQ_RESET_THRESHOLD`）誤判丟棄。改為 fallback 時重寫序號為 reliable 計數器。
+- **教訓**：行動端 WebView 的「一般打字」不保證走 `insertText`——Android 主流鍵盤在預測模式下全部走組字事件流。凡是「組字中不送、等 commit」的設計，都要區分「真 IME 組字（CJK）」與「自動修正緩衝（拉丁）」兩種情境，後者必須即時串流否則體感延遲以「單字」為單位。
+
 ## 2026-07-06 — 修正 MacBook Air 游標偏移真正根因（SCK 擷取黑邊，非競態）
 
 - **問題/目標**：前一筆「跨 channel 競態」修正上線後，MacBook Air host 的游標偏移**沒有改善**——固定約 1 公分、穩定重現，代表是系統性映射錯誤，不是時序競態。
