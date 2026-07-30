@@ -3,22 +3,8 @@
 
 use crate::CoreError;
 use crate::codec::{CodecParams, VideoHardwareEncoder, VideoCodecType, FrameBuffer};
-use std::ptr;
 use std::sync::atomic::{AtomicI64, Ordering};
 use rayon::prelude::*;
-
-// 引入 windows crate 的 Media Foundation 介面
-#[cfg(target_os = "windows")]
-use windows::{
-    core::{GUID, Result as WinResult, ComInterface, HRESULT},
-    Win32::System::Com::{CoInitializeEx, CoCreateInstance, COINIT_MULTITHREADED, CLSCTX_INPROC_SERVER},
-    Win32::Media::MediaFoundation::{
-        MFStartup, MFShutdown, MFCreateMediaType, MFCreateSample, MFCreateMemoryBuffer,
-        IMFTransform, IMFMediaType, IMFSample, IMFMediaBuffer,
-        MFT_OUTPUT_DATA_BUFFER, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_COMMAND_FLUSH,
-        MF_VERSION, MFSTARTUP_NOSOCKET
-    },
-};
 
 // 用於軟體轉換 RGBA 到 I420 的邏輯
 struct RgbaToI420 {
@@ -27,6 +13,14 @@ struct RgbaToI420 {
     pub v: Vec<u8>,
     pub width: usize,
     pub height: usize,
+}
+
+impl openh264::formats::YUVSource for RgbaToI420 {
+    fn dimensions(&self) -> (usize, usize) { (self.width, self.height) }
+    fn strides(&self) -> (usize, usize, usize) { (self.width, self.width / 2, self.width / 2) }
+    fn y(&self) -> &[u8] { &self.y }
+    fn u(&self) -> &[u8] { &self.u }
+    fn v(&self) -> &[u8] { &self.v }
 }
 
 impl RgbaToI420 {
@@ -76,13 +70,11 @@ pub struct WindowsHardwareEncoder {
     params: Option<CodecParams>,
     frame_count: i64,
     #[cfg(target_os = "windows")]
-    mft: Option<IMFTransform>,
+    encoder: Option<openh264::encoder::Encoder>,
 }
 
 impl Default for WindowsHardwareEncoder {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl WindowsHardwareEncoder {
@@ -91,33 +83,17 @@ impl WindowsHardwareEncoder {
             params: None, 
             frame_count: 0,
             #[cfg(target_os = "windows")]
-            mft: None,
+            encoder: None,
         }
     }
 
     #[cfg(target_os = "windows")]
-    fn setup_mft(&mut self, width: u32, height: u32) -> Result<(), CoreError> {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            let hr = MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET);
-            if hr.is_err() {
-                return Err(CoreError::HardwareCodecError("MFStartup failed".to_string()));
-            }
-
-            let clsid_h264 = GUID::from_values(0x6ca50344, 0x051a, 0x4aed, [0xa7, 0x7b, 0x1f, 0xa5, 0x0e, 0xd2, 0xcd, 0x23]);
-            let mft: IMFTransform = CoCreateInstance(&clsid_h264, None, CLSCTX_INPROC_SERVER)
-                .map_err(|e| CoreError::HardwareCodecError(format!("H264 MFT failed: {}", e)))?;
-
-            // 這裡實作 IMFMediaType 的輸入與輸出設定
-            // 由於 windows-rs 關於 MF_MT_MAJOR_TYPE 等 GUID 需要更多引入，我們使用空殼暫代屬性設置
-            // mft.SetOutputType(0, output_type, 0)?;
-            // mft.SetInputType(0, input_type, 0)?;
-            
-            mft.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0).ok();
-            mft.ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0).ok();
-
-            self.mft = Some(mft);
-        }
+    fn setup_encoder(&mut self, width: u32, height: u32, _fps: u32, _bitrate_kbps: u32) -> Result<(), CoreError> {
+        use openh264::encoder::{Encoder, EncoderConfig};
+        let config = EncoderConfig::new(width, height);
+        let encoder = Encoder::with_config(config)
+            .map_err(|e| CoreError::HardwareCodecError(format!("Failed to create openh264 encoder: {:?}", e)))?;
+        self.encoder = Some(encoder);
         Ok(())
     }
 }
@@ -127,7 +103,9 @@ unsafe impl Sync for WindowsHardwareEncoder {}
 
 impl VideoHardwareEncoder for WindowsHardwareEncoder {
     fn init(&mut self, params: CodecParams) -> Result<(), CoreError> {
-        self.params = Some(params);
+        self.params = Some(params.clone());
+        #[cfg(target_os = "windows")]
+        self.setup_encoder(params.width, params.height, params.fps, params.bitrate_kbps)?;
         Ok(())
     }
 
@@ -137,11 +115,8 @@ impl VideoHardwareEncoder for WindowsHardwareEncoder {
             p.fps = fps;
             p.width = target_width;
             p.height = target_height;
-            // 觸發 MFT 重建
             #[cfg(target_os = "windows")]
-            {
-                self.mft = None;
-            }
+            self.setup_encoder(target_width, target_height, fps, bitrate_kbps)?;
             Ok(())
         } else {
             Err(CoreError::HardwareCodecError("編碼器未初始化".to_string()))
@@ -149,7 +124,6 @@ impl VideoHardwareEncoder for WindowsHardwareEncoder {
     }
 
     fn force_intra_frame(&mut self) -> Result<(), CoreError> {
-        // 未來在這裡呼叫 MFT 的 ICodecAPI 設定 CODECAPI_AVEncVideoForceKeyFrame
         Ok(())
     }
 
@@ -159,70 +133,19 @@ impl VideoHardwareEncoder for WindowsHardwareEncoder {
             let target_w = self.params.as_ref().map(|p| p.width).unwrap_or(width);
             let target_h = self.params.as_ref().map(|p| p.height).unwrap_or(height);
 
-            if self.mft.is_none() {
-                self.setup_mft(target_w, target_h)?;
+            if self.encoder.is_none() {
+                self.setup_encoder(target_w, target_h, 30, 2000)?;
             }
             
-            unsafe {
-                if let Some(mft) = &self.mft {
-                    // 將 RGBA 轉換為 I420，同時支援縮放
-                    let i420 = RgbaToI420::new(rgba_data, width as usize, height as usize, target_w as usize, target_h as usize);
-                    // 1. 建立 MFMemoryBuffer
-                    let len = i420.y.len() + i420.u.len() + i420.v.len();
-                    let buffer: IMFMediaBuffer = MFCreateMemoryBuffer(len as u32)
-                        .map_err(|_| CoreError::HardwareCodecError("MFCreateMemoryBuffer failed".into()))?;
-                    
-                    let mut ptr: *mut u8 = std::ptr::null_mut();
-                    let mut max_len = 0u32;
-                    let mut current_len = 0u32;
-                    let lock_ok = buffer.Lock(&mut ptr, Some(&mut max_len), Some(&mut current_len)).is_ok();
-                    
-                    if lock_ok && !ptr.is_null() {
-                        std::ptr::copy_nonoverlapping(i420.y.as_ptr(), ptr, i420.y.len());
-                        std::ptr::copy_nonoverlapping(i420.u.as_ptr(), ptr.add(i420.y.len()), i420.u.len());
-                        std::ptr::copy_nonoverlapping(i420.v.as_ptr(), ptr.add(i420.y.len() + i420.u.len()), i420.v.len());
-                        buffer.SetCurrentLength(len as u32).ok();
-                        buffer.Unlock().ok();
-                    } else if lock_ok {
-                        // Lock 成功但 ptr 為 null (不應發生，但需平衡 Unlock)
-                        buffer.Unlock().ok();
+            if let Some(encoder) = &mut self.encoder {
+                let i420 = RgbaToI420::new(rgba_data, width as usize, height as usize, target_w as usize, target_h as usize);
+                match encoder.encode(&i420) {
+                    Ok(stream) => {
+                        self.frame_count += 1;
+                        return Ok(stream.to_vec());
                     }
-                    // 若 Lock 失敗，不呼叫 Unlock
-
-                    // 2. 建立 MFSample
-                    let sample: IMFSample = MFCreateSample()
-                        .map_err(|_| CoreError::HardwareCodecError("MFCreateSample failed".into()))?;
-                    sample.AddBuffer(&buffer).ok();
-                    
-                    // 3. 呼叫 ProcessInput (0 = input stream id)
-                    mft.ProcessInput(0, &sample, 0).ok();
-                    
-                    // 4. 嘗試 ProcessOutput：先配置輸出 Sample 與 Buffer
-                    let out_buffer: IMFMediaBuffer = MFCreateMemoryBuffer(len as u32 * 2)
-                        .map_err(|_| CoreError::HardwareCodecError("Output buffer alloc failed".into()))?;
-                    let out_sample: IMFSample = MFCreateSample()
-                        .map_err(|_| CoreError::HardwareCodecError("Output sample alloc failed".into()))?;
-                    out_sample.AddBuffer(&out_buffer).ok();
-
-                    let mut output_buffers = [MFT_OUTPUT_DATA_BUFFER {
-                        pSample: std::mem::ManuallyDrop::new(Some(out_sample.clone())),
-                        ..Default::default()
-                    }];
-                    let mut status = 0;
-                    if mft.ProcessOutput(0, &mut output_buffers, &mut status).is_ok() {
-                        if let Some(ref result_sample) = *output_buffers[0].pSample {
-                            if let Ok(out_buf) = result_sample.ConvertToContiguousBuffer() {
-                                let mut out_ptr: *mut u8 = std::ptr::null_mut();
-                                let mut out_len = 0u32;
-                                if out_buf.Lock(&mut out_ptr, None, Some(&mut out_len)).is_ok() && !out_ptr.is_null() {
-                                    let result = std::slice::from_raw_parts(out_ptr, out_len as usize).to_vec();
-                                    out_buf.Unlock().ok();
-                                    self.frame_count += 1;
-                                    return Ok(result);
-                                }
-                                if !out_ptr.is_null() { out_buf.Unlock().ok(); }
-                            }
-                        }
+                    Err(e) => {
+                        return Err(CoreError::HardwareCodecError(format!("Encode failed: {:?}", e)));
                     }
                 }
             }
@@ -233,7 +156,7 @@ impl VideoHardwareEncoder for WindowsHardwareEncoder {
 
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = i420;
+            let _ = rgba_data;
             self.frame_count += 1;
             Ok(vec![0x00, 0x00, 0x00, 0x01, 0x67])
         }
@@ -241,14 +164,5 @@ impl VideoHardwareEncoder for WindowsHardwareEncoder {
 
     fn encode_frame_zero_copy(&mut self, _gpu_texture: &FrameBuffer) -> Result<Vec<u8>, CoreError> {
         Err(CoreError::HardwareCodecError("尚未支援 Windows 零拷貝".to_string()))
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl Drop for WindowsHardwareEncoder {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = MFShutdown();
-        }
     }
 }
