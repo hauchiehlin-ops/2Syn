@@ -4335,6 +4335,14 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   // iOS Safari 不支援 Pointer Lock，第一次失敗後設旗標避免重複嘗試
   let pointerLockUnavailable = false;
 
+  // 解決瀏覽器鎖定滑鼠 (Pointer Lock) 時游標自動居中產生的瞬間巨大位移跳動問題
+  let isJustLocked = false;
+  document.addEventListener("pointerlockchange", () => {
+    if (document.pointerLockElement === videoEl) {
+      isJustLocked = true;
+    }
+  });
+
   videoEl.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "touch" || e.pointerType === "pen") return;
     e.preventDefault();
@@ -4371,6 +4379,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     isMouseInsideVideo = true;
     
     if (document.pointerLockElement === videoEl) {
+      if (isJustLocked) {
+        isJustLocked = false;
+        return; // 捨棄鎖定瞬間瀏覽器產生的居中位移訊號
+      }
       pendingRelativeDX += Math.round(e.movementX);
       pendingRelativeDY += Math.round(e.movementY);
       triggerMoveRaf();
