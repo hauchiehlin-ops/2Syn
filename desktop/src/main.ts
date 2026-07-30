@@ -3628,13 +3628,12 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     // position:fixed 確保座標對齊視口，不受 pan/transform 影響
     remoteCursor.style.position = "fixed";
     const _mobile = !isDesktopTauri();
-    remoteCursor.style.width = _mobile ? "24px" : "16px";
-    remoteCursor.style.height = _mobile ? "30px" : "20px";
+    const cursorSize = _mobile ? 24 : 16;
+    remoteCursor.style.width = `${cursorSize}px`;
+    remoteCursor.style.height = `${cursorSize}px`;
     remoteCursor.style.borderRadius = "0px";
     remoteCursor.style.backgroundColor = "transparent";
-    const svgW = _mobile ? 24 : 16;
-    const svgH = _mobile ? 30 : 20;
-    remoteCursor.style.backgroundImage = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='${svgW}' height='${svgH}'><path d='M0,0 L0,17 L4.7,12.3 L8,20 L10.5,19 L7.2,11.3 L12.7,11.3 Z' fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='miter'/></svg>")`;
+    remoteCursor.style.backgroundImage = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='${cursorSize}' height='${cursorSize}'><path d='M0,0 L0,17 L4.7,12.3 L8,20 L10.5,19 L7.2,11.3 L12.7,11.3 Z' fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='miter'/></svg>")`;
     remoteCursor.style.backgroundSize = "contain";
     remoteCursor.style.backgroundRepeat = "no-repeat";
     remoteCursor.style.boxShadow = "none";
@@ -4355,6 +4354,30 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     else if (e.button === 2) btn = 2;
     else if (e.button === 1) btn = 3;
     else return;
+
+    // 若未在鎖定狀態下，重新計算滑鼠點下時的精確座標，防止座標不同步或微小偏移
+    if (document.pointerLockElement !== videoEl) {
+      const rect = videoEl.getBoundingClientRect();
+      const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+      const containerRatio = rect.width / rect.height;
+      let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
+      if (containerRatio > videoRatio) {
+        renderedHeight = rect.height;
+        renderedWidth = renderedHeight * videoRatio;
+        offsetX = (rect.width - renderedWidth) / 2;
+      } else {
+        renderedWidth = rect.width;
+        renderedHeight = renderedWidth / videoRatio;
+        offsetY = (rect.height - renderedHeight) / 2;
+      }
+      let px = (e.clientX - rect.left - offsetX) / (renderedWidth || 1);
+      let py = (e.clientY - rect.top - offsetY) / (renderedHeight || 1);
+      currentCursorPercentX = Math.max(0, Math.min(1, px));
+      currentCursorPercentY = Math.max(0, Math.min(1, py));
+      syntheticCursorPercentX = currentCursorPercentX;
+      syntheticCursorPercentY = currentCursorPercentY;
+    }
+
     sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(btn, currentCursorPercentX, currentCursorPercentY)));
   });
 
@@ -4366,6 +4389,30 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     else if (e.button === 2) btn = 2;
     else if (e.button === 1) btn = 3;
     else return;
+
+    // 若未在鎖定狀態下，重新計算滑鼠放開時的精確座標
+    if (document.pointerLockElement !== videoEl) {
+      const rect = videoEl.getBoundingClientRect();
+      const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+      const containerRatio = rect.width / rect.height;
+      let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
+      if (containerRatio > videoRatio) {
+        renderedHeight = rect.height;
+        renderedWidth = renderedHeight * videoRatio;
+        offsetX = (rect.width - renderedWidth) / 2;
+      } else {
+        renderedWidth = rect.width;
+        renderedHeight = renderedWidth / videoRatio;
+        offsetY = (rect.height - renderedHeight) / 2;
+      }
+      let px = (e.clientX - rect.left - offsetX) / (renderedWidth || 1);
+      let py = (e.clientY - rect.top - offsetY) / (renderedHeight || 1);
+      currentCursorPercentX = Math.max(0, Math.min(1, px));
+      currentCursorPercentY = Math.max(0, Math.min(1, py));
+      syntheticCursorPercentX = currentCursorPercentX;
+      syntheticCursorPercentY = currentCursorPercentY;
+    }
+
     sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(btn, currentCursorPercentX, currentCursorPercentY)));
   });
 
