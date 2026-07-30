@@ -24,6 +24,14 @@ function isDesktopTauri(): boolean {
   return true;
 }
 
+function initPlatformClasses() {
+  const root = document.documentElement;
+  const ua = navigator.userAgent.toLowerCase();
+
+  root.classList.toggle("tauri-desktop", isDesktopTauri());
+  root.classList.toggle("os-windows", /\bwindows\b|win64|win32|wow64/.test(ua));
+}
+
 // --- Toast Notification System ---
 function showToast(message: string, duration: number = 3000) {
   const container = document.getElementById('toast-container');
@@ -1227,17 +1235,17 @@ function updateDomTranslations() {
 
 function setTextContent(id: string, text: string) {
   const el = document.getElementById(id);
-  if (el) el.textContent = text;
+  if (el && el.textContent !== text) el.textContent = text;
 }
 
 function setHtmlContent(id: string, html: string) {
   const el = document.getElementById(id);
-  if (el) el.innerHTML = html;
+  if (el && el.innerHTML !== html) el.innerHTML = html;
 }
 
 function setPlaceholder(id: string, text: string) {
   const el = document.getElementById(id) as HTMLInputElement;
-  if (el) el.placeholder = text;
+  if (el && el.placeholder !== text) el.placeholder = text;
 }
 
 // =========================================================================
@@ -6231,6 +6239,8 @@ function initQuickMenu() {
 // 應用程式初始化入口點
 // =========================================================================
 async function initializeApp() {
+  initPlatformClasses();
+
   if (pkg.version) {
     // 同步更新網頁標題，讓 Mac/Windows 原生視窗的標題列也能顯示版本號
     document.title = `2syn_Duel v${pkg.version}`;
@@ -6497,4 +6507,3 @@ if (document.readyState === 'loading') {
 } else {
   initializeApp();
 }
-
