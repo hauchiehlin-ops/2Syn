@@ -88,10 +88,10 @@ impl WindowsHardwareEncoder {
     }
 
     #[cfg(target_os = "windows")]
-    fn setup_encoder(&mut self, width: u32, height: u32, _fps: u32, _bitrate_kbps: u32) -> Result<(), CoreError> {
-        use openh264::encoder::{Encoder, EncoderConfig};
-        let config = EncoderConfig::new(width, height);
-        let encoder = Encoder::with_config(config)
+    fn setup_encoder(&mut self, _width: u32, _height: u32, _fps: u32, _bitrate_kbps: u32) -> Result<(), CoreError> {
+        use openh264::{encoder::{Encoder, EncoderConfig}, OpenH264API};
+        let config = EncoderConfig::new();
+        let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
             .map_err(|e| CoreError::HardwareCodecError(format!("Failed to create openh264 encoder: {:?}", e)))?;
         self.encoder = Some(encoder);
         Ok(())
