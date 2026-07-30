@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:build:host": "bash ../scripts/clean-dmg-mounts.sh && tauri build",
+    "tauri:build:host": "node -e \"if(process.platform==='darwin'){require('child_process').execSync('bash ../scripts/clean-dmg-mounts.sh',{stdio:'inherit'})}\" && tauri build",
     "tauri:build:client": "tauri build --config src-tauri/tauri.client.conf.json",
     "tauri:build:ios:host": "tauri ios build",
     "tauri:build:ios:client": "tauri ios build --config src-tauri/tauri.client.conf.json",

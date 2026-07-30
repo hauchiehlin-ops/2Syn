@@ -30,6 +30,12 @@ cd desktop && npm run tauri:build:ios:client     # iOS client 版
 cd desktop && npm run bump:patch  # 版本號同步 bump（Cargo.toml + package.json + tauri conf）
 ```
 
+Windows 建置：
+```powershell
+cd desktop; npm run tauri:build:host             # Windows host 版（.msi / .exe）
+cd desktop; npm run tauri:build:client           # Windows client 版
+```
+
 ## 架構要點（跨檔案協定，改一邊必須改另一邊）
 
 - **輸入協定**：client（main.ts `buildInputPacket`）→ host（input.rs `deserialize`）。
