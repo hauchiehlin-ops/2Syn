@@ -202,7 +202,7 @@ impl InputEvent {
 
             // 將正規化座標 (0..1) 轉為 SendInput 的絕對座標 dx/dy（與 MouseMove 相同換算邏輯），
             // 讓 MouseDown/MouseUp 不必依賴另一個 channel 送來的 MouseMove 副作用去定位游標。
-            fn absolute_mouse_dxdy(x: f32, y: f32) -> (i32, i32, u32) {
+            let absolute_mouse_dxdy = |x: f32, y: f32| -> (i32, i32, u32) {
                 use windows_sys::Win32::UI::WindowsAndMessaging::{
                     GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN
                 };
@@ -231,7 +231,7 @@ impl InputEvent {
                     let dy = (clamped_y * 65535.0) as i32;
                     (dx, dy, flags)
                 }
-            }
+            };
 
             unsafe {
                 let mut input = std::mem::zeroed::<INPUT>();
