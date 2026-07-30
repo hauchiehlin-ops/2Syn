@@ -1451,7 +1451,7 @@ function showClipboardToast(text: string) {
     "box-shadow:0 4px 20px rgba(0,0,0,0.5);touch-action:manipulation;text-align:center;";
   toast.innerHTML = `📋 遠端複製：<b>${preview}</b><br><small style="opacity:0.7">點擊貼入本機剪貼板</small>`;
   toast.addEventListener("click", () => {
-    navigator.clipboard.writeText(text).then(() => {
+    writeLocalClipboard(text).then(() => {
       toast.innerHTML = "✅ 已貼入本機剪貼板";
       setTimeout(() => toast.remove(), 1500);
     }).catch(() => toast.remove());
@@ -1461,7 +1461,7 @@ function showClipboardToast(text: string) {
 }
 
 async function readLocalClipboard(): Promise<string> {
-  if (isDesktopTauri()) {
+  if (isTauri()) {
     try {
       return await invoke<string>("read_clipboard");
     } catch (e) {
@@ -1476,6 +1476,22 @@ async function readLocalClipboard(): Promise<string> {
     }
   }
   return "";
+}
+
+async function writeLocalClipboard(text: string): Promise<void> {
+  if (isTauri()) {
+    try {
+      await invoke("write_clipboard", { text });
+      return;
+    } catch (e) {
+      console.warn("[clipboard] writeLocalClipboard tauri error:", e);
+    }
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  throw new Error("Clipboard API not supported");
 }
 
 async function pushClipboardToHost() {
@@ -2295,7 +2311,7 @@ async function startCall(remoteId: string, pin: string) {
           console.log(`[clipboard] 收到被控端剪貼簿: ${msg.text.substring(0, 40)}`);
           _lastRemoteClipboard = msg.text;
           // 桌面端直接寫入，iOS 需用戶手勢 → 顯示 toast 讓用戶點擊確認
-          navigator.clipboard.writeText(msg.text).catch(() => {
+          writeLocalClipboard(msg.text).catch(() => {
             showClipboardToast(msg.text);
           });
         }
@@ -3106,7 +3122,7 @@ function initOfflineSdpMode() {
             const finalSdp = pc.localDescription?.sdp || "";
             txtLocal.value = finalSdp;
             txtLocal.select();
-            navigator.clipboard.writeText(finalSdp).catch(() => {});
+            writeLocalClipboard(finalSdp).catch(() => {});
             // 同時壓縮 SDP 並顯示 QR code（隱私模式：掃碼替代貼上）
             const qrContainer = document.getElementById("sdp-qr-container");
             const qrCanvas = document.getElementById("sdp-qr-canvas") as HTMLCanvasElement;
@@ -3174,7 +3190,7 @@ function initOfflineSdpMode() {
               const answerSdp = pc.localDescription?.sdp || "";
               txtLocal.value = answerSdp;
               txtLocal.select();
-              navigator.clipboard.writeText(answerSdp).catch(() => {});
+              writeLocalClipboard(answerSdp).catch(() => {});
               alert(t("alert_answer_generated"));
             }
           };
@@ -3269,7 +3285,7 @@ function initClipboardCopy() {
   if (btnCopyId && valMyId) {
     btnCopyId.addEventListener("click", () => {
       const idText = valMyId.textContent || "";
-      navigator.clipboard.writeText(idText).then(() => {
+      writeLocalClipboard(idText).then(() => {
         btnCopyId.textContent = "✓";
         setTimeout(() => {
           btnCopyId.textContent = "📋";
@@ -3307,7 +3323,7 @@ function initClipboardCopy() {
   if (btnCopyMac && valMyMac) {
     btnCopyMac.addEventListener("click", () => {
       const macText = valMyMac.textContent || "";
-      navigator.clipboard.writeText(macText).then(() => {
+      writeLocalClipboard(macText).then(() => {
         btnCopyMac.textContent = "✓";
         setTimeout(() => {
           btnCopyMac.textContent = "📋";
@@ -3319,7 +3335,7 @@ function initClipboardCopy() {
   if (btnCopyHwid && valHwid) {
     btnCopyHwid.addEventListener("click", () => {
       const hwidText = valHwid.textContent || "";
-      navigator.clipboard.writeText(hwidText).then(() => {
+      writeLocalClipboard(hwidText).then(() => {
         btnCopyHwid.textContent = "✓";
         setTimeout(() => {
           btnCopyHwid.textContent = "📋";

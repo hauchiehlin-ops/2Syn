@@ -1,6 +1,6 @@
 [package]
 name = "syn-desktop"
-version = "4.0.3"
+version = "4.0.4"
 edition = "2021"
 default-run = "syn-desktop"
 
@@ -25,9 +25,13 @@ webrtc = "0.10"
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.9"
 
+[target.'cfg(target_os = "ios")'.dependencies]
+objc = "0.2"
+
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 tauri-plugin-autostart = "2"
 arboard = { version = "3.4", default-features = false }
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
+

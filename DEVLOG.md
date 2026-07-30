@@ -20,6 +20,16 @@
 
 # 歷程
 
+## 2026-07-12 — 解決 iOS 剪貼簿貼上失效之問題
+
+- **問題/目標**：解決 iOS 行動主控端點選快捷功能列上的「貼上」無反應之問題。
+- **根因/做法**：
+  1. iOS (WKWebView) 具有極為嚴格的瀏覽器沙盒限制，不允許透過 `navigator.clipboard.readText()` 在無特定環境下讀取本機剪貼簿，導致 `readLocalClipboard` 始終返回空值 `""`，使被控端無法獲取最新貼上內容。
+  2. **修法**：
+     - 在 `desktop/src-tauri/Cargo.toml` 針對 iOS 平台引入 `objc` 依賴。
+     - 在 `desktop/src-tauri/src/lib.rs` 移除對 `read_clipboard` 與 `write_clipboard` 的編譯與註冊限制，並透過 Objective-C 運行時動態調用 iOS 原生 `UIPasteboard` API，實現原生剪貼簿讀寫。
+     - 於 `desktop/src/main.ts` 新增 `writeLocalClipboard` 輔助函式並修正 `readLocalClipboard`，使其在所有 `isTauri()` 的環境下（包含行動端）直接呼叫原生的 `read_clipboard`/`write_clipboard` 指令，失敗時或在一般網頁環境才 fallback 至 `navigator.clipboard`。
+
 ## 2026-07-09 — 剪貼簿同步優化：解決本地複製文字無法在遠端貼上之問題
 
 - **問題/目標**：解決主控端複製文字後，無法在被控端貼上的問題。

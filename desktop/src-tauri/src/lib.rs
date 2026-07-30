@@ -92,21 +92,84 @@ async fn open_login_items_settings() -> Result<(), String> {
 }
 
 /// 讀取系統剪貼簿內容（純文字）
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 async fn read_clipboard() -> Result<String, String> {
-    use arboard::Clipboard;
-    let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
-    clipboard.get_text().map_err(|e| e.to_string())
+    #[cfg(target_os = "ios")]
+    {
+        use objc::runtime::{Class, Object};
+        use objc::{msg_send, sel, sel_impl};
+        unsafe {
+            let cls = Class::get("UIPasteboard").ok_or_else(|| "UIPasteboard class not found".to_string())?;
+            let pasteboard: *mut Object = msg_send![cls, generalPasteboard];
+            if pasteboard.is_null() {
+                return Err("generalPasteboard is null".to_string());
+            }
+            let has_strings: bool = msg_send![pasteboard, hasStrings];
+            if !has_strings {
+                return Ok(String::new());
+            }
+            let nsstring: *mut Object = msg_send![pasteboard, string];
+            if nsstring.is_null() {
+                return Ok(String::new());
+            }
+            let utf8_str: *const std::os::raw::c_char = msg_send![nsstring, UTF8String];
+            if utf8_str.is_null() {
+                return Ok(String::new());
+            }
+            let bytes = std::ffi::CStr::from_ptr(utf8_str).to_bytes();
+            let s = String::from_utf8_lossy(bytes).into_owned();
+            Ok(s)
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        Err("Android native clipboard not implemented".to_string())
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        use arboard::Clipboard;
+        let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
+        clipboard.get_text().map_err(|e| e.to_string())
+    }
 }
 
 /// 寫入內容至系統剪貼簿
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 async fn write_clipboard(text: String) -> Result<(), String> {
-    use arboard::Clipboard;
-    let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
-    clipboard.set_text(text).map_err(|e| e.to_string())
+    #[cfg(target_os = "ios")]
+    {
+        use objc::runtime::{Class, Object};
+        use objc::{msg_send, sel, sel_impl};
+        use std::ffi::CString;
+        unsafe {
+            let cls = Class::get("UIPasteboard").ok_or_else(|| "UIPasteboard class not found".to_string())?;
+            let pasteboard: *mut Object = msg_send![cls, generalPasteboard];
+            if pasteboard.is_null() {
+                return Err("generalPasteboard is null".to_string());
+            }
+            let nsstring_class = Class::get("NSString").ok_or_else(|| "NSString class not found".to_string())?;
+            let c_str = CString::new(text).map_err(|e| e.to_string())?;
+            let nsstring: *mut Object = msg_send![nsstring_class, alloc];
+            let nsstring: *mut Object = msg_send![nsstring, initWithUTF8String: c_str.as_ptr()];
+            let _: () = msg_send![pasteboard, setString: nsstring];
+            let _: () = msg_send![nsstring, release];
+            Ok(())
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        Err("Android native clipboard not implemented".to_string())
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        use arboard::Clipboard;
+        let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
+        clipboard.set_text(text).map_err(|e| e.to_string())
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -1335,9 +1398,7 @@ pub fn run() {
             check_macos_permissions,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             send_custom_signaling_message,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             read_clipboard,
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             write_clipboard,
             wake_device,
             get_local_mac_address,
