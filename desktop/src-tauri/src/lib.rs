@@ -1194,18 +1194,18 @@ async fn check_network_health() -> Result<serde_json::Value, String> {
     }
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
-        let output = std::process::Command::new("ifconfig")
+        #[cfg(target_os = "windows")]
+        let cmd = "ipconfig";
+        #[cfg(not(target_os = "windows"))]
+        let cmd = "ifconfig";
+
+        let output = std::process::Command::new(cmd)
             .output()
             .map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        let has_ipv6 = stdout.contains("inet6")
-            && stdout
-                .lines()
-                .any(|l| l.contains("inet6") && !l.contains("::1") && !l.contains("fe80::"));
-        let has_tailscale = stdout
-            .lines()
-            .any(|l| l.contains("100.") || l.contains("fd7a:115c:a1e0:"));
+        let has_ipv6 = stdout.contains("IPv6") || stdout.contains("inet6");
+        let has_tailscale = stdout.contains("100.") || stdout.contains("fd7a:115c:a1e0:");
 
         Ok(serde_json::json!({
             "has_ipv6": has_ipv6,
