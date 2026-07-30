@@ -789,6 +789,7 @@ const fallbackTranslations: Record<string, string> = {
   "ui_save_reload": "Save and Reload",
   "ui_byoi": "Advanced: Bring Your Own TURN (BYOI)",
   "ui_byoi_desc": "If you host a custom TURN relay server (e.g., Coturn), you can enter the JSON array configuration here:",
+  "ui_turn_guide_html": "💡 <b>Free TURN Server Registration Guide (Metered.ca):</b><br>1. Go to <a href=\"https://www.metered.ca/\" target=\"_blank\" style=\"color: var(--accent-color, #3b82f6); text-decoration: underline;\">Metered.ca</a>, register, and click <b>\"TURN Server\" -> \"Create App\"</b>.<br>2. Copy the JSON array inside <b>\"ICE Servers\"</b> box.<br>3. Paste the array into the input field above (ensure it starts with <code>[</code> and ends with <code>]</code>) and click Save.",
   "ui_dl_mac": "Download for Mac / Windows",
   "ui_dl_ios": "Download for iOS (App Store)",
   "ui_dl_android": "Download for Android",
@@ -957,6 +958,7 @@ function updateDomTranslations() {
   setTextContent("txt-save-reload-btn", t("ui_save_reload"));
   setTextContent("txt-byoi-title", t("ui_byoi"));
   setTextContent("txt-byoi-desc", t("ui_byoi_desc"));
+  setHtmlContent("txt-turn-guide-box", t("ui_turn_guide_html"));
   setTextContent("txt-dl-mac", t("ui_dl_mac"));
   setTextContent("txt-dl-ios", t("ui_dl_ios"));
   setTextContent("txt-dl-android", t("ui_dl_android"));
@@ -1226,6 +1228,11 @@ function updateDomTranslations() {
 function setTextContent(id: string, text: string) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
+}
+
+function setHtmlContent(id: string, html: string) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
 }
 
 function setPlaceholder(id: string, text: string) {

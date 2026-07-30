@@ -549,6 +549,7 @@
           <p style="margin: 0 0 8px 0; font-size: 12px;"><span id="txt-byoi-desc">若您有自架 Coturn 等中繼伺服器，可在此輸入 JSON 陣列格式配置：</span></p>
           <textarea id="ta-custom-turn" rows="3" style="width: 100%; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 4px; padding: 6px; font-family: monospace; font-size: 11px; margin-bottom: 8px;" placeholder='[{"urls":["turn:ip:3478"],"username":"...","credential":"..."}]'></textarea>
           <button id="btn-save-turn" class="btn-primary" style="padding: 4px 10px; font-size: 12px;"><span id="txt-save-reload-btn">儲存並重新載入</span></button>
+          <div style="margin-top: 10px; font-size: 11px; color: var(--text-muted, #888); line-height: 1.45; border-top: 1px dashed var(--panel-border, rgba(0,0,0,0.1)); padding-top: 8px;" id="txt-turn-guide-box"></div>
         </div>
 
         <p id="txt-ts-guide-desc" style="margin-top: 8px; border-top: 1px solid var(--panel-border); padding-top: 12px;"><span id="txt-network-traversal-desc-2">若不具備 TURN 伺服器，建議在雙端安裝免費的安全虛擬局域網工具 Tailscale，以 100% 實現 P2P 超低延遲直連。</span></p>

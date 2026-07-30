@@ -386,6 +386,7 @@
   "ui_save_reload": "儲存並重新載入",
   "ui_byoi": "進階：自攜 TURN 伺服器 (BYOI)",
   "ui_byoi_desc": "若您有自架 Coturn 等中繼伺服器，可在此輸入 JSON 陣列格式配置：",
+  "ui_turn_guide_html": "💡 <b>免費網頁版中轉伺服器申請指引 (Metered.ca)：</b><br>1. 前往 <a href=\"https://www.metered.ca/\" target=\"_blank\" style=\"color: var(--accent-color, #3b82f6); text-decoration: underline;\">Metered.ca</a> 註冊並點選 <b>\"TURN Server\" -> \"Create App\"</b>。<br>2. 複製 <b>\"ICE Servers\"</b> 內的 JSON 陣列。<br>3. 將該 JSON 貼入上方輸入框（確保以 <code>[</code> 開頭並以 <code>]</code> 結尾）並點擊儲存並重新載入。",
   "ui_dl_mac": "Mac / Windows 下載",
   "ui_dl_ios": "iOS 下載 (App Store)",
   "ui_dl_android": "Android 下載",
