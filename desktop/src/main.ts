@@ -433,6 +433,11 @@ function getSignalingUrl(): string {
     return (window as any).__SIGNALING_URL__;
   }
   
+  // 1.1 優先支援 Vite 編譯期注入的環境變數 (如 Vercel 部署)
+  if ((import.meta as any).env && (import.meta as any).env.VITE_SIGNALING_URL) {
+    return (import.meta as any).env.VITE_SIGNALING_URL;
+  }
+  
   // 2. 在 Tauri 中，無論開發或正式環境，window.location.hostname 通常都是 localhost 或 tauri.localhost
   // 確保 iOS 與 Mac mini 能夠順利連線，直接回傳公開部署的信令伺服器網址
   return OFFICIAL_SIGNALING_SERVER;
@@ -6264,6 +6269,12 @@ async function initializeApp() {
     const localHostInfo = document.getElementById("local-host-info-section");
     if (localHostInfo) {
       localHostInfo.style.display = "none";
+    }
+
+    // 網頁版/主控端不需要「隱私防護功能」設定
+    const privacyControl = document.querySelector(".privacy-control") as HTMLElement;
+    if (privacyControl) {
+      privacyControl.style.display = "none";
     }
 
     // 優化主控端的網路體質診斷顯示，並常態開啟穿透提示按鈕
