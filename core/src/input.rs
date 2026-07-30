@@ -214,7 +214,7 @@ impl InputEvent {
                 let th = TARGET_MONITOR_H.load(Ordering::Relaxed);
                 let mut flags = MOUSEEVENTF_ABSOLUTE;
                 if tw > 0 && th > 0 {
-                    flags |= MOUSEEVENTF_VIRTUALDESKTOP;
+                    flags |= MOUSEEVENTF_VIRTUALDESK;
                     let abs_x = tx + (clamped_x as f64 * tw as f64) as i32;
                     let abs_y = ty + (clamped_y as f64 * th as f64) as i32;
                     unsafe {
@@ -252,7 +252,7 @@ impl InputEvent {
                         
                         let mut flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
                         let (dx, dy) = if tw > 0 && th > 0 {
-                            flags |= MOUSEEVENTF_VIRTUALDESKTOP;
+                            flags |= MOUSEEVENTF_VIRTUALDESK;
                             let abs_x = tx + (clamped_x as f64 * tw as f64) as i32;
                             let abs_y = ty + (clamped_y as f64 * th as f64) as i32;
                             
@@ -944,7 +944,7 @@ unsafe extern "system" fn monitor_enum_proc(
 
 #[cfg(target_os = "windows")]
 pub fn get_monitor_bounds(index: usize) -> Option<(i32, i32, i32, i32)> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetMonitorInfoW, MONITORINFO};
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO};
     use windows_sys::Win32::Graphics::Gdi::EnumDisplayMonitors;
     use std::mem::size_of;
 
