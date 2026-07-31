@@ -1271,6 +1271,19 @@ async fn check_network_health() -> Result<serde_json::Value, String> {
     }
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
+        static NETWORK_HEALTH_CACHE: std::sync::OnceLock<
+            std::sync::Mutex<Option<(std::time::Instant, serde_json::Value)>>,
+        > = std::sync::OnceLock::new();
+
+        let cache = NETWORK_HEALTH_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+        if let Ok(guard) = cache.lock() {
+            if let Some((checked_at, value)) = guard.as_ref() {
+                if checked_at.elapsed() < std::time::Duration::from_secs(60) {
+                    return Ok(value.clone());
+                }
+            }
+        }
+
         #[cfg(target_os = "windows")]
         let cmd = "ipconfig";
         #[cfg(not(target_os = "windows"))]
@@ -1290,10 +1303,16 @@ async fn check_network_health() -> Result<serde_json::Value, String> {
         let has_ipv6 = stdout.contains("IPv6") || stdout.contains("inet6");
         let has_tailscale = stdout.contains("100.") || stdout.contains("fd7a:115c:a1e0:");
 
-        Ok(serde_json::json!({
+        let value = serde_json::json!({
             "has_ipv6": has_ipv6,
             "has_tailscale": has_tailscale
-        }))
+        });
+
+        if let Ok(mut guard) = cache.lock() {
+            *guard = Some((std::time::Instant::now(), value.clone()));
+        }
+
+        Ok(value)
     }
 }
 

@@ -2766,7 +2766,7 @@ function initConnectButton() {
       } catch (e) {
         console.warn('Network health check failed:', e);
       }
-    }, 5000);
+    }, 60000);
     // 立即執行一次
     invoke('check_network_health').catch(() => {});
   }
