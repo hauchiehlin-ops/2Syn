@@ -937,6 +937,10 @@ impl SecureInputPacket {
     /// 驗證封包安全性，防禦重放與過期封包。
     /// 回傳 Ok 表示放行；呼叫端應以 `sequence_number` 更新 last_seq。
     pub fn verify(&self, last_seq: u32) -> Result<(), CoreError> {
+        if matches!(self.event, InputEvent::ResetState) {
+            return Ok(());
+        }
+
         // 正常情況：序號嚴格遞增
         if self.sequence_number > last_seq {
             return Ok(());

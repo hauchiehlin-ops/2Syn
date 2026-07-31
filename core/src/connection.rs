@@ -389,6 +389,13 @@ impl WebRtcSession {
                 match SecureInputPacket::deserialize(&data) {
                     Ok(packet) => {
                         let prev_seq = last_seq.load(Ordering::SeqCst);
+                        if matches!(packet.event, crate::input::InputEvent::ResetState) {
+                            last_seq.store(packet.sequence_number, Ordering::SeqCst);
+                            if let Err(e) = packet.event.simulate() {
+                                eprintln!("[input-control] reset simulate failed: {}", e);
+                            }
+                            return;
+                        }
                         match packet.verify(prev_seq) {
                             Ok(()) => {
                                 last_seq.store(packet.sequence_number, Ordering::SeqCst);
@@ -434,6 +441,13 @@ impl WebRtcSession {
                 match SecureInputPacket::deserialize(&data) {
                     Ok(packet) => {
                         let prev_seq = last_seq.load(Ordering::SeqCst);
+                        if matches!(packet.event, crate::input::InputEvent::ResetState) {
+                            last_seq.store(packet.sequence_number, Ordering::SeqCst);
+                            if let Err(e) = packet.event.simulate() {
+                                eprintln!("[input-unreliable] reset simulate failed: {}", e);
+                            }
+                            return;
+                        }
                         match packet.verify(prev_seq) {
                             Ok(()) => {
                                 last_seq.store(packet.sequence_number, Ordering::SeqCst);

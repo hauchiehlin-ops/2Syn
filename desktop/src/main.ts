@@ -2077,6 +2077,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
     peerConnection.close();
     peerConnection = null;
     dataChannelControl = null;
+    dataChannelUnreliable = null;
     iceCandidateQueue = [];
   }
 
@@ -2314,6 +2315,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
               console.warn("[WebRTC] 視訊自動播放受阻，等待手動啟動或黑屏提示:", err);
             });
             setupInputControl(videoEl); // 綁定輸入控制
+            startInputHealthWatchdog();
           } catch (err) {
             console.error("[WebRTC] 視訊播放調用失敗:", err);
           }
@@ -2599,10 +2601,12 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
 function bindControlChannel(ch: RTCDataChannel) {
   ch.onopen = () => {
     dataChannelControl = ch;
+    inputControlBacklogSince = 0;
     console.log("[DataChannel] input-control 已開啟");
   };
   ch.onclose = () => {
     if (dataChannelControl === ch) dataChannelControl = null;
+    inputControlBacklogSince = 0;
     console.log("[DataChannel] input-control 已關閉");
   };
   ch.onerror = (event) => console.warn("[DataChannel] input-control 發生錯誤:", event);
@@ -2641,6 +2645,41 @@ function bindUnreliableChannel(ch: RTCDataChannel) {
       console.error("[Control-Unreliable] 執行遠端輸入失敗:", e);
     }
   };
+}
+
+function startInputHealthWatchdog() {
+  if (inputHealthWatchdog !== null) return;
+  inputHealthWatchdog = window.setInterval(() => {
+    if (!peerConnection || !currentRemoteId || !currentRemotePin) return;
+    const pcState = peerConnection.connectionState;
+    const iceState = peerConnection.iceConnectionState;
+    const connected = pcState === "connected" || iceState === "connected" || iceState === "completed";
+    if (!connected) {
+      inputControlBacklogSince = 0;
+      return;
+    }
+
+    const controlState = dataChannelControl?.readyState ?? "null";
+    const unreliableState = dataChannelUnreliable?.readyState ?? "null";
+    const controlBuffered = dataChannelControl?.bufferedAmount ?? 0;
+    const unreliableBuffered = dataChannelUnreliable?.bufferedAmount ?? 0;
+    console.log(`[Input][Health] pc=${pcState}/${iceState} control=${controlState}(${controlBuffered}) unreliable=${unreliableState}(${unreliableBuffered})`);
+
+    if (controlState !== "open") {
+      awaitSafeRenegotiate(`input-control channel is ${controlState} while ICE is connected`);
+      return;
+    }
+
+    if (controlBuffered > INPUT_CONTROL_BUFFER_LIMIT) {
+      if (!inputControlBacklogSince) inputControlBacklogSince = Date.now();
+      if (Date.now() - inputControlBacklogSince > 5000) {
+        awaitSafeRenegotiate(`input-control backlog stuck at ${controlBuffered} bytes`);
+        inputControlBacklogSince = Date.now();
+      }
+    } else {
+      inputControlBacklogSince = 0;
+    }
+  }, 3000);
 }
 
 function bindSystemControlChannel(ch: RTCDataChannel) {
@@ -3661,6 +3700,8 @@ let controlSeqNumber = 0;
 let unreliableSeqNumber = 0;
 let inputBound = false;
 let resetDisplayMode: () => void = () => {};
+let inputHealthWatchdog: number | null = null;
+let inputControlBacklogSince = 0;
 
 function buildInputPacket(eventType: number, payload: Uint8Array): Uint8Array {
   const isUnreliable = isTransientInputEvent(eventType);
