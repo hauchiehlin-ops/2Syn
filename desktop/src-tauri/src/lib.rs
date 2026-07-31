@@ -1199,9 +1199,15 @@ async fn check_network_health() -> Result<serde_json::Value, String> {
         #[cfg(not(target_os = "windows"))]
         let cmd = "ifconfig";
 
-        let output = std::process::Command::new(cmd)
-            .output()
-            .map_err(|e| e.to_string())?;
+        let mut command = std::process::Command::new(cmd);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let output = command.output().map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&output.stdout);
 
         let has_ipv6 = stdout.contains("IPv6") || stdout.contains("inet6");

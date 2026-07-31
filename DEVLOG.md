@@ -20,6 +20,15 @@
 
 # 歷程
 
+## 2026-07-31 — 修正 Windows 版啟動後終端機視窗反覆閃現
+
+- **問題/目標**：Windows 安裝版啟動後，畫面會不斷有終端機視窗一閃即逝，反覆出現/消失。
+- **根因/做法**：
+  1. 前端 `check_network_health` 每 5 秒被 `setInterval` 呼叫一次（`desktop/src/main.ts`），對應的 Tauri 指令 `check_network_health`（`desktop/src-tauri/src/lib.rs:1186`）在 Windows 上會執行 `Command::new("ipconfig")`。App 本身以 GUI subsystem 編譯（`main.rs:2` 的 `windows_subsystem = "windows"`）沒有主控台，但子行程 `ipconfig.exe` 未加 `CREATE_NO_WINDOW` 旗標，於是 Windows 每次都會為它配置一個新主控台視窗、瞬間顯示又銷毀——每 5 秒一次，正是使用者看到的「終端機一直啟動、消失」。
+  2. 同樣的問題也存在於 `core/src/security.rs:29` 的 `wmic csproduct get UUID`（`generate_hwid()` 的 fallback 路徑，讀不到登錄檔 `MachineGuid` 時才會觸發）。
+  3. 修法：在兩處 `std::process::Command` 上，Windows 平台下用 `std::os::windows::process::CommandExt::creation_flags(0x08000000)`（`CREATE_NO_WINDOW`）抑制子行程主控台視窗，不需改動輪詢間隔本身。
+- **教訓**：GUI subsystem 的 Windows 應用程式，任何 shell-out 到主控台程式（`ipconfig`/`wmic`/`cmd` 等）都必須加 `CREATE_NO_WINDOW`，否則只要呼叫點在迴圈/計時器裡就會變成視覺上很顯眼的閃爍 bug；純類型檢查（`cargo check`）在非 Windows 主機上不會發現，因為整段程式碼在 `#[cfg(target_os = "windows")]` 之內。
+
 ## 2026-07-31 — 修正 web 連線短時間後模糊與輸入失效
 
 - **問題/目標**：網頁版遠端連線初期正常，但短時間後 host 畫面變模糊；滑鼠移動仍可用，點擊/鍵盤失效或嚴重延遲。

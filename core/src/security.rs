@@ -26,8 +26,14 @@ pub fn generate_hwid() -> Result<String, CoreError> {
         }
         
         // Fallback: 呼叫 wmic 獲取主機板 UUID
-        let output = Command::new("wmic")
-            .args(["csproduct", "get", "UUID"])
+        let mut wmic_cmd = Command::new("wmic");
+        wmic_cmd.args(["csproduct", "get", "UUID"]);
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            wmic_cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let output = wmic_cmd
             .output()
             .map_err(|e| CoreError::SystemError(format!("執行 wmic 失敗: {}", e)))?;
         
