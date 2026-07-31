@@ -11,8 +11,18 @@ $script:BuildLog = $null
 
 function Run([string]$Command, [string[]]$Arguments) {
   Write-Host "`n> $Command $($Arguments -join ' ')" -ForegroundColor Cyan
-  & $Command @Arguments 2>&1 | Tee-Object -FilePath $script:BuildLog -Append
-  $exitCode = $LASTEXITCODE
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $Command @Arguments 2>&1 | ForEach-Object {
+      $line = "$_"
+      Write-Host $line
+      Add-Content -Path $script:BuildLog -Value $line
+    }
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
   if ($exitCode -ne 0) {
     if (Test-Path $script:BuildLog) {
       Write-Host "`nLast build log lines:" -ForegroundColor Yellow
