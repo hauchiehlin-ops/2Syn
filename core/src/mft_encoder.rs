@@ -66,6 +66,21 @@ impl RgbaToI420 {
     }
 }
 
+fn cap_encode_size(target_width: u32, target_height: u32, src_width: u32, src_height: u32) -> (u32, u32) {
+    let even = |v: u32| (v.max(2) & !1).max(2);
+    if target_width <= src_width && target_height <= src_height {
+        return (even(target_width), even(target_height));
+    }
+
+    let scale = (src_width as f64 / target_width.max(1) as f64)
+        .min(src_height as f64 / target_height.max(1) as f64)
+        .min(1.0);
+    (
+        even((target_width as f64 * scale).floor() as u32),
+        even((target_height as f64 * scale).floor() as u32),
+    )
+}
+
 pub struct WindowsHardwareEncoder {
     params: Option<CodecParams>,
     frame_count: i64,
@@ -145,8 +160,9 @@ impl VideoHardwareEncoder for WindowsHardwareEncoder {
     fn encode_rgba_frame(&mut self, rgba_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
         #[cfg(target_os = "windows")]
         {
-            let target_w = self.params.as_ref().map(|p| p.width).unwrap_or(width);
-            let target_h = self.params.as_ref().map(|p| p.height).unwrap_or(height);
+            let requested_w = self.params.as_ref().map(|p| p.width).unwrap_or(width);
+            let requested_h = self.params.as_ref().map(|p| p.height).unwrap_or(height);
+            let (target_w, target_h) = cap_encode_size(requested_w, requested_h, width, height);
 
             if self.encoder.is_none() {
                 self.setup_encoder(target_w, target_h, 30, 2000)?;

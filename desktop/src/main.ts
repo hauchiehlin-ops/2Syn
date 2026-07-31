@@ -2226,6 +2226,11 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
 
         if (!videoEl.srcObject) {
           // 強制僅綁定視訊軌道，避免 iOS Safari 因為混入音訊軌道而無條件阻擋 autoplay
+          try {
+            (event.track as any).contentHint = "detail";
+          } catch (e) {
+            console.warn("[WebRTC] 設定視訊 contentHint=detail 失敗:", e);
+          }
           videoEl.srcObject = new MediaStream([event.track]);
           videoEl.style.imageRendering = "auto";
           videoEl.style.filter = "none";

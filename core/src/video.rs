@@ -105,6 +105,15 @@ fn fit_to_aspect(budget_w: u32, budget_h: u32, aspect: f64) -> (u32, u32) {
     (even(w), even(h))
 }
 
+#[cfg(not(target_os = "macos"))]
+fn cap_to_native_size(width: u32, height: u32, native_width: u32, native_height: u32) -> (u32, u32) {
+    let even = |v: u32| (v.max(2) & !1).max(2);
+    (
+        even(width.min(native_width.max(2))),
+        even(height.min(native_height.max(2))),
+    )
+}
+
 pub struct VideoStreamer {
     track: Arc<TrackLocalStaticSample>,
     encoder: Arc<Mutex<Box<dyn VideoHardwareEncoder + Send + Sync>>>,
@@ -343,7 +352,15 @@ impl VideoStreamer {
                     let tw = crate::input::TARGET_MONITOR_W.load(std::sync::atomic::Ordering::Relaxed);
                     let th = crate::input::TARGET_MONITOR_H.load(std::sync::atomic::Ordering::Relaxed);
                     if tw > 0 && th > 0 {
-                        fit_to_aspect(current_config.target_width, current_config.target_height, tw as f64 / th as f64)
+                        let fitted = fit_to_aspect(current_config.target_width, current_config.target_height, tw as f64 / th as f64);
+                        #[cfg(target_os = "macos")]
+                        {
+                            fitted
+                        }
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            cap_to_native_size(fitted.0, fitted.1, tw, th)
+                        }
                     } else {
                         (current_config.target_width, current_config.target_height)
                     }
