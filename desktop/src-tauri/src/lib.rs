@@ -30,6 +30,16 @@ struct AppState {
     has_active_webrtc: Arc<std::sync::atomic::AtomicBool>,
 }
 
+/// 回傳目前執行中的後端 build 身分，協助確認安裝包是否真的更新。
+#[tauri::command]
+async fn get_build_info() -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "git_commit": option_env!("SYN_GIT_COMMIT").unwrap_or("unknown"),
+        "build_time": option_env!("SYN_BUILD_TIME").unwrap_or("unknown"),
+    }))
+}
+
 /// 獲取本機硬體特徵碼（HWID）的 Tauri Command
 #[tauri::command]
 async fn get_device_hwid() -> Result<String, String> {
@@ -1467,6 +1477,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_build_info,
             get_device_hwid,
             open_login_items_settings,
             set_static_password,

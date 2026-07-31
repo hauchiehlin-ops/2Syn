@@ -6,6 +6,11 @@ import { listen } from "@tauri-apps/api/event";
 import QRCode from "qrcode";
 import pkg from "../package.json";
 
+type BuildInfo = {
+  version?: string;
+  git_commit?: string;
+  build_time?: string;
+};
 
 function isDesktopTauri(): boolean {
   if (!isTauri()) return false;
@@ -33,6 +38,31 @@ function initPlatformClasses() {
 }
 
 initPlatformClasses();
+
+async function resolveBuildInfo(): Promise<BuildInfo> {
+  if (!isDesktopTauri()) {
+    return { version: pkg.version };
+  }
+
+  try {
+    return await invoke<BuildInfo>("get_build_info");
+  } catch (error) {
+    console.warn("Build info unavailable:", error);
+    return { version: pkg.version };
+  }
+}
+
+function applyBuildInfo(info: BuildInfo) {
+  const version = info.version || pkg.version;
+  if (!version) return;
+
+  const commit = info.git_commit && info.git_commit !== "unknown" ? info.git_commit : "";
+  const suffix = commit ? ` (${commit})` : "";
+  document.title = `2syn_Duel v${version}${suffix}`;
+  document.querySelectorAll(".app-version").forEach(el => {
+    el.textContent = `v${version}${suffix}`;
+  });
+}
 
 // --- Toast Notification System ---
 function showToast(message: string, duration: number = 3000) {
@@ -6290,14 +6320,7 @@ function initQuickMenu() {
 async function initializeApp() {
   initPlatformClasses();
 
-  if (pkg.version) {
-    // 同步更新網頁標題，讓 Mac/Windows 原生視窗的標題列也能顯示版本號
-    document.title = `2syn_Duel v${pkg.version}`;
-    // 同步更新介面中的版本號標籤，避免硬編碼顯示與實際版號不符
-    document.querySelectorAll(".app-version").forEach(el => {
-      el.textContent = `v${pkg.version}`;
-    });
-  }
+  applyBuildInfo(await resolveBuildInfo());
   setupFileTransferDropZone(() => dataChannelFileTransfer);
   initDeviceBook();
 
