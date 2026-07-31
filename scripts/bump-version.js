@@ -13,7 +13,8 @@ const files = {
   tauriCargo: path.join(rootDir, 'desktop', 'src-tauri', 'Cargo.toml'),
   coreCargo: path.join(rootDir, 'core', 'Cargo.toml'),
   signalingCargo: path.join(rootDir, 'signaling', 'Cargo.toml'),
-  indexHtml: path.join(rootDir, 'desktop', 'index.html')
+  indexHtml: path.join(rootDir, 'desktop', 'index.html'),
+  iosGeneratedInfoPlist: path.join(rootDir, 'desktop', 'src-tauri', 'gen', 'apple', 'syn-desktop_iOS', 'Info.plist')
 };
 
 // 讀取目前 package.json 的版次
@@ -97,5 +98,23 @@ const updateIndexHtmlVersion = (filePath) => {
   }
 };
 updateIndexHtmlVersion(files.indexHtml);
+
+// 6. 更新已生成的 iOS Info.plist，避免下一次 IPA 打包沿用舊版號
+const updateGeneratedIosInfoPlist = (filePath) => {
+  if (fs.existsSync(filePath)) {
+    let content = fs.readFileSync(filePath, 'utf-8');
+    content = content.replace(
+      /(<key>CFBundleShortVersionString<\/key>\s*<string>)[^<]+(<\/string>)/,
+      `$1${nextVersion}$2`
+    );
+    content = content.replace(
+      /(<key>CFBundleVersion<\/key>\s*<string>)[^<]+(<\/string>)/,
+      `$1${nextVersion}$2`
+    );
+    fs.writeFileSync(filePath, content);
+    console.log(`Updated: ${filePath}`);
+  }
+};
+updateGeneratedIosInfoPlist(files.iosGeneratedInfoPlist);
 
 console.log(`[Version Bump] Successfully bumped version to ${nextVersion} in all files!`);
