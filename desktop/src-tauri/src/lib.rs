@@ -638,9 +638,8 @@ async fn handle_remote_offer_as_host(
                     // 若立刻把全域 active flag 關掉，host 擷取 loop 會停止產生影格，
                     // client 端就會永久停在最後一張畫面，但滑鼠/鍵盤仍會在 host 端生效。
                     println!("WebRTC 狀態變更: {:?}，視為暫時抖動，保持影像擷取活躍", state_val);
-                } else {
-                    // 失敗/關閉：僅當本 pc 仍是當前 active session 時才標記非活躍，
-                    // 避免舊 session 的遲來斷線事件把正在運作的新 session 影像掐斷。
+                } else if matches!(state_val, RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed) {
+                    // 失敗/關閉：僅當本 pc 仍是當前 active session 時才標記非活躍。
                     let is_current = app_state
                         .active_pc
                         .lock()
@@ -656,6 +655,52 @@ async fn handle_remote_offer_as_host(
                     } else {
                         println!("WebRTC 狀態變更: {:?}（舊/非當前 session，忽略不影響活躍旗標）", state_val);
                     }
+                } else {
+                    // New/Connecting 等過渡狀態不關閉擷取，避免 ICE/data channel 已通但
+                    // peer connection 聚合狀態尚未 Connected 時造成首幀黑屏。
+                    println!("WebRTC 狀態變更: {:?}，等待 ICE/DTLS 穩定，不改變影像擷取狀態", state_val);
+                }
+            })
+        },
+    ));
+
+    let app_clone_ice = app_handle.clone();
+    let pc_for_ice = Arc::clone(&pc);
+    let session_alive_ice = Arc::clone(&session_alive);
+    pc.on_ice_connection_state_change(Box::new(
+        move |ice_state: webrtc::ice_transport::ice_connection_state::RTCIceConnectionState| {
+            let app = app_clone_ice.clone();
+            let pc_self = Arc::clone(&pc_for_ice);
+            let session_alive = Arc::clone(&session_alive_ice);
+            Box::pin(async move {
+                use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
+                let app_state = app.state::<AppState>();
+                let is_current = app_state
+                    .active_pc
+                    .lock()
+                    .await
+                    .as_ref()
+                    .map(|cur| Arc::ptr_eq(cur, &pc_self))
+                    .unwrap_or(false);
+
+                if !is_current {
+                    println!("ICE 狀態變更: {:?}（舊/非當前 session，忽略）", ice_state);
+                    return;
+                }
+
+                if matches!(ice_state, RTCIceConnectionState::Connected | RTCIceConnectionState::Completed) {
+                    app_state
+                        .has_active_webrtc
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    println!("ICE 狀態變更: {:?}, 是否活躍: true", ice_state);
+                } else if matches!(ice_state, RTCIceConnectionState::Failed | RTCIceConnectionState::Closed) {
+                    session_alive.store(false, std::sync::atomic::Ordering::SeqCst);
+                    app_state
+                        .has_active_webrtc
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                    println!("ICE 狀態變更: {:?}, 是否活躍: false", ice_state);
+                } else if matches!(ice_state, RTCIceConnectionState::Disconnected) {
+                    println!("ICE 狀態變更: {:?}，視為暫時抖動，保持影像擷取活躍", ice_state);
                 }
             })
         },

@@ -2255,19 +2255,19 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
             const presentedFrames = quality?.totalVideoFrames ?? 0;
             const frameAdvanced = presentedFrames > lastPresentedFrames;
             const timeAdvanced = ct > lastCurrentTime;
-            if (!frameAdvanced && !timeAdvanced && ct > 0 && !videoEl.paused) {
+            if (!frameAdvanced && !timeAdvanced && !videoEl.paused) {
               freezeDetectCount++;
               if (freezeDetectCount >= 2) {
-                console.warn("[Video] 偵測到影片凍結，嘗試恢復播放...");
+                console.warn("[Video] 偵測到影片無新幀，嘗試恢復播放...");
                 videoEl.play().catch(() => {});
               }
               if (freezeDetectCount >= 4) {
                 const now = Date.now();
                 const state = peerConnection?.connectionState;
                 const iceState = peerConnection?.iceConnectionState;
-                if (peerConnection && state === "connected" && (iceState === "connected" || iceState === "completed") && now - lastIceRestartAt > 15000) {
+                if (peerConnection && (state === "connected" || state === "connecting") && (iceState === "connected" || iceState === "completed") && now - lastIceRestartAt > 15000) {
                   lastIceRestartAt = now;
-                  awaitSafeRenegotiate("video freeze with live input channel");
+                  awaitSafeRenegotiate("video has no decoded frames while ICE is connected");
                 }
                 freezeDetectCount = 0;
               }
