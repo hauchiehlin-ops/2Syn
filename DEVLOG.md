@@ -20,6 +20,17 @@
 
 # 歷程
 
+## 2026-07-31 — 修正 Pointer Lock 相對移動造成的點擊位置漂移
+
+- **問題/目標**：連線成功後，鼠標點擊位置有時準確、有時偏差；且與平台/host 端無關（web 版與安裝版 client 皆會發生）。
+- **根因/做法**：
+  1. 排除鍵盤/滑鼠協定本身的競態——`MouseDown`/`MouseUp` 早已改為自帶座標（見更早的「跨 channel 座標競態」記錄），問題出在**滑鼠移動**這一段：desktop/web client 在滑鼠進入 Pointer Lock（原生無邊界拖曳）模式後，改送 `MouseRelativeMove`(0x07) 相對位移封包，`desktop/src/main.ts` 直接把瀏覽器 `e.movementX/Y`（CSS 像素、且是視訊畫面的渲染尺寸，非 host 實際解析度）當作整數送出；host 端（`core/src/input.rs`）過去把這個數值當「原生滑鼠相對位移」注入：Windows 用 `MOUSEEVENTF_MOVE`（會被系統的指標加速度曲線/「增強指標精確度」非線性縮放）、macOS 用 CGEvent 的 Delta 欄位（同樣意圖讓 WindowServer 套用原生加速度曲線）。
+  2. 這造成 client 端本地估算的合成游標位置（`syntheticCursorPercentX/Y`，用「像素位移 / 渲染寬高」換算的比例）與 host 端實際游標終點**在單位與非線性度上都對不上**：視訊渲染尺寸（CSS px）幾乎不可能剛好等於 host 實際解析度（會因瀏覽器視窗大小、DPI、ABR 動態調整解析度而變動），加上作業系統的加速度曲線又是非線性的——移動越多、越快，兩端估算的位置就漂移越遠。而 `MouseDown`/`MouseUp` 送出的座標正是這個「已經漂移」的 `currentCursorPercentX/Y`，因此點擊位置時準時不準：剛進入鎖定或很少移動時準確，移動一段距離後（尤其快速滑動）就會偏差。
+  3. **修法**：讓 `MouseRelativeMove` 的 payload 改成與 `MouseMove`/`MouseDown`/`MouseUp` 相同單位的「螢幕寬高正規化比例」（f32，而非原始像素 i32）。Client 端（`desktop/src/main.ts` 的 `pointermove` 監聽器）在鎖定模式下改為送出「本地已 clamp 過的合成游標位移量」（`syntheticCursorPercentX` 前後差值，而非未夾限的原始位移），確保邊界夾限行為與 host 端一致。Host 端（`core/src/input.rs` 的 `simulate()`）不再用任何 OS 原生的相對移動/加速度 API：改成用既有的全域游標正規化位置追蹤（`get_global_cursor`/`set_global_cursor`）疊加這個比例位移、clamp 到 0..1，再套用與 `MouseMove` 完全相同的絕對定位公式（Windows：`absolute_mouse_dxdy` + `MOUSEEVENTF_ABSOLUTE`；macOS：`TARGET_MONITOR_*`/`screen_w/h` 換算後的 `CGPoint` + `MouseMoved`/`*Dragged` 事件）。兩端從此是同一套純算術，不再有任何平台相依的非線性轉換，游標估算不會漂移。
+- **教訓**：「相對位移」封包若要保留 OS 原生滑鼠加速度手感，前提是雙端對同一個 dx/dy 數值的解讀必須完全一致；一旦 client 端還要用同一個數值做「本地位置估算」（例如合成游標疊加層、或像本例直接拿來當點擊座標），OS 加速度曲線的非線性就會讓兩邊估算脫鉤。凡是「點擊位置累積誤差、且與移動量/速度正相關」的症狀，都該懷疑是不是有一段相對位移路徑繞過了正規化絕對座標系。
+- **鍵盤延遲**：檢查了 `input-control`（reliable, ordered, `maxPacketLifeTime=250ms`）與 `input-unreliable` 的分流、backpressure 丟包邏輯、IME 組字串流化等既有機制，皆與先前多筆 DEVLOG 修正一致，沒有找到新的離散型 bug；鍵盤 KeyDown/KeyUp 走實體鍵盤監聽器（`main.ts:5286`/`5351`）沒有節流/防抖，直送 reliable channel。殘餘的「時好時壞」較可能是弱網路（RTT/loss）與已調校過的 250ms 封包壽命交互作用下的正常劣化，而非新發現的程式碼缺陷；若使用者能提供可重現條件（例如是否只在特定網路/TURN relay 環境下發生），可再深入排查。
+- **驗證**：`npm install`（補齊本機缺少的 `qrcode` 相依套件，與此次修正無關的既有環境落差）；`npm run build` 通過；`CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo check --workspace` 通過（僅既有 unused/warning，macOS 端已實際編譯到修改的 `MouseRelativeMove` 分支；Windows 端因交叉編譯限制僅靜態檢視程式碼，未在此機器上實測）。
+
 ## 2026-07-31 — 修正 Windows 版啟動後終端機視窗反覆閃現
 
 - **問題/目標**：Windows 安裝版啟動後，畫面會不斷有終端機視窗一閃即逝，反覆出現/消失。

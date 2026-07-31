@@ -34,7 +34,10 @@ pub enum InputEvent {
     MouseScroll { delta_x: i16, delta_y: i16 },
     KeyDown { keycode: u16, modifiers: u8 },
     KeyUp { keycode: u16, modifiers: u8 },
-    MouseRelativeMove { dx: i32, dy: i32 }, // 相對位移，用於 Pointer Lock 支援原生滑鼠加速度
+    // 相對位移，用於 Pointer Lock；dx/dy 為「螢幕寬高比例」(-1.0..1.0 量級)而非像素，
+    // 與 MouseMove/Down/Up 使用同一套正規化座標系，host 端據此疊加全域游標比例位置
+    // 再套用絕對定位——不再借助任一平台的原生滑鼠加速度曲線（見 DEVLOG 對應記錄）。
+    MouseRelativeMove { dx: f32, dy: f32 },
     TextInput { text: String }, // 原生字元注入 (Unicode)
     PenMove { x: f32, y: f32, pressure: u16, tilt_x: i8, tilt_y: i8 }, // Apple Pencil / 觸控筆壓力感應
     ResetState,
@@ -167,8 +170,8 @@ impl InputEvent {
             }
             0x07 => {
                 if data.len() < 9 { return Err(CoreError::NetworkError("MouseRelativeMove 封包長度不足".to_string())); }
-                let dx = i32::from_be_bytes(data[1..5].try_into().unwrap());
-                let dy = i32::from_be_bytes(data[5..9].try_into().unwrap());
+                let dx = f32::from_be_bytes(data[1..5].try_into().unwrap());
+                let dy = f32::from_be_bytes(data[5..9].try_into().unwrap());
                 Ok(InputEvent::MouseRelativeMove { dx, dy })
             }
             0x08 => {
@@ -317,10 +320,21 @@ impl InputEvent {
                         input.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
                     }
                     InputEvent::MouseRelativeMove { dx, dy } => {
+                        // 疊加正規化比例位置後改走絕對定位（與 MouseMove 相同公式），
+                        // 不再用 MOUSEEVENTF_MOVE 相對位移——後者會被 Windows 指標
+                        // 加速度曲線（增強指標精確度）非線性縮放，與 client 端估算
+                        // 的比例位置逐漸脫節，導致點擊位置隨移動量漂移。
+                        let (last_x, last_y) = get_global_cursor();
+                        let new_x = (last_x + *dx).clamp(0.0, 1.0);
+                        let new_y = (last_y + *dy).clamp(0.0, 1.0);
+                        set_global_cursor(new_x, new_y);
+
                         input.r#type = INPUT_MOUSE;
-                        input.Anonymous.mi.dx = *dx;
-                        input.Anonymous.mi.dy = *dy;
-                        input.Anonymous.mi.dwFlags = MOUSEEVENTF_MOVE;
+                        let (adx, ady, mut flags) = absolute_mouse_dxdy(new_x, new_y);
+                        flags |= MOUSEEVENTF_MOVE;
+                        input.Anonymous.mi.dx = adx;
+                        input.Anonymous.mi.dy = ady;
+                        input.Anonymous.mi.dwFlags = flags;
                     }
                     InputEvent::TextInput { text } => {
                         for ch in text.encode_utf16() {
@@ -707,30 +721,44 @@ impl InputEvent {
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::MouseRelativeMove { dx, dy } => {
-                    // 為了保留 macOS 的滑鼠加速度，我們取當前座標疊加 dx/dy 後注入，同時設定 DeltaX/Y
-                    let event = CGEvent::new(source.clone());
-                    if event.is_err() {
-                        return Err(CoreError::SystemError("無法獲取當前滑鼠位置".to_string()));
-                    }
-                    let current_point = event.unwrap().location();
-                    let point = core_graphics::geometry::CGPoint::new(current_point.x + *dx as f64, current_point.y + *dy as f64);
-                    
+                    // 改用與 MouseMove 相同的正規化比例位置公式疊加絕對定位，不再
+                    // 依賴 CGEvent Delta 欄位觸發的 macOS 滑鼠加速度曲線——client 端
+                    // 視訊畫面尺寸（CSS px）與 host 端實際解析度、DPI 天生不同，
+                    // 疊加加速度曲線後兩端估算位置會隨移動量/速度漸行漸遠，造成點擊
+                    // 位置「有時準確、有時偏差」。
+                    let (last_x, last_y) = get_global_cursor();
+                    let new_x = (last_x + *dx).clamp(0.0, 1.0);
+                    let new_y = (last_y + *dy).clamp(0.0, 1.0);
+                    set_global_cursor(new_x, new_y);
+
+                    let tx = TARGET_MONITOR_X.load(Ordering::Relaxed);
+                    let ty = TARGET_MONITOR_Y.load(Ordering::Relaxed);
+                    let tw = TARGET_MONITOR_W.load(Ordering::Relaxed);
+                    let th = TARGET_MONITOR_H.load(Ordering::Relaxed);
+                    let point = if tw > 0 && th > 0 {
+                        core_graphics::geometry::CGPoint::new(
+                            tx as f64 + new_x as f64 * tw as f64,
+                            ty as f64 + new_y as f64 * th as f64,
+                        )
+                    } else {
+                        core_graphics::geometry::CGPoint::new(
+                            new_x as f64 * screen_w,
+                            new_y as f64 * screen_h,
+                        )
+                    };
+
                     let mut event_type = CGEventType::MouseMoved;
                     let mut mouse_btn = CGMouseButton::Left;
-                    
+
                     if LEFT_BTN_DOWN.load(Ordering::Relaxed) {
                         event_type = CGEventType::LeftMouseDragged;
                     } else if RIGHT_BTN_DOWN.load(Ordering::Relaxed) {
                         event_type = CGEventType::RightMouseDragged;
                         mouse_btn = CGMouseButton::Right;
                     }
-                    
+
                     let event = CGEvent::new_mouse_event(source, event_type, point, mouse_btn)
                         .map_err(|_| CoreError::SystemError("建立 macOS 滑鼠相對移動事件失敗".to_string()))?;
-                    
-                    // 寫入底層的 Event Delta，讓 macOS 得以計算並應用滑鼠加速度曲線
-                    event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_DELTA_X, *dx as i64);
-                    event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_DELTA_Y, *dy as i64);
                     event.post(CGEventTapLocation::HID);
                 }
                 InputEvent::TextInput { text } => {

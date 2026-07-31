@@ -4107,14 +4107,15 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
   function sendPendingMoves() {
     
-    // 優先發送相對位移 (Pointer Lock 模式)
+    // 優先發送相對位移 (Pointer Lock 模式)；dx/dy 為螢幕寬高比例（與 MouseMove 同單位），
+    // 非原始像素——見 pointermove 監聽器內的說明。
     if (pendingRelativeDX !== 0 || pendingRelativeDY !== 0) {
       const payload = new Uint8Array(8);
       const view = new DataView(payload.buffer);
-      view.setInt32(0, pendingRelativeDX, false);
-      view.setInt32(4, pendingRelativeDY, false);
+      view.setFloat32(0, pendingRelativeDX, false);
+      view.setFloat32(4, pendingRelativeDY, false);
       sendInputPacket(buildInputPacket(0x07, payload));
-      
+
       pendingRelativeDX = 0;
       pendingRelativeDY = 0;
     }
@@ -4482,14 +4483,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         isJustLocked = false;
         return; // 捨棄鎖定瞬間瀏覽器產生的居中位移訊號
       }
-      pendingRelativeDX += Math.round(e.movementX);
-      pendingRelativeDY += Math.round(e.movementY);
-      triggerMoveRaf();
-      
       const rect = videoEl.getBoundingClientRect();
       const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
       const containerRatio = rect.width / rect.height;
-      
+
       let renderedWidth, renderedHeight;
       if (containerRatio > videoRatio) {
         renderedHeight = rect.height;
@@ -4499,17 +4496,23 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         renderedHeight = renderedWidth / videoRatio;
       }
 
-      // 在鎖定模式下，根據實際滑鼠的移動量累積計算本地合成游標的絕對位置
-      syntheticCursorPercentX += e.movementX / (renderedWidth || 1);
-      syntheticCursorPercentY += e.movementY / (renderedHeight || 1);
-      
-      // 確保游標不會超出畫面範圍
-      syntheticCursorPercentX = Math.max(0, Math.min(1, syntheticCursorPercentX));
-      syntheticCursorPercentY = Math.max(0, Math.min(1, syntheticCursorPercentY));
-      
+      // 送出「螢幕寬高比例」而非原始 CSS 像素位移：視訊畫面尺寸與被控端實際解析度
+      // /DPI 本就不同，若直接送像素值，host 端套用各平台原生滑鼠加速度曲線後，
+      // 兩端估算的游標位置會隨移動量與速度漸行漸遠，造成點擊位置「有時準確、有時
+      // 偏差」。改成 client/host 用同一套正規化座標公式疊加，並用本地已 clamp 過的
+      // 合成游標位移量（而非原始未夾限位移）送出，讓兩端邊界夾限行為一致。
+      const prevSyntheticX = syntheticCursorPercentX;
+      const prevSyntheticY = syntheticCursorPercentY;
+      syntheticCursorPercentX = Math.max(0, Math.min(1, syntheticCursorPercentX + e.movementX / (renderedWidth || 1)));
+      syntheticCursorPercentY = Math.max(0, Math.min(1, syntheticCursorPercentY + e.movementY / (renderedHeight || 1)));
+
+      pendingRelativeDX += syntheticCursorPercentX - prevSyntheticX;
+      pendingRelativeDY += syntheticCursorPercentY - prevSyntheticY;
+      triggerMoveRaf();
+
       currentCursorPercentX = syntheticCursorPercentX;
       currentCursorPercentY = syntheticCursorPercentY;
-      
+
       updateCursorOverlay(syntheticCursorPercentX, syntheticCursorPercentY);
     } else {
       let x = 0, y = 0;
