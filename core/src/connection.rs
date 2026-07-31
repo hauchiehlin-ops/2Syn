@@ -122,24 +122,35 @@ impl ConnectionManager {
         // （堅持不使用 TURN 策略：不會出現 Relay 狀態，保留分支以備未來擴展如 Tailscale Relay）
         if metrics.connection_type == ConnectionType::Relay {
             config.target_fps = 30;
-            config.bitrate_limit_kbps = 2000; // 降低頻寬以適應中繼
+            config.bitrate_limit_kbps = 6000; // relay/TURN 仍優先保留可讀文字畫質
             config.color_format = ColorFormat::Yuv420;
-            config.target_width = 1280;
-            config.target_height = 720;
+            config.target_width = 1920;
+            config.target_height = 1080;
         }
 
         // 2. 基於網路指標 (ABR: Adaptive Bitrate) 的動態調整
-        // RTT 或 Packet Loss 過高時大幅降速
-        if metrics.rtt_ms > 150 || metrics.packet_loss_rate > 0.05 {
+        // Packet loss 會直接破壞畫面流暢與控制回饋，需優先處理；RTT 高但 loss 低
+        // 時通常仍有足夠頻寬，不應過早降到 480p，否則 web/TURN 文字會變得不可讀。
+        if metrics.packet_loss_rate > 0.10 {
             config.target_fps = 30;
-            config.bitrate_limit_kbps = 1000;
-            config.target_width = 854;
-            config.target_height = 480;
-        } else if metrics.rtt_ms > 80 || metrics.packet_loss_rate > 0.01 {
-            config.target_fps = 60;
-            config.bitrate_limit_kbps = 3000;
+            config.bitrate_limit_kbps = 2500;
             config.target_width = 1280;
             config.target_height = 720;
+        } else if metrics.packet_loss_rate > 0.03 {
+            config.target_fps = 30;
+            config.bitrate_limit_kbps = 4000;
+            config.target_width = 1600;
+            config.target_height = 900;
+        } else if metrics.rtt_ms > 180 || metrics.packet_loss_rate > 0.01 {
+            config.target_fps = 45;
+            config.bitrate_limit_kbps = 6000;
+            config.target_width = 1920;
+            config.target_height = 1080;
+        } else if metrics.rtt_ms > 80 {
+            config.target_fps = 60;
+            config.bitrate_limit_kbps = 7000;
+            config.target_width = 1920;
+            config.target_height = 1080;
         } else {
             // 網路暢通，提升至最高畫質。
             // 註：macOS 走零拷貝編碼，編碼器尺寸須匹配 SCStream 交付的顯示器原生尺寸，
@@ -312,10 +323,10 @@ impl WebRtcSession {
     pub async fn setup_input_channel(&self) -> Result<Arc<RTCDataChannel>, CoreError> {
         let init = RTCDataChannelInit {
             ordered: Some(true),
-            // Keep keyboard/click ordering, but do not replay stale input seconds
-            // later on lossy TURN paths. Fresh control beats guaranteed old control.
-            max_packet_life_time: Some(200),
-            max_retransmits: None,
+            // Keep keyboard/click ordering, but skip retransmission. On web/TURN
+            // paths, waiting for stale SCTP retransmits is worse than dropping an
+            // old input command and letting the next fresh command through.
+            max_retransmits: Some(0),
             ..Default::default()
         };
 

@@ -20,6 +20,14 @@
 
 # 歷程
 
+## 2026-07-31 — 修正 web client 鍵盤延遲與低解析度
+
+- **問題/目標**：網頁版控制端鍵盤指令仍回應遲緩，且遠端 host 畫面解析度明顯偏低。
+- **根因/做法**：
+  1. `input-control` 雖已限制 packet lifetime，但 ordered SCTP 在 web/TURN 路徑仍會因重傳造成 head-of-line blocking；鍵盤與點擊封包會等舊控制封包過期。改成 ordered + `maxRetransmits=0`，保留事件順序但跳過重傳，讓新鮮指令優先。
+  2. ABR 原本只要 RTT > 150ms 或 loss > 5% 就降到 `854x480 / 1Mbps`；web/TURN 常見 RTT 偏高但不代表頻寬不足，導致文字和桌面畫面不可讀。調整為以 packet loss 優先降級，RTT 高但 loss 低時維持 1080p，只降 fps/bitrate。
+- **驗證**：`npm run build` 通過；`cargo check -p syn-core` 通過（僅既有 unused warnings）。
+
 ## 2026-07-31 — 降低桌面與 web client 的輸入延遲
 
 - **問題/目標**：遠端連線後，除 iOS client 外，桌面 client 與 web client 仍容易出現鍵盤、滑鼠點擊與選取延遲。

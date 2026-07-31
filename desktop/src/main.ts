@@ -2304,7 +2304,7 @@ async function startCall(remoteId: string, pin: string) {
     // 主動端建立 Data Channels
     dataChannelControl = pc.createDataChannel("input-control", {
       ordered: true,
-      maxPacketLifeTime: INPUT_CONTROL_PACKET_LIFETIME_MS,
+      maxRetransmits: 0,
     });
     dataChannelControl.bufferedAmountLowThreshold = 1024;
     bindControlChannel(dataChannelControl);
@@ -3132,7 +3132,7 @@ function initOfflineSdpMode() {
         currentRemoteId = "manual";
 
         // 建立 Data Channels
-        dataChannelControl = pc.createDataChannel("input-control", { ordered: true, maxPacketLifeTime: INPUT_CONTROL_PACKET_LIFETIME_MS });
+        dataChannelControl = pc.createDataChannel("input-control", { ordered: true, maxRetransmits: 0 });
         dataChannelControl.bufferedAmountLowThreshold = 1024;
         bindControlChannel(dataChannelControl);
         
@@ -3557,7 +3557,6 @@ function buildMouseButtonPayload(button: number, x: number, y: number): Uint8Arr
   return payload;
 }
 
-const INPUT_CONTROL_PACKET_LIFETIME_MS = 200;
 const INPUT_UNRELIABLE_BUFFER_LIMIT = 4 * 1024;
 const INPUT_CONTROL_BUFFER_LIMIT = 64 * 1024;
 const INPUT_CONTROL_TRANSIENT_BUFFER_LIMIT = 8 * 1024;
