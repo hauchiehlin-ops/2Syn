@@ -1263,7 +1263,7 @@ async fn get_connection_status(state: State<'_, AppState>) -> Result<serde_json:
 async fn check_network_health() -> Result<serde_json::Value, String> {
     #[cfg(any(target_os = "ios", target_os = "android"))]
     {
-        // iOS 無法執行 ifconfig，預設回傳基礎支援
+        // 行動端不需要桌面網卡探測，預設回傳基礎支援
         Ok(serde_json::json!({
             "has_ipv6": true,
             "has_tailscale": false
@@ -1284,24 +1284,26 @@ async fn check_network_health() -> Result<serde_json::Value, String> {
             }
         }
 
-        #[cfg(target_os = "windows")]
-        let cmd = "ipconfig";
-        #[cfg(not(target_os = "windows"))]
-        let cmd = "ifconfig";
-
-        let mut command = std::process::Command::new(cmd);
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        let output = command.output().map_err(|e| e.to_string())?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        let has_ipv6 = stdout.contains("IPv6") || stdout.contains("inet6");
-        let has_tailscale = stdout.contains("100.") || stdout.contains("fd7a:115c:a1e0:");
+        let interfaces = if_addrs::get_if_addrs().map_err(|e| e.to_string())?;
+        let has_ipv6 = interfaces.iter().any(|iface| match &iface.addr {
+            if_addrs::IfAddr::V6(addr) => !addr.ip.is_loopback(),
+            if_addrs::IfAddr::V4(_) => false,
+        });
+        let has_tailscale = interfaces.iter().any(|iface| {
+            let name = iface.name.to_ascii_lowercase();
+            let is_tailscale_name = name.contains("tailscale");
+            let is_tailscale_addr = match &iface.addr {
+                if_addrs::IfAddr::V4(addr) => {
+                    let octets = addr.ip.octets();
+                    octets[0] == 100 && (64..=127).contains(&octets[1])
+                }
+                if_addrs::IfAddr::V6(addr) => {
+                    let segments = addr.ip.segments();
+                    segments[0] == 0xfd7a && segments[1] == 0x115c && segments[2] == 0xa1e0
+                }
+            };
+            is_tailscale_name || is_tailscale_addr
+        });
 
         let value = serde_json::json!({
             "has_ipv6": has_ipv6,
