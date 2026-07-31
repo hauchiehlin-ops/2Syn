@@ -6277,7 +6277,7 @@ dependencies = [
 
 [[package]]
 name = "syn-signaling"
-version = "4.1.7"
+version = "4.1.10"
 dependencies = [
  "axum",
  "futures-util",
