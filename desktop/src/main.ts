@@ -457,6 +457,8 @@ let currentMonitorIndex: number = 0;
 let _clipboardPollInterval: ReturnType<typeof setInterval> | null = null;
 let _lastRemoteClipboard = "";
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
+let currentRemotePin: string | null = null;  // 當前連線 PIN，用於媒體凍結時自癒重協商
+let renegotiationInFlight = false;
 let myId: string = "";                        // 本機 9 位數 ID
 let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
 let currentCursorPercentX = 0.5;               // 全域游標百分比 X（用於避讓對焦）
@@ -2237,19 +2239,36 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
             }
           };
 
-          // 持續偵測影片凍結並自動恢復：iOS WKWebView 的 <video> 在背景切換、
-          // jitter buffer 清空、或解碼器暫停後可能靜默停止渲染但不觸發任何事件。
-          // 每 2 秒檢查 currentTime 是否有推進，若凍結超過 4 秒自動 play()。
+          // 持續偵測影片凍結並自動恢復：部分 WebView/Chromium 在 media path 停住時，
+          // connectionState/data channel 仍維持 connected，host 仍會收到 input，但 client
+          // 端畫面停在最後一幀。此時單純 play() 不夠，需要嘗試 ICE restart 讓媒體路徑恢復。
           let lastCurrentTime = 0;
+          let lastPresentedFrames = 0;
           let freezeDetectCount = 0;
+          let lastIceRestartAt = 0;
           const freezeWatchdog = setInterval(() => {
             if (!videoEl.srcObject) { clearInterval(freezeWatchdog); return; }
             const ct = videoEl.currentTime;
-            if (ct === lastCurrentTime && ct > 0 && !videoEl.paused) {
+            const quality = typeof videoEl.getVideoPlaybackQuality === "function"
+              ? videoEl.getVideoPlaybackQuality()
+              : null;
+            const presentedFrames = quality?.totalVideoFrames ?? 0;
+            const frameAdvanced = presentedFrames > lastPresentedFrames;
+            const timeAdvanced = ct > lastCurrentTime;
+            if (!frameAdvanced && !timeAdvanced && ct > 0 && !videoEl.paused) {
               freezeDetectCount++;
               if (freezeDetectCount >= 2) {
                 console.warn("[Video] 偵測到影片凍結，嘗試恢復播放...");
                 videoEl.play().catch(() => {});
+              }
+              if (freezeDetectCount >= 4) {
+                const now = Date.now();
+                const state = peerConnection?.connectionState;
+                const iceState = peerConnection?.iceConnectionState;
+                if (peerConnection && state === "connected" && (iceState === "connected" || iceState === "completed") && now - lastIceRestartAt > 15000) {
+                  lastIceRestartAt = now;
+                  awaitSafeRenegotiate("video freeze with live input channel");
+                }
                 freezeDetectCount = 0;
               }
             } else {
@@ -2260,6 +2279,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
               videoEl.play().catch(() => {});
             }
             lastCurrentTime = ct;
+            lastPresentedFrames = presentedFrames;
           }, 2000);
 
           try {
@@ -2328,6 +2348,41 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
   return pc;
 }
 
+async function renegotiateCurrentPeerConnection(reason: string) {
+  if (!peerConnection || !currentRemoteId || !currentRemotePin) return;
+  if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) return;
+  if (renegotiationInFlight) return;
+  if (peerConnection.signalingState !== "stable") {
+    console.warn(`[WebRTC] 略過重協商 (${reason})，signalingState=${peerConnection.signalingState}`);
+    return;
+  }
+
+  renegotiationInFlight = true;
+  try {
+    console.warn(`[WebRTC] 觸發重協商: ${reason}`);
+    const offer = await peerConnection.createOffer({ iceRestart: true });
+    await peerConnection.setLocalDescription(offer);
+    signalingWs.send(JSON.stringify({
+      type: "offer",
+      target: currentRemoteId,
+      pin: currentRemotePin,
+      sdp: offer.sdp,
+    }));
+  } catch (err) {
+    console.warn("[WebRTC] 重協商失敗:", err);
+  } finally {
+    setTimeout(() => {
+      renegotiationInFlight = false;
+    }, 3000);
+  }
+}
+
+function awaitSafeRenegotiate(reason: string) {
+  renegotiateCurrentPeerConnection(reason).catch((err) => {
+    console.warn("[WebRTC] 自癒重協商例外:", err);
+  });
+}
+
 // 主動端：建立 Data Channels 並發起 Offer
 async function startCall(remoteId: string, pin: string) {
   if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
@@ -2337,6 +2392,7 @@ async function startCall(remoteId: string, pin: string) {
   }
 
   try {
+    currentRemotePin = pin;
     const pc = createPeerConnection(remoteId);
     peerConnection = pc;
 
@@ -2570,6 +2626,9 @@ function bindSystemControlChannel(ch: RTCDataChannel) {
 // 重置連線相關 UI 狀態
 function resetConnectionUI() {
   remoteHostOs = ""; // 避免跨連線沿用上一台被控端的 OS 資訊
+  currentRemoteId = null;
+  currentRemotePin = null;
+  renegotiationInFlight = false;
   activeSyncStatefulLabels = null; // 清除狀態標籤同步回調
   if (connectionTimeoutTimer) {
     clearTimeout(connectionTimeoutTimer);

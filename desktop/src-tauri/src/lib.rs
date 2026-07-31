@@ -633,8 +633,13 @@ async fn handle_remote_offer_as_host(
                         .has_active_webrtc
                         .store(true, std::sync::atomic::Ordering::SeqCst);
                     println!("WebRTC 狀態變更: {:?}, 是否活躍: true", state_val);
+                } else if matches!(state_val, RTCPeerConnectionState::Disconnected) {
+                    // Disconnected 可能只是 ICE 短暫抖動；此時 data channel/input 仍可能可用。
+                    // 若立刻把全域 active flag 關掉，host 擷取 loop 會停止產生影格，
+                    // client 端就會永久停在最後一張畫面，但滑鼠/鍵盤仍會在 host 端生效。
+                    println!("WebRTC 狀態變更: {:?}，視為暫時抖動，保持影像擷取活躍", state_val);
                 } else {
-                    // 斷線/失敗/關閉：僅當本 pc 仍是當前 active session 時才標記非活躍，
+                    // 失敗/關閉：僅當本 pc 仍是當前 active session 時才標記非活躍，
                     // 避免舊 session 的遲來斷線事件把正在運作的新 session 影像掐斷。
                     let is_current = app_state
                         .active_pc
