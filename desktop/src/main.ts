@@ -13,7 +13,7 @@ type BuildInfo = {
 };
 
 function isDesktopTauri(): boolean {
-  if (!isTauri()) return false;
+  if (!isTauriBackendAvailable()) return false;
   const ua = navigator.userAgent.toLowerCase();
   
   // 排除明確的行動端 UA 關鍵字
@@ -27,6 +27,11 @@ function isDesktopTauri(): boolean {
   if (isMac && navigator.maxTouchPoints > 2) return false;
   
   return true;
+}
+
+function isTauriBackendAvailable(): boolean {
+  const win = window as any;
+  return typeof invoke === "function" && typeof win.__TAURI_INTERNALS__?.invoke === "function";
 }
 
 function initPlatformClasses() {
@@ -1336,6 +1341,10 @@ function generateMockMyId(): string {
 async function loadMyMac() {
   const valMyMac = document.getElementById("val-my-mac");
   if (!valMyMac) return;
+  if (!isDesktopTauri()) {
+    valMyMac.textContent = "N/A";
+    return;
+  }
   try {
     const mac = await invoke<string>("get_local_mac_address");
     valMyMac.textContent = mac;
@@ -1524,7 +1533,7 @@ function showClipboardToast(text: string) {
 }
 
 async function readLocalClipboard(): Promise<string> {
-  if (isTauri()) {
+  if (isTauriBackendAvailable()) {
     try {
       return await invoke<string>("read_clipboard");
     } catch (e) {
@@ -1542,7 +1551,7 @@ async function readLocalClipboard(): Promise<string> {
 }
 
 async function writeLocalClipboard(text: string): Promise<void> {
-  if (isTauri()) {
+  if (isTauriBackendAvailable()) {
     try {
       await invoke("write_clipboard", { text });
       return;
@@ -1784,6 +1793,10 @@ function renderDeviceBook() {
 };
 
 (window as any).deviceBookWake = async (mac: string) => {
+  if (!isDesktopTauri()) {
+    alert(t("wake_failed") || "Wake-on-LAN is only available in the desktop app.");
+    return;
+  }
   try {
     await invoke("wake_device", { mac });
     alert(t("wake_success") || "Magic Packet 已送出！");
@@ -2478,23 +2491,32 @@ async function startCall(remoteId: string, pin: string) {
 
 // 被動端：收到 Offer，驗證 PIN 後回傳 Answer
 async function handleIncomingOffer(sourceId: string, sdpString: string, incomingPin?: string) {
+  if (!isDesktopTauri()) {
+    console.warn("[WebRTC] Browser client cannot act as host; rejecting incoming offer.");
+    if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
+      signalingWs.send(JSON.stringify({
+        type: "error",
+        target: sourceId,
+        message: "Connection rejected: Browser client cannot host"
+      }));
+    }
+    return;
+  }
+
   // 1. 檢查本機授權狀態（作為被控端，必須有有效授權或在試用期內）
   try {
-    const isWebBrowser = !isDesktopTauri();
-    if (!isWebBrowser) {
-      const licenseState = await invoke<{status: string, trial_days_left: number | null}>("check_license_status");
-      if (licenseState.status === "expired" || licenseState.status === "unauthorized") {
-        console.warn(t("log_webrtc_trial_expired"), licenseState.status);
-        alert(t("err_host_expired") || "Host trial period has expired. Please enter a valid license key.");
-        if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
-          signalingWs.send(JSON.stringify({
-            type: "error",
-            target: sourceId,
-            message: "Connection rejected: Host trial expired"
-          }));
-        }
-        return;
+    const licenseState = await invoke<{status: string, trial_days_left: number | null}>("check_license_status");
+    if (licenseState.status === "expired" || licenseState.status === "unauthorized") {
+      console.warn(t("log_webrtc_trial_expired"), licenseState.status);
+      alert(t("err_host_expired") || "Host trial period has expired. Please enter a valid license key.");
+      if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
+        signalingWs.send(JSON.stringify({
+          type: "error",
+          target: sourceId,
+          message: "Connection rejected: Host trial expired"
+        }));
       }
+      return;
     }
   } catch (e) {
     console.warn("授權狀態檢查失敗，為安全起見拒絕連線:", e);
