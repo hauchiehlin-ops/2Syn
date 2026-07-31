@@ -98,7 +98,7 @@ impl WindowsHardwareEncoder {
         };
         let config = EncoderConfig::new()
             .profile(Profile::Baseline)
-            .level(Level::Level_3_1)
+            .level(Level::Level_5_0)
             .usage_type(UsageType::ScreenContentRealTime)
             .rate_control_mode(RateControlMode::Bitrate)
             .bitrate(BitRate::from_bps(bitrate_kbps.saturating_mul(1000)))

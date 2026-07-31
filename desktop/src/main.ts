@@ -2227,6 +2227,15 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         if (!videoEl.srcObject) {
           // 強制僅綁定視訊軌道，避免 iOS Safari 因為混入音訊軌道而無條件阻擋 autoplay
           videoEl.srcObject = new MediaStream([event.track]);
+          videoEl.style.imageRendering = "auto";
+          videoEl.style.filter = "none";
+
+          videoEl.onloadedmetadata = () => {
+            console.log(`[Video] remote metadata ${videoEl.videoWidth}x${videoEl.videoHeight}`);
+          };
+          videoEl.onresize = () => {
+            console.log(`[Video] remote resize ${videoEl.videoWidth}x${videoEl.videoHeight}`);
+          };
             
           // 啟用零延遲渲染 (Zero-Latency Rendering)
           if ((videoEl as any).playoutDelayHint !== undefined) {
@@ -3220,16 +3229,11 @@ function startStatusPolling() {
         }
         indicator.style.background = color;
 
-        // 當網路狀態為紅 (極差) 時，啟動 AI 超解析 (前端銳化濾鏡)
+        // 遠端桌面文字畫質由 host 端解析度/位元率決定；前端 pixelated/銳化濾鏡會讓 web 放大後更難讀。
         const remoteVideo = document.getElementById("remote-video") as HTMLVideoElement;
         if (remoteVideo) {
-          if (color === "#ef4444") {
-            remoteVideo.style.imageRendering = "pixelated"; // FSR-lite
-            remoteVideo.style.filter = "contrast(1.1) brightness(1.05) saturate(1.2)";
-          } else {
-            remoteVideo.style.imageRendering = "auto";
-            remoteVideo.style.filter = "none";
-          }
+          remoteVideo.style.imageRendering = "auto";
+          remoteVideo.style.filter = "none";
         }
       }
       if (floatingIndicator) {

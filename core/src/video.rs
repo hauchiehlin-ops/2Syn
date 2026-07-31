@@ -117,10 +117,10 @@ impl VideoStreamer {
         let mut encoder = CaptureCodecFactory::create_encoder();
         
         let params = CodecParams {
-            width: 1920,
-            height: 1080,
-            bitrate_kbps: 6000,
-            fps: 60,
+            width: 2560,
+            height: 1440,
+            bitrate_kbps: 12_000,
+            fps: 30,
             codec_type: VideoCodecType::H264,
         };
         
@@ -670,8 +670,10 @@ impl VideoStreamer {
                     let secs = last_fps_log.elapsed().as_secs_f32();
                     let n = produced_frames.max(1) as f32;
                     let msg = format!(
-                        "[Video][DIAG] host {:.1} fps（目標 {}）| 迴圈 {:.0} 圈/s 沒幀 {} | 每幀 等 {:.0} 編 {:.0} 送 {:.0}ms | 平均sleep {:.0}ms | 丟: 無buf {} 無surf {} 編失 {} 鎖跳 {}",
+                        "[Video][DIAG] host {:.1} fps（目標 {}）| 編碼 {}x{} @ {:.1}Mbps | 迴圈 {:.0} 圈/s 沒幀 {} | 每幀 等 {:.0} 編 {:.0} 送 {:.0}ms | 平均sleep {:.0}ms | 丟: 無buf {} 無surf {} 編失 {} 鎖跳 {}",
                         produced_frames as f32 / secs, target_fps,
+                        last_applied_width, last_applied_height,
+                        last_applied_bitrate as f32 / 1000.0,
                         iter_count as f32 / secs, no_frame,
                         acc_wait.as_millis() as f32 / n,
                         acc_encode.as_millis() as f32 / n,

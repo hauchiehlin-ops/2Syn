@@ -17,7 +17,7 @@ use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSampl
 use webrtc::track::track_local::TrackLocal;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
-const H264_SAFARI_FMTP: &str = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f";
+const H264_SAFARI_FMTP: &str = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e032";
 
 /// 色彩採樣格式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,11 +46,11 @@ pub struct QualityConfig {
 impl Default for QualityConfig {
     fn default() -> Self {
         Self {
-            target_fps: 60,
+            target_fps: 30,
             color_format: ColorFormat::Yuv420,
-            bitrate_limit_kbps: 8_000, // 預設 8 Mbps
-            target_width: 1920, // 預設 1080p（macOS 零拷貝編碼器須匹配顯示器原生尺寸）
-            target_height: 1080,
+            bitrate_limit_kbps: 12_000, // 預設 12 Mbps，保留桌面文字清晰度
+            target_width: 2560, // 預設 1440p，避免 web/Retina client 放大 1080p 造成模糊
+            target_height: 1440,
         }
     }
 }
@@ -124,7 +124,7 @@ impl ConnectionManager {
         // （堅持不使用 TURN 策略：不會出現 Relay 狀態，保留分支以備未來擴展如 Tailscale Relay）
         if metrics.connection_type == ConnectionType::Relay {
             config.target_fps = 30;
-            config.bitrate_limit_kbps = 6000; // relay/TURN 仍優先保留可讀文字畫質
+            config.bitrate_limit_kbps = 8000; // relay/TURN 仍優先保留可讀文字畫質
             config.color_format = ColorFormat::Yuv420;
             config.target_width = 1920;
             config.target_height = 1080;
@@ -140,28 +140,28 @@ impl ConnectionManager {
             config.target_height = 900;
         } else if metrics.packet_loss_rate > 0.05 {
             config.target_fps = 30;
-            config.bitrate_limit_kbps = 5000;
-            config.target_width = 1920;
-            config.target_height = 1080;
-        } else if metrics.rtt_ms > 180 || metrics.packet_loss_rate > 0.02 {
-            config.target_fps = 45;
             config.bitrate_limit_kbps = 6000;
             config.target_width = 1920;
             config.target_height = 1080;
-        } else if metrics.rtt_ms > 80 {
-            config.target_fps = 60;
-            config.bitrate_limit_kbps = 7000;
+        } else if metrics.rtt_ms > 180 || metrics.packet_loss_rate > 0.02 {
+            config.target_fps = 30;
+            config.bitrate_limit_kbps = 8000;
             config.target_width = 1920;
             config.target_height = 1080;
+        } else if metrics.rtt_ms > 80 {
+            config.target_fps = 30;
+            config.bitrate_limit_kbps = 10_000;
+            config.target_width = 2560;
+            config.target_height = 1440;
         } else {
             // 網路暢通，提升至最高畫質。
             // 註：macOS 走零拷貝編碼，編碼器尺寸須匹配 SCStream 交付的顯示器原生尺寸，
             // 不可在此擅自下調解析度（否則 IOSurface 尺寸不符導致編碼失敗、整路無畫面）。
             // 真要降解析度須改 SCStreamConfiguration 的輸出尺寸，屬另案。
-            config.target_fps = 60;
-            config.bitrate_limit_kbps = 8000;
-            config.target_width = 1920;
-            config.target_height = 1080;
+            config.target_fps = 30;
+            config.bitrate_limit_kbps = 12_000;
+            config.target_width = 2560;
+            config.target_height = 1440;
         }
 
         config
