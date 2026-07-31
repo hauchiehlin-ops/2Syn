@@ -39,11 +39,13 @@ Set-Location $repoRoot
 $script:BuildLog = Join-Path $repoRoot ("build-windows-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
 $env:RUST_BACKTRACE = "1"
 $env:CARGO_TERM_COLOR = "always"
+$env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"
 
 Write-Host "2Syn Windows clean build" -ForegroundColor Green
 Write-Host "Repository: $repoRoot"
 Write-Host "Target: $Target"
 Write-Host "Build log: $script:BuildLog"
+Write-Host "CMAKE_POLICY_VERSION_MINIMUM: $env:CMAKE_POLICY_VERSION_MINIMUM"
 
 if (-not $SkipPull) {
   $dirty = git status --porcelain
