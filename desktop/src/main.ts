@@ -2304,7 +2304,7 @@ async function startCall(remoteId: string, pin: string) {
     // 主動端建立 Data Channels
     dataChannelControl = pc.createDataChannel("input-control", {
       ordered: true,
-      maxPacketLifeTime: 750,
+      maxPacketLifeTime: INPUT_CONTROL_PACKET_LIFETIME_MS,
     });
     dataChannelControl.bufferedAmountLowThreshold = 1024;
     bindControlChannel(dataChannelControl);
@@ -3132,7 +3132,7 @@ function initOfflineSdpMode() {
         currentRemoteId = "manual";
 
         // 建立 Data Channels
-        dataChannelControl = pc.createDataChannel("input-control", { ordered: true, maxPacketLifeTime: 750 });
+        dataChannelControl = pc.createDataChannel("input-control", { ordered: true, maxPacketLifeTime: INPUT_CONTROL_PACKET_LIFETIME_MS });
         dataChannelControl.bufferedAmountLowThreshold = 1024;
         bindControlChannel(dataChannelControl);
         
@@ -3521,7 +3521,7 @@ let inputBound = false;
 let resetDisplayMode: () => void = () => {};
 
 function buildInputPacket(eventType: number, payload: Uint8Array): Uint8Array {
-  const isUnreliable = (eventType === 0x01 || eventType === 0x07);
+  const isUnreliable = isTransientInputEvent(eventType);
   let seq = 0;
   if (isUnreliable) {
     unreliableSeqNumber++;
@@ -3557,10 +3557,18 @@ function buildMouseButtonPayload(button: number, x: number, y: number): Uint8Arr
   return payload;
 }
 
+const INPUT_CONTROL_PACKET_LIFETIME_MS = 200;
 const INPUT_UNRELIABLE_BUFFER_LIMIT = 4 * 1024;
 const INPUT_CONTROL_BUFFER_LIMIT = 64 * 1024;
 const INPUT_CONTROL_TRANSIENT_BUFFER_LIMIT = 8 * 1024;
 let lastInputBackpressureLog = 0;
+
+function isTransientInputEvent(eventType: number) {
+  // Mouse move, relative move, scroll, and pen hover/move are high frequency state
+  // updates. Dropping an old one is better than letting it sit in front of
+  // keyboard and click events.
+  return eventType === 0x01 || eventType === 0x04 || eventType === 0x07 || eventType === 0x09;
+}
 
 function logInputBackpressure(message: string) {
   const now = performance.now();
@@ -3572,10 +3580,10 @@ function logInputBackpressure(message: string) {
 
 function sendInputPacket(packet: Uint8Array) {
   const eventType = packet[12];
-  if (eventType === 0x01 || eventType === 0x07) {
+  if (isTransientInputEvent(eventType)) {
     if (dataChannelUnreliable && dataChannelUnreliable.readyState === "open") {
       if (dataChannelUnreliable.bufferedAmount > INPUT_UNRELIABLE_BUFFER_LIMIT) {
-        logInputBackpressure(`[Input] unreliable backlog ${dataChannelUnreliable.bufferedAmount} bytes; dropping stale mouse move`);
+        logInputBackpressure(`[Input] unreliable backlog ${dataChannelUnreliable.bufferedAmount} bytes; dropping stale transient event 0x${eventType.toString(16).padStart(2,'0')}`);
         return;
       }
       dataChannelUnreliable.send(packet as any);
@@ -3590,7 +3598,7 @@ function sendInputPacket(packet: Uint8Array) {
   }
   if (dataChannelControl && dataChannelControl.readyState === "open") {
     const buffered = dataChannelControl.bufferedAmount;
-    if ((eventType === 0x04 || eventType === 0x01 || eventType === 0x07) && buffered > INPUT_CONTROL_TRANSIENT_BUFFER_LIMIT) {
+    if (isTransientInputEvent(eventType) && buffered > INPUT_CONTROL_TRANSIENT_BUFFER_LIMIT) {
       logInputBackpressure(`[Input] reliable backlog ${buffered} bytes; dropping transient event 0x${eventType.toString(16).padStart(2,'0')}`);
       return;
     }
@@ -3598,7 +3606,7 @@ function sendInputPacket(packet: Uint8Array) {
       logInputBackpressure(`[Input] reliable backlog ${buffered} bytes; sending control event despite queue pressure`);
     }
     dataChannelControl.send(packet as any);
-  } else if (eventType !== 0x01 && eventType !== 0x07) {
+  } else if (!isTransientInputEvent(eventType)) {
     console.warn(`[Input] 可靠通道未開啟，丟棄事件 0x${eventType.toString(16).padStart(2,'0')} (state=${dataChannelControl?.readyState ?? 'null'})`);
   }
 }

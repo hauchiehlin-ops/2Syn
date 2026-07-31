@@ -20,6 +20,16 @@
 
 # 歷程
 
+## 2026-07-31 — 降低桌面與 web client 的輸入延遲
+
+- **問題/目標**：遠端連線後，除 iOS client 外，桌面 client 與 web client 仍容易出現鍵盤、滑鼠點擊與選取延遲。
+- **根因/做法**：
+  1. `input-control` 是 ordered channel；上一版雖把 stale input 壽命限制為 750ms，仍可能在弱網路或 TURN relay 下讓後續鍵盤、MouseDown、MouseUp 等事件等待舊封包過期，形成 head-of-line blocking。
+  2. 桌面/web client 較容易產生高頻 transient input（scroll、pen move，或 unreliable 尚未開啟時的 fallback move），若這些事件混入可靠控制通道，會排在真正關鍵的鍵盤/點擊前面。
+  3. `desktop/src/main.ts` 將 MouseMove(0x01)、MouseScroll(0x04)、MouseRelativeMove(0x07)、PenMove(0x09) 統一視為 transient input，優先走 `input-unreliable`；fallback 到 reliable 時仍重寫 reliable 序號，避免污染 host 端 `last_seq`。
+  4. `input-control` 的 `maxPacketLifeTime` 從 750ms 降為 200ms，並同步 `core/src/connection.rs` 的 Rust/手動 SDP channel 設定，讓最壞等待時間更符合遠端桌面互動。
+- **驗證**：`npm run build` 通過；`cargo check -p syn-core` 通過（僅既有 unused warnings）。
+
 ## 2026-07-12 — 解決 iOS 剪貼簿貼上失效之問題
 
 - **問題/目標**：解決 iOS 行動主控端點選快捷功能列上的「貼上」無反應之問題。

@@ -314,7 +314,7 @@ impl WebRtcSession {
             ordered: Some(true),
             // Keep keyboard/click ordering, but do not replay stale input seconds
             // later on lossy TURN paths. Fresh control beats guaranteed old control.
-            max_packet_life_time: Some(750),
+            max_packet_life_time: Some(200),
             max_retransmits: None,
             ..Default::default()
         };
