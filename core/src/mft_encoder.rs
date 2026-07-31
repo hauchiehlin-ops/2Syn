@@ -88,9 +88,24 @@ impl WindowsHardwareEncoder {
     }
 
     #[cfg(target_os = "windows")]
-    fn setup_encoder(&mut self, _width: u32, _height: u32, _fps: u32, _bitrate_kbps: u32) -> Result<(), CoreError> {
-        use openh264::{encoder::{Encoder, EncoderConfig}, OpenH264API};
-        let config = EncoderConfig::new();
+    fn setup_encoder(&mut self, _width: u32, _height: u32, fps: u32, bitrate_kbps: u32) -> Result<(), CoreError> {
+        use openh264::{
+            encoder::{
+                BitRate, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, Level, Profile,
+                RateControlMode, SpsPpsStrategy, UsageType,
+            },
+            OpenH264API,
+        };
+        let config = EncoderConfig::new()
+            .profile(Profile::Baseline)
+            .level(Level::Level_3_1)
+            .usage_type(UsageType::ScreenContentRealTime)
+            .rate_control_mode(RateControlMode::Bitrate)
+            .bitrate(BitRate::from_bps(bitrate_kbps.saturating_mul(1000)))
+            .max_frame_rate(FrameRate::from_hz(fps.max(1) as f32))
+            .intra_frame_period(IntraFramePeriod::from_num_frames(fps.max(1)))
+            .sps_pps_strategy(SpsPpsStrategy::ConstantId)
+            .skip_frames(false);
         let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
             .map_err(|e| CoreError::HardwareCodecError(format!("Failed to create openh264 encoder: {:?}", e)))?;
         self.encoder = Some(encoder);

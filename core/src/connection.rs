@@ -17,6 +17,8 @@ use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSampl
 use webrtc::track::track_local::TrackLocal;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
+const H264_SAFARI_FMTP: &str = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f";
+
 /// 色彩採樣格式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorFormat {
@@ -294,6 +296,8 @@ impl WebRtcSession {
         let video_track = Arc::new(TrackLocalStaticSample::new(
             RTCRtpCodecCapability {
                 mime_type: "video/H264".to_owned(),
+                clock_rate: 90_000,
+                sdp_fmtp_line: H264_SAFARI_FMTP.to_owned(),
                 ..Default::default()
             },
             "screen".to_owned(),
@@ -313,6 +317,8 @@ impl WebRtcSession {
         let foveated_track = Arc::new(TrackLocalStaticSample::new(
             RTCRtpCodecCapability {
                 mime_type: "video/H264".to_owned(),
+                clock_rate: 90_000,
+                sdp_fmtp_line: H264_SAFARI_FMTP.to_owned(),
                 ..Default::default()
             },
             "foveated".to_owned(),
