@@ -7,21 +7,33 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$script:BuildLog = $null
+
 function Run([string]$Command, [string[]]$Arguments) {
   Write-Host "`n> $Command $($Arguments -join ' ')" -ForegroundColor Cyan
-  & $Command @Arguments
-  if ($LASTEXITCODE -ne 0) {
-    throw "Command failed with exit code ${LASTEXITCODE}: $Command $($Arguments -join ' ')"
+  & $Command @Arguments 2>&1 | Tee-Object -FilePath $script:BuildLog -Append
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) {
+    if (Test-Path $script:BuildLog) {
+      Write-Host "`nLast build log lines:" -ForegroundColor Yellow
+      Get-Content $script:BuildLog -Tail 160
+      Write-Host "`nFull build log: $script:BuildLog" -ForegroundColor Yellow
+    }
+    throw "Command failed with exit code ${exitCode}: $Command $($Arguments -join ' ')"
   }
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 Set-Location $repoRoot
+$script:BuildLog = Join-Path $repoRoot ("build-windows-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+$env:RUST_BACKTRACE = "1"
+$env:CARGO_TERM_COLOR = "always"
 
 Write-Host "2Syn Windows clean build" -ForegroundColor Green
 Write-Host "Repository: $repoRoot"
 Write-Host "Target: $Target"
+Write-Host "Build log: $script:BuildLog"
 
 if (-not $SkipPull) {
   $dirty = git status --porcelain
