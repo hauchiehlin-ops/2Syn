@@ -246,16 +246,22 @@ html.tauri-desktop.os-windows .glass-container {
   max-width: none;
   height: 100%;
   max-height: none;
-  border: 0;
+  border: 1px solid var(--panel-border);
   border-radius: 0;
-  box-shadow: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
-html.tauri-desktop.os-windows .orb,
-html.tauri-desktop.os-windows .pulse-dot::after {
-  animation: none;
+html.tauri-desktop.os-windows *,
+html.tauri-desktop.os-windows *::before,
+html.tauri-desktop.os-windows *::after {
+  animation: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.tauri-desktop.os-windows .orb {
   display: none;
 }
 

@@ -312,7 +312,10 @@ impl WebRtcSession {
     pub async fn setup_input_channel(&self) -> Result<Arc<RTCDataChannel>, CoreError> {
         let init = RTCDataChannelInit {
             ordered: Some(true),
-            max_retransmits: None, // 允許無限重傳，保證按鍵不遺失
+            // Keep keyboard/click ordering, but do not replay stale input seconds
+            // later on lossy TURN paths. Fresh control beats guaranteed old control.
+            max_packet_life_time: Some(750),
+            max_retransmits: None,
             ..Default::default()
         };
 

@@ -32,6 +32,8 @@ function initPlatformClasses() {
   root.classList.toggle("os-windows", /\bwindows\b|win64|win32|wow64/.test(ua));
 }
 
+initPlatformClasses();
+
 // --- Toast Notification System ---
 function showToast(message: string, duration: number = 3000) {
   const container = document.getElementById('toast-container');
@@ -2302,13 +2304,16 @@ async function startCall(remoteId: string, pin: string) {
     // 主動端建立 Data Channels
     dataChannelControl = pc.createDataChannel("input-control", {
       ordered: true,
+      maxPacketLifeTime: 750,
     });
+    dataChannelControl.bufferedAmountLowThreshold = 1024;
     bindControlChannel(dataChannelControl);
 
     dataChannelUnreliable = pc.createDataChannel("input-unreliable", {
       ordered: false,
       maxRetransmits: 0,
     });
+    dataChannelUnreliable.bufferedAmountLowThreshold = 0;
     bindUnreliableChannel(dataChannelUnreliable);
 
     dataChannelSystemControl = pc.createDataChannel("system-control", { ordered: true });
@@ -3127,10 +3132,12 @@ function initOfflineSdpMode() {
         currentRemoteId = "manual";
 
         // 建立 Data Channels
-        dataChannelControl = pc.createDataChannel("input-control", { ordered: true });
+        dataChannelControl = pc.createDataChannel("input-control", { ordered: true, maxPacketLifeTime: 750 });
+        dataChannelControl.bufferedAmountLowThreshold = 1024;
         bindControlChannel(dataChannelControl);
         
         dataChannelUnreliable = pc.createDataChannel("input-unreliable", { ordered: false, maxRetransmits: 0 });
+        dataChannelUnreliable.bufferedAmountLowThreshold = 0;
         bindUnreliableChannel(dataChannelUnreliable);
 
         // 檔案傳輸 DataChannel
@@ -3550,10 +3557,27 @@ function buildMouseButtonPayload(button: number, x: number, y: number): Uint8Arr
   return payload;
 }
 
+const INPUT_UNRELIABLE_BUFFER_LIMIT = 4 * 1024;
+const INPUT_CONTROL_BUFFER_LIMIT = 64 * 1024;
+const INPUT_CONTROL_TRANSIENT_BUFFER_LIMIT = 8 * 1024;
+let lastInputBackpressureLog = 0;
+
+function logInputBackpressure(message: string) {
+  const now = performance.now();
+  if (now - lastInputBackpressureLog > 2000) {
+    lastInputBackpressureLog = now;
+    console.warn(message);
+  }
+}
+
 function sendInputPacket(packet: Uint8Array) {
   const eventType = packet[12];
   if (eventType === 0x01 || eventType === 0x07) {
     if (dataChannelUnreliable && dataChannelUnreliable.readyState === "open") {
+      if (dataChannelUnreliable.bufferedAmount > INPUT_UNRELIABLE_BUFFER_LIMIT) {
+        logInputBackpressure(`[Input] unreliable backlog ${dataChannelUnreliable.bufferedAmount} bytes; dropping stale mouse move`);
+        return;
+      }
       dataChannelUnreliable.send(packet as any);
       return;
     }
@@ -3565,10 +3589,15 @@ function sendInputPacket(packet: Uint8Array) {
     new DataView(packet.buffer, packet.byteOffset).setUint32(0, controlSeqNumber, false);
   }
   if (dataChannelControl && dataChannelControl.readyState === "open") {
-    dataChannelControl.send(packet as any);
-    if (eventType === 0x02 || eventType === 0x03) {
-      console.log(`[Input] 已送出點擊事件 0x${eventType.toString(16).padStart(2,'0')} seq=${new DataView(packet.buffer).getUint32(0, false)}`);
+    const buffered = dataChannelControl.bufferedAmount;
+    if ((eventType === 0x04 || eventType === 0x01 || eventType === 0x07) && buffered > INPUT_CONTROL_TRANSIENT_BUFFER_LIMIT) {
+      logInputBackpressure(`[Input] reliable backlog ${buffered} bytes; dropping transient event 0x${eventType.toString(16).padStart(2,'0')}`);
+      return;
     }
+    if (buffered > INPUT_CONTROL_BUFFER_LIMIT) {
+      logInputBackpressure(`[Input] reliable backlog ${buffered} bytes; sending control event despite queue pressure`);
+    }
+    dataChannelControl.send(packet as any);
   } else if (eventType !== 0x01 && eventType !== 0x07) {
     console.warn(`[Input] 可靠通道未開啟，丟棄事件 0x${eventType.toString(16).padStart(2,'0')} (state=${dataChannelControl?.readyState ?? 'null'})`);
   }
