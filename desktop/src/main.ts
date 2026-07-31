@@ -460,25 +460,34 @@ const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
 
 let ICE_SERVERS: RTCIceServer[] = [...DEFAULT_STUN_SERVERS];
 
-function loadCustomIceServers() {
+// 讀取並驗證使用者在設定面板填入的自訂 TURN 伺服器清單。除了給 client 端
+// 自己的 RTCPeerConnection 使用，也在擔任 host 角色時原樣傳給 Rust 後端
+// （見 handle_remote_offer_as_host 呼叫處），讓 host 端的 WebRTC session
+// 套用同一份設定——過去 host 端一直是寫死 STUN-only，即使這裡填了 TURN
+// 對 host 角色也完全無效（見 DEVLOG）。
+function getValidatedCustomTurnServers(): any[] {
   try {
     const customStr = localStorage.getItem("custom_turn_servers");
-    if (customStr) {
-      const customServers = JSON.parse(customStr);
-      if (Array.isArray(customServers) && customServers.length > 0) {
-        // 驗證每個伺服器項目必須包含 urls 屬性
-        const validServers = customServers.filter(
-          (s: any) => s && s.urls && (typeof s.urls === 'string' || Array.isArray(s.urls))
-        );
-        if (validServers.length > 0) {
-          // 始終保留預設 STUN，附加自訂 TURN
-          ICE_SERVERS = [...DEFAULT_STUN_SERVERS, ...validServers];
-          console.log(`[ICE] Loaded ${validServers.length} custom TURN server(s)`);
-        }
-      }
-    }
-  } catch(e) {
-    console.error("Failed to parse custom TURN servers, reverting to defaults", e);
+    if (!customStr) return [];
+    const customServers = JSON.parse(customStr);
+    if (!Array.isArray(customServers)) return [];
+    // 驗證每個伺服器項目必須包含 urls 屬性
+    return customServers.filter(
+      (s: any) => s && s.urls && (typeof s.urls === 'string' || Array.isArray(s.urls))
+    );
+  } catch (e) {
+    console.error("Failed to parse custom TURN servers", e);
+    return [];
+  }
+}
+
+function loadCustomIceServers() {
+  const validServers = getValidatedCustomTurnServers();
+  if (validServers.length > 0) {
+    // 始終保留預設 STUN，附加自訂 TURN
+    ICE_SERVERS = [...DEFAULT_STUN_SERVERS, ...validServers];
+    console.log(`[ICE] Loaded ${validServers.length} custom TURN server(s)`);
+  } else {
     ICE_SERVERS = [...DEFAULT_STUN_SERVERS];
   }
 }
@@ -2435,7 +2444,7 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
   try {
     // 轉交給 Rust 後端處理 WebRTC (方案 C: 啟動 Rust-native WebRTC 與硬體螢幕擷取)
     console.log("[WebRTC] 交由 Rust 處理遠端 Offer...");
-    const answerSdp: string = await invoke("handle_remote_offer_as_host", { offerSdp: sdpString });
+    const answerSdp: string = await invoke("handle_remote_offer_as_host", { offerSdp: sdpString, turnServers: getValidatedCustomTurnServers() });
 
     // 回傳 Rust 產生的 Answer 給發起方
     if (signalingWs?.readyState === WebSocket.OPEN) {

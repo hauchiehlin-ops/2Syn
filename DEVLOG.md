@@ -20,6 +20,30 @@
 
 # 歷程
 
+## 2026-07-31 — 修正網頁版黑屏真正根因：host 端 TURN 設定 2 個月前被誤刪
+
+- **問題/目標**：延續前一筆「排查網頁版連線成功後黑屏」的診斷——使用者提供了瀏覽器主控台截圖，取得決定性線索。
+- **關鍵證據**：主控台顯示 `[Input] 可靠通道未開啟，丟棄事件 0x02 (state=connecting)` 持續多秒、`[Stats] 等待視訊統計 RTT –ms`、最終 `[WebRTC] 連線逾時 (15秒未成功建立)` 後斷線。這代表**根本不是 host 端擷取畫面失敗**（前一筆猜測的方向），而是 **ICE/WebRTC 連線本身從未建立成功**——data channel 卡在 `connecting`、15 秒逾時、video track 自然沒有任何影格，黑屏只是連線失敗的下游症狀。使用者確認 client 與 host 是跨網路（非同一局網），且已在設定面板填入自訂 TURN 伺服器，但仍然失敗。
+- **根因（已確認）**：`core/src/connection.rs` 的 `WebRtcSession::create_session()`（host 端原生 Rust WebRTC session）長期寫死只有 STUN 清單，完全沒有管道接收使用者在前端設定面板填入的自訂 TURN。追查 git 歷史發現：2026-05-27 commit `b2465c6`（標題是「fix(signaling): add 30s websocket heartbeat」——一個完全不相關的修正）**附帶刪掉了** `create_session(custom_turn: Option<(String,String,String)>)` 參數與呼叫端原本的預設 TURN fallback（`turn:openrelay.metered.ca:80`，env var `TURN_URL`/`TURN_USER`/`TURN_PASS` 可覆蓋）。這個誤刪完全沒有在該次 commit 訊息中被提及，此後兩個多月 host 端一直是「STUN-only」，而 client 端（`desktop/src/main.ts` 的 `ICE_SERVERS`/`loadCustomIceServers()`/設定面板）獨立保有一套完整的自訂 TURN 邏輯——這造成表面上「有 TURN 設定 UI、看起來有支援」，但那份設定只對**這個 app 扮演 client 角色時**的 JS `RTCPeerConnection`有效；扮演 **host** 角色時，Rust 端這裡的 `create_session()` 完全不知道也不會用到它。純 STUN 在任一端為對稱型 NAT / CGNAT / 嚴格防火牆時無法打通（尤其跨網路連線很常見），症狀正是 ICE 停在 `connecting`、15 秒逾時斷線、client 端畫面全黑。
+- **修法**：
+  1. `core/src/connection.rs`：`create_session()` 恢復接受 `custom_turn: Vec<RTCIceServer>` 參數，附加到預設 STUN 清單後面。
+  2. `desktop/src-tauri/src/lib.rs`：新增 `TurnServerConfig`/`TurnUrls`（寬鬆格式，`urls` 可為單一字串或陣列，`username`/`credential` 可省略，比對齊瀏覽器 `RTCIceServer` 的實際填寫習慣）與 `resolve_ice_servers()`：呼叫端有提供自訂 TURN 就只用那組，否則退回預設的免費 `openrelay.metered.ca` fallback（恢復 `b2465c6` 之前的行為）。`generate_local_sdp_offer`、`handle_remote_offer_as_host` 兩個 Tauri command 都新增 `turn_servers` 參數並套用這個解析。純 Rust 背景無人值守訊令路徑（`lib.rs` 內直接呼叫 `handle_remote_offer_as_host` 那處）沒有 JS/localStorage 可讀，固定傳 `None`，一樣會落到預設 TURN fallback（至少比純 STUN 好）。
+  3. `desktop/src/main.ts`：把 `loadCustomIceServers()` 內的驗證/解析邏輯抽成 `getValidatedCustomTurnServers()`，在呼叫 `invoke("handle_remote_offer_as_host", ...)` 時一併把使用者設定面板填的 TURN 清單透過 `turnServers` 參數傳給 Rust 後端，讓 host 角色也套用同一份設定。
+- **教訓**：這次真正教訓在於「排查順序」——上一筆先入為主往 host 擷取失敗方向查，花了不少力氣才透過主控台截圖確認真相是連線層。往後遇到黑屏，第一步應該先看 `state=connecting`/ICE 逾時這類訊息，區分「連線沒建立」與「連線建立了但沒畫面」，這兩者的排查方向完全不同、不該混著猜。另外，「不相關的 commit 意外刪掉一段關鍵邏輯、且完全沒在 commit message 提及」是這次最久也最隱蔽的一個根因——這類回歸只能靠使用者實際回報症狀，並仔細比對 git blame/log 才挖得出來，日後修改一個功能時，順手刪掉「看起來像其他功能」的程式碼前，應該先確認它是否真的與本次修正無關。
+- **驗證**：`CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo check --workspace` 與 `npm run build`（tsc + vite）皆通過。仍待使用者實際重新連線驗證黑屏是否解決；若使用者填的自訂 TURN 伺服器本身可用，這次修正後應該能連上。
+
+## 2026-07-31 — 排查網頁版連線成功後黑屏；補上 debug_log 實際落檔（除錯未果，先補診斷能力）
+
+- **問題/目標**：使用者回報網頁版 client 連線成功後畫面黑屏，Windows host、每次都會發生。
+- **已排除/確認的機制**：
+  1. `core/src/video.rs` 的擷取迴圈對非 macOS（`xcap::Monitor::capture_image()`）路徑其實**已經有**完整的失敗處理（`video.rs:657-665`）：擷取失敗會 `eprintln!` 並透過 `status_tx` → Tauri event `rust-video-status`（`desktop/src-tauri/src/lib.rs:435-441`）送給前端「系統日誌」面板顯示，並非原先懷疑的「完全靜默」。每 2 秒也有一次 fps/丟幀診斷走同一條路徑。
+  2. 但這個 `rust-video-status` Tauri event 是 **host 端本機事件**，只有「坐在被控端(Windows)前面、看得到 host 自己那份 2syn App 視窗」的人才看得到「系統日誌」面板；網頁版 client（回報黑屏的人）**完全看不到**這份診斷——這是排查上的關鍵落差：問題現象在 client 端，但既有的診斷全部只回報給 host 端。
+  3. `openh264` 0.9.3（Windows 軟體編碼器，`core/src/mft_encoder.rs`）的 `Encoder::encode()` 本來就會用傳入的 `YUVSource` 尺寸自動 `reinit`（見 crate 原始碼 `encoder.rs:883-914`），所以 `setup_encoder()` 忽略 width/height 參數、只呼叫 `EncoderConfig::new()`，理論上不是硬性錯誤——但 `reconfigure()` 目前每次 ABR 品質變更都整個重建 `Encoder` 實例（含連接剛建立的第一幀，因為 `last_applied_*` 初始值是 0，見 `video.rs:295-298`），比 crate 內建的「同實例動態 reinit」更浪費、且每次都強制 keyframe，值得之後優化但尚未證實是黑屏根因。
+  4. 找到一個真正的既有缺陷：`core/src/debug_log.rs` 的 `log_to_file()` 函式名為「落檔」，但過去只有 `eprintln!`（stderr），從未真的寫檔——而 release 版 Windows GUI subsystem（`main.rs:2` 的 `windows_subsystem = "windows"`，與本次稍早修正終端機閃現用的是同一個機制）沒有主控台，stderr 沒有任何地方可看。這代表 `desktop/src-tauri/src/lib.rs` 裡一整串 host 端影像/音訊初始化流程記錄（"Adding video track"→"Creating VideoStreamer"→"VideoStreamer created"...）在已安裝的 Windows release 版上**完全查無日誌**，連我們自己都無從得知卡在哪一步。
+- **本次修法（診斷能力，非黑屏本體的猜測性修正）**：`core/src/debug_log.rs` 的 `log_to_file()` 除了 `eprintln!`，改為同時 append 寫入 `%USERPROFILE%\2syn-debug.log`（`HOME` 在 Windows 上不一定存在，改用 `HOME` 或 fallback `USERPROFILE`）。之後若同一問題重現，可請使用者在 Windows host 上：(a) 直接看 host 端 2syn App 的「系統日誌」面板（擷取失敗訊息本來就會顯示在那裡）；(b) 附上 `%USERPROFILE%\2syn-debug.log` 內容，藉此判斷是連線協商/軌道建立卡住，還是 xcap 擷取本身失敗。
+- **教訓**：黑屏這類症狀，第一步應先確認「錯誤現象發生的一端」與「診斷資訊送達的一端」是否同一台機器——本例兩者剛好相反（client 端看到黑屏，診斷卻只送到 host 端本機），排查前若沒先釐清這點，很容易把力氣花在錯的假設上。也再次印證：GUI subsystem 的 Windows release 版任何只靠 `eprintln!`/stderr 的診斷，對已安裝版使用者而言等於不存在，必須落檔才有事後可查性。
+- **驗證**：`CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo check --workspace` 通過（macOS 端實際編譯確認；Windows 端未在此機器實測）。黑屏根因仍待使用者提供上述診斷資訊後才能確認/修正。
+
 ## 2026-07-31 — 修正 Pointer Lock 相對移動造成的點擊位置漂移
 
 - **問題/目標**：連線成功後，鼠標點擊位置有時準確、有時偏差；且與平台/host 端無關（web 版與安裝版 client 皆會發生）。

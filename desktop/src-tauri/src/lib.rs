@@ -355,11 +355,85 @@ async fn unplug_virtual_monitor(index: u32) -> Result<String, String> {
     Ok(format!("unplug_success|{}", index))
 }
 
+// TURN 伺服器設定：沿用瀏覽器端設定面板寫入 localStorage 的寬鬆 RTCIceServer
+// 格式（urls 可以是單一字串或陣列，username/credential 可省略），由前端在呼叫
+// generate_local_sdp_offer / handle_remote_offer_as_host 時一併傳入，讓 host 端
+// 的 Rust WebRTC session 也能套用同一份 TURN 設定。
+//
+// 2026-05-27 一次無關的 signaling heartbeat 修正（commit b2465c6）誤刪了
+// host 端原本的 custom_turn 參數與預設 TURN fallback，此後 host 端一直是
+// 寫死的 STUN-only：即使使用者在設定面板填了 TURN，對 host 角色完全無效。
+// 純 STUN 在任一端為對稱型 NAT / CGNAT / 嚴格防火牆時無法打通連線，症狀是
+// ICE 停在 connecting、15 秒逾時斷線、client 端畫面全黑（見 DEVLOG）。
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[derive(serde::Deserialize)]
+struct TurnServerConfig {
+    urls: TurnUrls,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    credential: Option<String>,
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum TurnUrls {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn turn_configs_to_ice_servers(
+    configs: Vec<TurnServerConfig>,
+) -> Vec<webrtc::ice_transport::ice_server::RTCIceServer> {
+    use webrtc::ice_transport::ice_credential_type::RTCIceCredentialType;
+    configs
+        .into_iter()
+        .map(|c| webrtc::ice_transport::ice_server::RTCIceServer {
+            urls: match c.urls {
+                TurnUrls::Single(s) => vec![s],
+                TurnUrls::Multiple(v) => v,
+            },
+            username: c.username.unwrap_or_default(),
+            credential: c.credential.unwrap_or_default(),
+            credential_type: RTCIceCredentialType::Password,
+            ..Default::default()
+        })
+        .collect()
+}
+
+// 使用者未設定自訂 TURN 時的預設 fallback（恢復 b2465c6 之前的行為），避免
+// 完全沒有 TURN 導致對稱型 NAT/CGNAT 環境下無法連線。免費公用服務頻寬有限，
+// 使用者可在設定面板填入自己的 TURN 伺服器覆蓋這組預設值。
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn default_turn_servers() -> Vec<webrtc::ice_transport::ice_server::RTCIceServer> {
+    use webrtc::ice_transport::ice_credential_type::RTCIceCredentialType;
+    vec![webrtc::ice_transport::ice_server::RTCIceServer {
+        urls: vec!["turn:openrelay.metered.ca:80".to_string()],
+        username: "openrelayproject".to_string(),
+        credential: "openrelayproject".to_string(),
+        credential_type: RTCIceCredentialType::Password,
+    }]
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn resolve_ice_servers(
+    turn_servers: Option<Vec<TurnServerConfig>>,
+) -> Vec<webrtc::ice_transport::ice_server::RTCIceServer> {
+    match turn_servers {
+        Some(list) if !list.is_empty() => turn_configs_to_ice_servers(list),
+        _ => default_turn_servers(),
+    }
+}
+
 /// 產生去中心化手動 SDP Offer 資訊
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
-async fn generate_local_sdp_offer() -> Result<String, String> {
-    let session = syn_core::connection::WebRtcSession::create_session()
+async fn generate_local_sdp_offer(
+    turn_servers: Option<Vec<TurnServerConfig>>,
+) -> Result<String, String> {
+    let session = syn_core::connection::WebRtcSession::create_session(resolve_ice_servers(turn_servers))
         .await
         .map_err(|e| e.to_string())?;
 
@@ -391,10 +465,11 @@ async fn generate_local_sdp_offer() -> Result<String, String> {
 async fn handle_remote_offer_as_host(
     app_handle: tauri::AppHandle,
     offer_sdp: String,
+    turn_servers: Option<Vec<TurnServerConfig>>,
 ) -> Result<String, String> {
     use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
-    let session = syn_core::connection::WebRtcSession::create_session()
+    let session = syn_core::connection::WebRtcSession::create_session(resolve_ice_servers(turn_servers))
         .await
         .map_err(|e| e.to_string())?;
 
@@ -983,7 +1058,9 @@ async fn start_rust_signaling_task(
 
                             *state.current_remote_id.write().await = source.clone();
 
-                            match handle_remote_offer_as_host(app_handle_clone.clone(), sdp).await {
+                            // 純 Rust 背景無人值守路徑，沒有 JS/localStorage 可讀取使用者
+                            // 設定的自訂 TURN，只能套用預設 fallback（見 resolve_ice_servers）
+                            match handle_remote_offer_as_host(app_handle_clone.clone(), sdp, None).await {
                                 Ok(answer_sdp) => {
                                     let ok_msg =
                                         format!("成功處理 Offer，正在回傳 Answer 至 {}...", source);

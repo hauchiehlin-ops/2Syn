@@ -239,8 +239,15 @@ pub struct WebRtcSession {
 
 impl WebRtcSession {
     /// 建立全新 WebRTC PeerConnection 連線工作階段
-    /// 包含高可用性 STUN 清單，完全捨棄 TURN 依賴
-    pub async fn create_session() -> Result<Self, CoreError> {
+    /// 包含高可用性 STUN 清單，並附加呼叫端提供的自訂 TURN 中繼伺服器。
+    ///
+    /// 2026-05-27 一次無關的 signaling heartbeat 修正（b2465c6）誤刪了原本的
+    /// `custom_turn` 參數與預設 TURN fallback，host 端從此完全無法使用 TURN——
+    /// 即使 client 端設定面板填了自訂 TURN 伺服器也不會生效，因為 host 端這裡
+    /// 一直是寫死的 STUN-only。純 STUN 在雙方任一端為對稱型 NAT / CGNAT /
+    /// 嚴格防火牆時無法打通，症狀是 ICE 停在 connecting、15 秒逾時後斷線、
+    /// 畫面全黑（見 DEVLOG 對應記錄）。
+    pub async fn create_session(custom_turn: Vec<RTCIceServer>) -> Result<Self, CoreError> {
         let mut m = MediaEngine::default();
         m.register_default_codecs()
             .map_err(|e| CoreError::NetworkError(format!("註冊預設編解碼器失敗: {}", e)))?;
@@ -249,8 +256,8 @@ impl WebRtcSession {
             .with_media_engine(m)
             .build();
 
-        // 高可用性 STUN 清單 (堅持不使用 TURN 以符合架構設計)
-        let ice_servers = vec![
+        // 高可用性 STUN 清單，附加自訂 TURN（若呼叫端有提供）
+        let mut ice_servers = vec![
             RTCIceServer {
                 urls: vec![
                     "stun:stun.l.google.com:19302".to_string(),
@@ -260,6 +267,7 @@ impl WebRtcSession {
                 ..Default::default()
             }
         ];
+        ice_servers.extend(custom_turn);
 
         let config = RTCConfiguration {
             ice_servers,
