@@ -6213,7 +6213,7 @@ dependencies = [
 
 [[package]]
 name = "syn-core"
-version = "4.1.6"
+version = "4.1.7"
 dependencies = [
  "aes-gcm",
  "apple-cf",
@@ -6253,7 +6253,7 @@ dependencies = [
 
 [[package]]
 name = "syn-desktop"
-version = "4.1.6"
+version = "4.1.7"
 dependencies = [
  "arboard",
  "core-foundation 0.9.4",
@@ -6277,7 +6277,7 @@ dependencies = [
 
 [[package]]
 name = "syn-signaling"
-version = "4.1.6"
+version = "4.1.7"
 dependencies = [
  "axum",
  "futures-util",

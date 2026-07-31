@@ -356,11 +356,10 @@ impl WebRtcSession {
     pub async fn setup_input_channel(&self) -> Result<Arc<RTCDataChannel>, CoreError> {
         let init = RTCDataChannelInit {
             ordered: Some(true),
-            // Keep keyboard/click ordering, but do not replay stale input long
-            // after the user's intent. A short lifetime gives lossy web/TURN
-            // paths a chance to recover without freezing fresh commands behind
-            // old SCTP retransmits.
-            max_packet_life_time: Some(250),
+            // Keyboard, clicks, and button-up events must be fully reliable.
+            // Safari/WebKit is especially fragile with partially reliable SCTP
+            // channels; stale high-frequency movement uses input-unreliable.
+            max_packet_life_time: None,
             max_retransmits: None,
             ..Default::default()
         };

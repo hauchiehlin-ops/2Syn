@@ -2412,7 +2412,6 @@ async function startCall(remoteId: string, pin: string) {
     // 主動端建立 Data Channels
     dataChannelControl = pc.createDataChannel("input-control", {
       ordered: true,
-      maxPacketLifeTime: INPUT_CONTROL_PACKET_LIFETIME_MS,
     });
     dataChannelControl.bufferedAmountLowThreshold = 1024;
     bindControlChannel(dataChannelControl);
@@ -2584,8 +2583,15 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
 
 // 控制通道（滑鼠鍵盤）綁定：收到遠端控制指令交由 Rust 執行
 function bindControlChannel(ch: RTCDataChannel) {
-  ch.onopen = () => console.log("[DataChannel] input-control 已開啟");
-  ch.onclose = () => console.log("[DataChannel] input-control 已關閉");
+  ch.onopen = () => {
+    dataChannelControl = ch;
+    console.log("[DataChannel] input-control 已開啟");
+  };
+  ch.onclose = () => {
+    if (dataChannelControl === ch) dataChannelControl = null;
+    console.log("[DataChannel] input-control 已關閉");
+  };
+  ch.onerror = (event) => console.warn("[DataChannel] input-control 發生錯誤:", event);
   ch.onmessage = async (event) => {
     try {
       const data: Uint8Array = event.data instanceof ArrayBuffer
@@ -2601,8 +2607,15 @@ function bindControlChannel(ch: RTCDataChannel) {
 
 // 非可靠控制通道綁定
 function bindUnreliableChannel(ch: RTCDataChannel) {
-  ch.onopen = () => console.log("[DataChannel] input-unreliable 已開啟");
-  ch.onclose = () => console.log("[DataChannel] input-unreliable 已關閉");
+  ch.onopen = () => {
+    dataChannelUnreliable = ch;
+    console.log("[DataChannel] input-unreliable 已開啟");
+  };
+  ch.onclose = () => {
+    if (dataChannelUnreliable === ch) dataChannelUnreliable = null;
+    console.log("[DataChannel] input-unreliable 已關閉");
+  };
+  ch.onerror = (event) => console.warn("[DataChannel] input-unreliable 發生錯誤:", event);
   ch.onmessage = async (event) => {
     try {
       const data: Uint8Array = event.data instanceof ArrayBuffer
@@ -3252,7 +3265,7 @@ function initOfflineSdpMode() {
         currentRemoteId = "manual";
 
         // 建立 Data Channels
-        dataChannelControl = pc.createDataChannel("input-control", { ordered: true, maxPacketLifeTime: INPUT_CONTROL_PACKET_LIFETIME_MS });
+        dataChannelControl = pc.createDataChannel("input-control", { ordered: true });
         dataChannelControl.bufferedAmountLowThreshold = 1024;
         bindControlChannel(dataChannelControl);
         
@@ -3677,7 +3690,6 @@ function buildMouseButtonPayload(button: number, x: number, y: number): Uint8Arr
   return payload;
 }
 
-const INPUT_CONTROL_PACKET_LIFETIME_MS = 250;
 const INPUT_UNRELIABLE_BUFFER_LIMIT = 4 * 1024;
 const INPUT_CONTROL_BUFFER_LIMIT = 64 * 1024;
 const INPUT_CONTROL_TRANSIENT_BUFFER_LIMIT = 8 * 1024;
