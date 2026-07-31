@@ -131,17 +131,17 @@ impl ConnectionManager {
         // 2. 基於網路指標 (ABR: Adaptive Bitrate) 的動態調整
         // Packet loss 會直接破壞畫面流暢與控制回饋，需優先處理；RTT 高但 loss 低
         // 時通常仍有足夠頻寬，不應過早降到 480p，否則 web/TURN 文字會變得不可讀。
-        if metrics.packet_loss_rate > 0.10 {
-            config.target_fps = 30;
-            config.bitrate_limit_kbps = 2500;
-            config.target_width = 1280;
-            config.target_height = 720;
-        } else if metrics.packet_loss_rate > 0.03 {
+        if metrics.packet_loss_rate > 0.15 {
             config.target_fps = 30;
             config.bitrate_limit_kbps = 4000;
             config.target_width = 1600;
             config.target_height = 900;
-        } else if metrics.rtt_ms > 180 || metrics.packet_loss_rate > 0.01 {
+        } else if metrics.packet_loss_rate > 0.05 {
+            config.target_fps = 30;
+            config.bitrate_limit_kbps = 5000;
+            config.target_width = 1920;
+            config.target_height = 1080;
+        } else if metrics.rtt_ms > 180 || metrics.packet_loss_rate > 0.02 {
             config.target_fps = 45;
             config.bitrate_limit_kbps = 6000;
             config.target_width = 1920;
@@ -175,6 +175,8 @@ impl ConnectionManager {
 
     pub fn spawn_monitor_task(manager: Arc<Self>, pc: Arc<webrtc::peer_connection::RTCPeerConnection>) {
         tokio::spawn(async move {
+            let mut smoothed_rtt_ms: Option<f32> = None;
+            let mut smoothed_loss: Option<f32> = None;
             loop {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
                 
@@ -188,18 +190,35 @@ impl ConnectionManager {
 
                 for (_id, stat) in stats.reports.iter() {
                     if let webrtc::stats::StatsReportType::RemoteInboundRTP(rtp_stats) = stat {
+                        if rtp_stats.kind != "video" {
+                            continue;
+                        }
                         current_rtt = (rtp_stats.round_trip_time.unwrap_or(0.0) * 1000.0) as u32;
                         current_loss = rtp_stats.fraction_lost as f32;
                         break;
                     }
                 }
 
-                // 如果完全沒有收到 RTCP，則使用上一次的數值避免震盪
+                if current_rtt > 0 {
+                    let alpha = 0.25;
+                    smoothed_rtt_ms = Some(match smoothed_rtt_ms {
+                        Some(prev) => prev * (1.0 - alpha) + current_rtt as f32 * alpha,
+                        None => current_rtt as f32,
+                    });
+                    smoothed_loss = Some(match smoothed_loss {
+                        Some(prev) => prev * (1.0 - alpha) + current_loss * alpha,
+                        None => current_loss,
+                    });
+                }
+
+                // 如果完全沒有收到 video RTCP，則使用上一次的數值避免震盪
                 let new_metrics = {
                     let current_m = manager.current_metrics.lock().await;
                     NetworkMetrics {
-                        rtt_ms: if current_rtt > 0 { current_rtt } else { current_m.rtt_ms },
-                        packet_loss_rate: if current_rtt > 0 { current_loss } else { current_m.packet_loss_rate },
+                        rtt_ms: smoothed_rtt_ms
+                            .map(|v| v.round() as u32)
+                            .unwrap_or(current_m.rtt_ms),
+                        packet_loss_rate: smoothed_loss.unwrap_or(current_m.packet_loss_rate),
                         connection_type: current_m.connection_type.clone(),
                     }
                 };
@@ -323,10 +342,12 @@ impl WebRtcSession {
     pub async fn setup_input_channel(&self) -> Result<Arc<RTCDataChannel>, CoreError> {
         let init = RTCDataChannelInit {
             ordered: Some(true),
-            // Keep keyboard/click ordering, but skip retransmission. On web/TURN
-            // paths, waiting for stale SCTP retransmits is worse than dropping an
-            // old input command and letting the next fresh command through.
-            max_retransmits: Some(0),
+            // Keep keyboard/click ordering, but do not replay stale input long
+            // after the user's intent. A short lifetime gives lossy web/TURN
+            // paths a chance to recover without freezing fresh commands behind
+            // old SCTP retransmits.
+            max_packet_life_time: Some(250),
+            max_retransmits: None,
             ..Default::default()
         };
 

@@ -20,6 +20,15 @@
 
 # 歷程
 
+## 2026-07-31 — 修正 web 連線短時間後模糊與輸入失效
+
+- **問題/目標**：網頁版遠端連線初期正常，但短時間後 host 畫面變模糊；滑鼠移動仍可用，點擊/鍵盤失效或嚴重延遲。
+- **根因/做法**：
+  1. 前次把 `input-control` 改成 `maxRetransmits=0` 是錯誤方向：web/TURN 一旦有短暫 loss，MouseDown/MouseUp/KeyDown/KeyUp 會直接掉包；MouseMove 走 `input-unreliable` 所以仍可移動，造成「可移動但不能點/不能打」的症狀。改回 ordered + 短 `maxPacketLifeTime=250ms`，保留短暫修復機會但避免舊控制封包長時間阻塞。
+  2. host 端 ABR 讀 RTCP 時未限定 video stats，也沒有平滑，短暫 loss 會立刻觸發降級與重配解析度。改為只看 video `RemoteInboundRTP`，RTT/loss 以 EMA 平滑後再決策。
+  3. 桌面控制以可讀文字為優先：高 RTT 不降解析度；只有持續 loss 很高時才降到 1600x900，不再掉到 720p/480p。
+- **驗證**：`npm run build` 通過；`cargo check -p syn-core` 通過（僅既有 unused warnings）。
+
 ## 2026-07-31 — 修正 web client 鍵盤延遲與低解析度
 
 - **問題/目標**：網頁版控制端鍵盤指令仍回應遲緩，且遠端 host 畫面解析度明顯偏低。
