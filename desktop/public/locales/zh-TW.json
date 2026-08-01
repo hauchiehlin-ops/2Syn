@@ -418,5 +418,16 @@
   "alert_transfer_complete": "檔案傳輸完成！",
   "alert_permissions_granted": "已成功取得系統權限！應用程式已準備就緒。",
   "alert_permissions_missing": "系統權限仍不足。請確保已在 macOS 系統設定中勾選。",
-  "toast_turn_saved": "中繼伺服器已儲存！即將重新載入..."
+  "toast_turn_saved": "中繼伺服器已儲存！即將重新載入...",
+  "file_transfer_failed": "傳輸失敗",
+  "file_transfer_queue_empty": "尚未選擇檔案",
+  "file_transfer_queue_count": "已選擇 {0} 個檔案",
+  "file_transfer_queue_more": "另有 {0} 個",
+  "file_transfer_send_selected": "傳輸",
+  "file_transfer_clear_selected": "清除",
+  "file_transfer_cancel_selected": "取消",
+  "file_transfer_waiting_receiver": "等待接收端...",
+  "file_transfer_resuming": "正在續傳",
+  "file_transfer_remote_received": "遠端已收到 {0}",
+  "file_transfer_stalled": "傳輸停滯，請重試。"
 }

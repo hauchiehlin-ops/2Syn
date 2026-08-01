@@ -386,5 +386,16 @@
   "alert_transfer_complete": "文件传输完成！",
   "alert_permissions_granted": "已成功取得系统权限！应用程序已准备就绪。",
   "alert_permissions_missing": "系统权限仍不足。请确保已在 macOS系统设置中勾选。",
-  "toast_turn_saved": "中继服务器已储存！即将重新载入..."
+  "toast_turn_saved": "中继服务器已储存！即将重新载入...",
+  "file_transfer_failed": "传输失败",
+  "file_transfer_queue_empty": "尚未选择文件",
+  "file_transfer_queue_count": "已选择 {0} 个文件",
+  "file_transfer_queue_more": "另有 {0} 个",
+  "file_transfer_send_selected": "传输",
+  "file_transfer_clear_selected": "清除",
+  "file_transfer_cancel_selected": "取消",
+  "file_transfer_waiting_receiver": "等待接收端...",
+  "file_transfer_resuming": "正在续传",
+  "file_transfer_remote_received": "远端已收到 {0}",
+  "file_transfer_stalled": "传输停滞，请重试。"
 }

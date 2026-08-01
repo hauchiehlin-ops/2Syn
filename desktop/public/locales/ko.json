@@ -384,5 +384,16 @@
   "alert_transfer_complete": "Transfer Complete!",
   "alert_permissions_granted": "Permissions granted successfully! Application is ready.",
   "alert_permissions_missing": "Permissions still missing. Please ensure they are checked in macOS System Settings.",
-  "toast_turn_saved": "TURN Servers saved! Reloading..."
+  "toast_turn_saved": "TURN Servers saved! Reloading...",
+  "file_transfer_failed": "전송 실패",
+  "file_transfer_queue_empty": "선택된 파일 없음",
+  "file_transfer_queue_count": "{0}개 파일 선택됨",
+  "file_transfer_queue_more": "+ {0}개 더",
+  "file_transfer_send_selected": "전송",
+  "file_transfer_clear_selected": "지우기",
+  "file_transfer_cancel_selected": "취소",
+  "file_transfer_waiting_receiver": "수신 장치 대기 중...",
+  "file_transfer_resuming": "전송 재개 중",
+  "file_transfer_remote_received": "원격에서 {0} 수신",
+  "file_transfer_stalled": "전송이 멈췄습니다. 다시 시도하세요."
 }

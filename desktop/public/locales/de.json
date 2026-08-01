@@ -384,5 +384,16 @@
   "alert_transfer_complete": "Transfer Complete!",
   "alert_permissions_granted": "Permissions granted successfully! Application is ready.",
   "alert_permissions_missing": "Permissions still missing. Please ensure they are checked in macOS System Settings.",
-  "toast_turn_saved": "TURN Servers saved! Reloading..."
+  "toast_turn_saved": "TURN Servers saved! Reloading...",
+  "file_transfer_failed": "Übertragung fehlgeschlagen",
+  "file_transfer_queue_empty": "Keine Dateien ausgewählt",
+  "file_transfer_queue_count": "{0} Datei(en) ausgewählt",
+  "file_transfer_queue_more": "+ {0} weitere",
+  "file_transfer_send_selected": "Übertragen",
+  "file_transfer_clear_selected": "Leeren",
+  "file_transfer_cancel_selected": "Abbrechen",
+  "file_transfer_waiting_receiver": "Warte auf Empfänger...",
+  "file_transfer_resuming": "Übertragung wird fortgesetzt",
+  "file_transfer_remote_received": "Remote hat {0} empfangen",
+  "file_transfer_stalled": "Übertragung hängt. Bitte erneut versuchen."
 }

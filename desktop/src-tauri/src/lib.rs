@@ -13,6 +13,9 @@ use futures_util::{SinkExt, StreamExt};
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+const FILE_TRANSFER_CHUNK_SIZE: usize = 64 * 1024;
+
 struct AppState {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     connection_manager: Arc<ConnectionManager>,
@@ -1109,6 +1112,9 @@ async fn handle_remote_offer_as_host(
                     }
                     // 否則視為二進位檔案內容
                     state.handle_binary(&data);
+                    for outgoing in state.take_outgoing_messages() {
+                        let _ = dc.send_text(outgoing).await;
+                    }
                 })
             }));
         } else {
@@ -1860,7 +1866,7 @@ async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result
             .await
             .map_err(|e| format!("無法續傳定位檔案: {}", e))?;
     }
-    let mut buf = vec![0u8; 16 * 1024];
+    let mut buf = vec![0u8; FILE_TRANSFER_CHUNK_SIZE];
     loop {
         let n = file
             .read(&mut buf)
@@ -1891,7 +1897,7 @@ async fn send_selected_file_to_client(
         .await?
         .min(bytes.len() as u64) as usize;
 
-    for chunk in bytes[offset..].chunks(16 * 1024) {
+    for chunk in bytes[offset..].chunks(FILE_TRANSFER_CHUNK_SIZE) {
         send_file_chunk(&dc, chunk).await?;
     }
 

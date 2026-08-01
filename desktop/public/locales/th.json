@@ -384,5 +384,16 @@
   "alert_transfer_complete": "Transfer Complete!",
   "alert_permissions_granted": "Permissions granted successfully! Application is ready.",
   "alert_permissions_missing": "Permissions still missing. Please ensure they are checked in macOS System Settings.",
-  "toast_turn_saved": "TURN Servers saved! Reloading..."
+  "toast_turn_saved": "TURN Servers saved! Reloading...",
+  "file_transfer_failed": "การถ่ายโอนล้มเหลว",
+  "file_transfer_queue_empty": "ยังไม่ได้เลือกไฟล์",
+  "file_transfer_queue_count": "เลือก {0} ไฟล์แล้ว",
+  "file_transfer_queue_more": "+ อีก {0}",
+  "file_transfer_send_selected": "ถ่ายโอน",
+  "file_transfer_clear_selected": "ล้าง",
+  "file_transfer_cancel_selected": "ยกเลิก",
+  "file_transfer_waiting_receiver": "กำลังรอฝั่งรับ...",
+  "file_transfer_resuming": "กำลังถ่ายโอนต่อ",
+  "file_transfer_remote_received": "ปลายทางได้รับ {0}",
+  "file_transfer_stalled": "การถ่ายโอนค้าง โปรดลองอีกครั้ง"
 }

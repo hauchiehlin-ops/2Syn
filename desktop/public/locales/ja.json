@@ -386,5 +386,16 @@
   "alert_transfer_complete": "Transfer Complete!",
   "alert_permissions_granted": "Permissions granted successfully! Application is ready.",
   "alert_permissions_missing": "Permissions still missing. Please ensure they are checked in macOS System Settings.",
-  "toast_turn_saved": "TURN Servers saved! Reloading..."
+  "toast_turn_saved": "TURN Servers saved! Reloading...",
+  "file_transfer_failed": "転送に失敗しました",
+  "file_transfer_queue_empty": "ファイルが選択されていません",
+  "file_transfer_queue_count": "{0} 個のファイルを選択済み",
+  "file_transfer_queue_more": "さらに {0} 件",
+  "file_transfer_send_selected": "転送",
+  "file_transfer_clear_selected": "クリア",
+  "file_transfer_cancel_selected": "キャンセル",
+  "file_transfer_waiting_receiver": "受信側を待機中...",
+  "file_transfer_resuming": "転送を再開中",
+  "file_transfer_remote_received": "リモートが {0} を受信済み",
+  "file_transfer_stalled": "転送が停止しました。再試行してください。"
 }

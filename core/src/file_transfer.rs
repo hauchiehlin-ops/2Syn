@@ -33,6 +33,7 @@ pub struct FileTransferState {
     current_received: u64,
     current_expected_size: u64,
     current_name: Option<String>,
+    last_progress_reported: u64,
     last_completed: Option<CompletedFileTransfer>,
     outgoing_messages: Vec<String>,
 }
@@ -53,6 +54,7 @@ impl FileTransferState {
             current_received: 0,
             current_expected_size: 0,
             current_name: None,
+            last_progress_reported: 0,
             last_completed: None,
             outgoing_messages: Vec::new(),
         }
@@ -87,6 +89,7 @@ impl FileTransferState {
                         self.current_received = existing_len;
                         self.current_expected_size = size;
                         self.current_name = Some(safe_name);
+                        self.last_progress_reported = existing_len;
                         self.current_file = OpenOptions::new()
                             .write(true)
                             .create(true)
@@ -165,6 +168,21 @@ impl FileTransferState {
                 return;
             }
             self.current_received += data.len() as u64;
+            if self.current_received == self.current_expected_size
+                || self.current_received.saturating_sub(self.last_progress_reported) >= 1024 * 1024
+            {
+                self.last_progress_reported = self.current_received;
+                self.outgoing_messages.push(
+                    serde_json::json!({
+                        "action": "progress",
+                        "id": self.current_id,
+                        "name": self.current_name,
+                        "received": self.current_received,
+                        "size": self.current_expected_size
+                    })
+                    .to_string(),
+                );
+            }
         }
     }
 
@@ -188,6 +206,7 @@ impl FileTransferState {
         self.current_received = 0;
         self.current_expected_size = 0;
         self.current_name = None;
+        self.last_progress_reported = 0;
     }
 }
 

@@ -6,6 +6,7 @@ type TransferDirection = "send" | "receive";
 type TransferMessage =
   | { action: "start"; id?: string; name: string; size: number; fingerprint?: string }
   | { action: "resume"; id?: string; offset: number }
+  | { action: "progress"; id?: string; name?: string; received: number; size: number }
   | { action: "end"; id?: string }
   | { action: "cancel"; id?: string };
 
@@ -30,9 +31,10 @@ type ReceiveState = {
   chunks: BlobPart[];
 };
 
-const CHUNK_SIZE = 16 * 1024;
+const CHUNK_SIZE = 64 * 1024;
 const BUFFER_HIGH_WATER = 10 * 1024 * 1024;
 const BUFFER_LOW_WATER = 2 * 1024 * 1024;
+const TRANSFER_UI_INTERVAL_MS = 120;
 
 let activeSendAbort: AbortController | null = null;
 let activeReceive: ReceiveState | null = null;
@@ -195,7 +197,10 @@ function bindQueueActions(getChannel: () => RTCDataChannel | null) {
     if (button.dataset.bound === "true") return;
     button.dataset.bound = "true";
     button.addEventListener("click", () => {
-      if (activeQueueSending) return;
+      if (activeQueueSending) {
+        activeQueueSending = false;
+        cancelActiveFileTransfer(getChannel());
+      }
       clearPendingFiles();
     });
   });
@@ -218,12 +223,23 @@ function clearPendingFiles() {
   updateQueueUi();
 }
 
+function removePendingFile(file: File) {
+  const key = fileQueueKey(file);
+  const index = pendingSendFiles.findIndex((pendingFile) => fileQueueKey(pendingFile) === key);
+  if (index >= 0) {
+    pendingSendFiles.splice(index, 1);
+    updateQueueUi();
+  }
+}
+
 function updateQueueUi() {
   const queues = Array.from(document.querySelectorAll<HTMLElement>("[data-transfer-queue]"));
   const totalSize = pendingSendFiles.reduce((sum, file) => sum + file.size, 0);
   const title = pendingSendFiles.length === 0
     ? transferText("file_transfer_queue_empty", "No files selected")
     : transferText("file_transfer_queue_count", "{0} file(s) selected").replace("{0}", String(pendingSendFiles.length));
+
+  document.body.classList.toggle("file-transfer-active-queue", pendingSendFiles.length > 0 && activeQueueSending);
 
   queues.forEach((queue) => {
     queue.style.display = pendingSendFiles.length > 0 ? "flex" : "none";
@@ -259,8 +275,10 @@ function updateQueueUi() {
       sendButton.disabled = activeQueueSending || pendingSendFiles.length === 0;
     }
     if (clearButton) {
-      clearButton.textContent = transferText("file_transfer_clear_selected", "Clear");
-      clearButton.disabled = activeQueueSending;
+      clearButton.textContent = activeQueueSending
+        ? transferText("file_transfer_cancel_selected", "Cancel")
+        : transferText("file_transfer_clear_selected", "Clear");
+      clearButton.disabled = false;
     }
   });
 }
@@ -301,6 +319,7 @@ async function sendFiles(files: File[], ch: RTCDataChannel | null) {
     for (const file of files) {
       const sent = await sendFile(file, ch);
       if (!sent) return false;
+      removePendingFile(file);
     }
     return true;
   }
@@ -314,6 +333,7 @@ async function sendFiles(files: File[], ch: RTCDataChannel | null) {
     for (const file of files) {
       const sent = await sendFileViaNativeHostChannel(file);
       if (!sent) return false;
+      removePendingFile(file);
     }
     return true;
   }
@@ -345,34 +365,123 @@ async function sendFile(file: File, ch: RTCDataChannel) {
   });
   console.log(`[file-transfer] Sending file: ${file.name} (${file.size} bytes)`);
 
-  ch.send(JSON.stringify({ action: "start", id, name: file.name, size: file.size, fingerprint }));
+  if (!sendControlMessage(ch, { action: "start", id, name: file.name, size: file.size, fingerprint })) {
+    updateTransferUi({
+      id,
+      name: file.name,
+      direction: "send",
+      transferred: 0,
+      total: file.size,
+      status: "failed",
+      detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
+    });
+    activeSendAbort = null;
+    return false;
+  }
 
+  updateTransferUi({
+    id,
+    name: file.name,
+    direction: "send",
+    transferred: 0,
+    total: file.size,
+    status: "preparing",
+    detail: transferText("file_transfer_waiting_receiver", "Waiting for receiver..."),
+  });
   let offset = await waitForResumeOffset(id, abort.signal);
   offset = Math.min(Math.max(offset, 0), file.size);
+  updateTransferUi({
+    id,
+    name: file.name,
+    direction: "send",
+    transferred: offset,
+    total: file.size,
+    status: "transferring",
+    detail: offset > 0 ? transferText("file_transfer_resuming", "Resuming transfer") : undefined,
+  });
+  let lastUiUpdateAt = 0;
   while (offset < file.size) {
     if (abort.signal.aborted) {
-      ch.send(JSON.stringify({ action: "cancel", id }));
+      sendControlMessage(ch, { action: "cancel", id });
       return false;
     }
 
     const chunk = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
-    ch.send(chunk);
+    if (ch.readyState !== "open") {
+      activeSendAbort = null;
+      updateTransferUi({
+        id,
+        name: file.name,
+        direction: "send",
+        transferred: offset,
+        total: file.size,
+        status: "failed",
+        detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
+      });
+      return false;
+    }
+    try {
+      ch.send(chunk);
+    } catch (error) {
+      console.warn("[file-transfer] Failed to send file chunk:", error);
+      activeSendAbort = null;
+      updateTransferUi({
+        id,
+        name: file.name,
+        direction: "send",
+        transferred: offset,
+        total: file.size,
+        status: "failed",
+        detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
+      });
+      return false;
+    }
     offset += chunk.byteLength;
+    const now = Date.now();
+    if (now - lastUiUpdateAt >= TRANSFER_UI_INTERVAL_MS || offset >= file.size) {
+      lastUiUpdateAt = now;
+      updateTransferUi({
+        id,
+        name: file.name,
+        direction: "send",
+        transferred: offset,
+        total: file.size,
+        status: "transferring",
+      });
+    }
+
+    if (ch.bufferedAmount > BUFFER_HIGH_WATER) {
+      const writable = await waitForBufferedAmount(ch, BUFFER_LOW_WATER, abort.signal);
+      if (!writable) {
+        sendControlMessage(ch, { action: "cancel", id });
+        activeSendAbort = null;
+        updateTransferUi({
+          id,
+          name: file.name,
+          direction: "send",
+          transferred: offset,
+          total: file.size,
+          status: "failed",
+          detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
+        });
+        return false;
+      }
+    }
+  }
+
+  if (!sendControlMessage(ch, { action: "end", id })) {
+    activeSendAbort = null;
     updateTransferUi({
       id,
       name: file.name,
       direction: "send",
       transferred: offset,
       total: file.size,
-      status: "transferring",
+      status: "failed",
+      detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
     });
-
-    if (ch.bufferedAmount > BUFFER_HIGH_WATER) {
-      await waitForBufferedAmount(ch, BUFFER_LOW_WATER, abort.signal);
-    }
+    return false;
   }
-
-  ch.send(JSON.stringify({ action: "end", id }));
   activeSendAbort = null;
   updateTransferUi({
     id,
@@ -467,6 +576,20 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
     return;
   }
 
+  if (msg.action === "progress") {
+    const received = Math.min(Math.max(msg.received || 0, 0), msg.size || 0);
+    updateTransferUi({
+      id: msg.id || latestTransfer?.id || `remote-progress-${Date.now()}`,
+      name: sanitizeFileName(msg.name || latestTransfer?.name || "transfer"),
+      direction: "send",
+      transferred: received,
+      total: msg.size || latestTransfer?.total || received,
+      status: "transferring",
+      detail: transferText("file_transfer_remote_received", "Remote received {0}").replace("{0}", formatBytes(received)),
+    });
+    return;
+  }
+
   if (msg.action === "start") {
     const fingerprint = msg.fingerprint || `${sanitizeFileName(msg.name)}-${msg.size}`;
     const partial = partialReceives.get(fingerprint);
@@ -555,11 +678,26 @@ function fileFingerprint(file: File) {
   return sanitizeFileName(`${file.name}-${file.size}-${file.lastModified || 0}`);
 }
 
+function sendControlMessage(ch: RTCDataChannel, message: TransferMessage) {
+  if (ch.readyState !== "open") return false;
+  try {
+    ch.send(JSON.stringify(message));
+    return true;
+  } catch (error) {
+    console.warn("[file-transfer] Failed to send control message:", error);
+    return false;
+  }
+}
+
 function waitForBufferedAmount(ch: RTCDataChannel, target: number, signal: AbortSignal) {
-  return new Promise<void>((resolve) => {
+  return new Promise<boolean>((resolve) => {
+    const startedAt = Date.now();
     const check = () => {
       if (signal.aborted || ch.readyState !== "open" || ch.bufferedAmount < target) {
-        resolve();
+        resolve(!signal.aborted && ch.readyState === "open");
+      } else if (Date.now() - startedAt > 45_000) {
+        console.warn(`[file-transfer] DataChannel backpressure timeout: ${ch.bufferedAmount} bytes buffered`);
+        resolve(false);
       } else {
         setTimeout(check, 50);
       }
