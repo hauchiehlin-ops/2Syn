@@ -448,6 +448,14 @@ export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
   updateQueueUi();
 }
 
+export function dismissOrCancelFileTransfer(ch: RTCDataChannel | null) {
+  if (activeTransferRunning || activeSendAbort || activeReceive) {
+    cancelActiveFileTransfer(ch);
+    return;
+  }
+  dismissTransferUi();
+}
+
 async function waitForOpenTransferChannel(
   getChannel: () => RTCDataChannel | null,
   signal: AbortSignal,
@@ -1230,6 +1238,7 @@ function updateTransferUi(state: TransferUiState | null) {
   if (!state) {
     progressContainers.forEach((container) => {
       container.style.display = "none";
+      delete container.dataset.transferStatus;
     });
     return;
   }
@@ -1245,8 +1254,11 @@ function updateTransferUi(state: TransferUiState | null) {
     const barEl = container.querySelector<HTMLElement>("[data-transfer-bar]");
     const detailEl = container.querySelector<HTMLElement>("[data-transfer-detail]");
     const cancelBtn = container.querySelector<HTMLButtonElement>("[data-transfer-cancel]");
+    const cancelLabel = container.querySelector<HTMLElement>("[data-transfer-cancel-label]");
+    const terminal = !isActiveTransferStatus(state.status);
 
     container.style.display = "flex";
+    container.dataset.transferStatus = state.status;
     if (filenameEl) {
       const verb = state.direction === "send"
         ? transferText("file_transfer_sending", "Sending")
@@ -1259,21 +1271,36 @@ function updateTransferUi(state: TransferUiState | null) {
       detailEl.textContent = detail;
       detailEl.style.display = detail ? "block" : "none";
     }
-    if (cancelBtn) cancelBtn.disabled = state.status === "complete";
+    if (cancelBtn) cancelBtn.disabled = false;
+    if (cancelLabel) {
+      cancelLabel.textContent = terminal
+        ? transferText("btn_dismiss", "Dismiss")
+        : transferText("btn_cancel_transfer", "Cancel Transfer");
+    }
   });
 
   if (state.status === "complete") {
     transferHideTimer = window.setTimeout(() => {
       if (latestTransfer?.id === state.id) {
-        progressContainers.forEach((container) => {
-          container.style.display = "none";
-        });
-        transferStartedAt.delete(state.id);
-        latestTransfer = null;
+        dismissTransferUi();
       }
       transferHideTimer = null;
     }, 30_000);
   }
+}
+
+function dismissTransferUi() {
+  const transferId = latestTransfer?.id;
+  if (transferHideTimer !== null) {
+    window.clearTimeout(transferHideTimer);
+    transferHideTimer = null;
+  }
+  if (noticeHideTimer !== null) {
+    window.clearTimeout(noticeHideTimer);
+    noticeHideTimer = null;
+  }
+  updateTransferUi(null);
+  if (transferId) transferStartedAt.delete(transferId);
 }
 
 function emitTransferPriorityState(active: boolean) {

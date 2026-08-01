@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { bindFileTransferChannel, cancelActiveFileTransfer, setupFileTransferDropZone } from "./file_transfer";
+import { bindFileTransferChannel, dismissOrCancelFileTransfer, setupFileTransferDropZone } from "./file_transfer";
 import { I18N_HELP_DOCS } from "./help_i18n";
 import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
@@ -1077,7 +1077,9 @@ function updateDomTranslations() {
   setTextContent("txt-btn-cancel-transfer", t("btn_cancel_transfer"));
   setTextContent("txt-file-drop-overlay", t("file_transfer_drop_overlay"));
   document.querySelectorAll<HTMLElement>("[data-transfer-cancel-label]").forEach((el) => {
-    el.textContent = t("btn_cancel_transfer");
+    const status = el.closest<HTMLElement>("[data-transfer-progress]")?.dataset.transferStatus;
+    const terminal = status === "complete" || status === "cancelled" || status === "failed";
+    el.textContent = t(terminal ? "btn_dismiss" : "btn_cancel_transfer");
   });
   
   setTextContent("lbl-metric-fps", t("metric_fps"));
@@ -3709,7 +3711,7 @@ function initSmartAutoMode() {
 
 function initFileTransfer() {
   document.querySelectorAll<HTMLButtonElement>("[data-transfer-cancel]").forEach((btnCancel) => {
-    btnCancel.addEventListener("click", () => cancelActiveFileTransfer(dataChannelFileTransfer));
+    btnCancel.addEventListener("click", () => dismissOrCancelFileTransfer(dataChannelFileTransfer));
   });
 }
 
