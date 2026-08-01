@@ -2808,6 +2808,15 @@ window.addEventListener("file-transfer-priority-change", (event) => {
   }
 });
 
+window.addEventListener("file-transfer-channel-reset-needed", () => {
+  if (dataChannelFileTransfer?.readyState !== "open") {
+    dataChannelFileTransfer = null;
+  }
+  window.setTimeout(() => {
+    getOrRecoverFileTransferChannel();
+  }, 500);
+});
+
 
 
 // 重置連線相關 UI 狀態

@@ -66,7 +66,9 @@ const MOBILE_BUFFER_HIGH_WATER = 256 * 1024;
 const MOBILE_BUFFER_LOW_WATER = 64 * 1024;
 const TRANSFER_ACK_INTERVAL_BYTES = 64 * 1024;
 const TRANSFER_ACK_INTERVAL_MS = 250;
-const TRANSFER_MAX_IN_FLIGHT_BYTES = 256 * 1024;
+const TRANSFER_MIN_IN_FLIGHT_BYTES = 256 * 1024;
+const TRANSFER_MOBILE_MAX_IN_FLIGHT_BYTES = 768 * 1024;
+const TRANSFER_DESKTOP_MAX_IN_FLIGHT_BYTES = 2 * 1024 * 1024;
 const TRANSFER_UI_INTERVAL_MS = 120;
 const CHUNK_GROW_AFTER = 16;
 const FRAME_HEADER_BYTES = 16;
@@ -455,6 +457,12 @@ function setupNativeReceiveListener() {
 }
 
 export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
+  const shouldResetChannel = !!ch && (activeSendChannel === ch || ch.bufferedAmount > 0);
+  if (isDesktopTauri()) {
+    void invoke("cancel_active_file_transfer").catch((error) => {
+      console.warn("[file-transfer] Native transfer cancel failed:", error);
+    });
+  }
   channelWaitAbort?.abort();
   channelWaitAbort = null;
   activeSendAbort?.abort();
@@ -472,6 +480,7 @@ export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
     if (activeReceive.sink) void activeReceive.sink.abort().catch(() => {});
     activeReceive = null;
   }
+  resetCongestedFileChannel(ch, shouldResetChannel);
   activeQueueSending = false;
   activeTransferRunning = false;
   emitTransferPriorityState(false);
@@ -658,6 +667,8 @@ async function sendFile(file: File, ch: RTCDataChannel) {
   const bufferHighWater = channelBufferHighWater();
   const bufferLowWater = channelBufferLowWater();
   let smoothChunks = 0;
+  let adaptiveInFlightBytes = initialTransferInFlightBytes();
+  const maxInFlightBytes = maxTransferInFlightBytes();
   while (offset < file.size) {
     if (abort.signal.aborted) {
       sendControlMessage(ch, { action: "cancel", id });
@@ -739,6 +750,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
         if (cancelledTransferIds.has(id)) {
           sendControlMessage(ch, { action: "cancel", id });
         }
+        resetCongestedFileChannel(ch, true);
         clearActiveSend(ch);
         if (abort.signal.aborted || cancelledTransferIds.has(id)) return false;
         updateTransferUi({
@@ -758,8 +770,9 @@ async function sendFile(file: File, ch: RTCDataChannel) {
     }
 
     const confirmed = confirmedTransferOffset(id, file.size);
-    if (offset - confirmed >= TRANSFER_MAX_IN_FLIGHT_BYTES) {
-      const target = Math.max(confirmed + TRANSFER_ACK_INTERVAL_BYTES, offset - Math.floor(TRANSFER_MAX_IN_FLIGHT_BYTES / 2));
+    if (offset - confirmed >= adaptiveInFlightBytes) {
+      const target = Math.max(confirmed + TRANSFER_ACK_INTERVAL_BYTES, offset - Math.floor(adaptiveInFlightBytes / 2));
+      const progressStartedAt = Date.now();
       const progressed = await waitForRemoteProgress(id, target, abort.signal, file.size, (received) => {
         updateTransferUi({
           id,
@@ -772,6 +785,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
         });
       });
       if (!progressed) {
+        resetCongestedFileChannel(ch, true);
         clearActiveSend(ch);
         if (abort.signal.aborted || cancelledTransferIds.has(id)) return false;
         updateTransferUi({
@@ -784,6 +798,14 @@ async function sendFile(file: File, ch: RTCDataChannel) {
           detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
         });
         return false;
+      }
+      const progressElapsed = Date.now() - progressStartedAt;
+      if (progressElapsed < 350 && adaptiveInFlightBytes < maxInFlightBytes) {
+        adaptiveInFlightBytes = Math.min(maxInFlightBytes, adaptiveInFlightBytes + TRANSFER_ACK_INTERVAL_BYTES);
+      } else if (progressElapsed > 1500 && adaptiveInFlightBytes > TRANSFER_MIN_IN_FLIGHT_BYTES) {
+        adaptiveInFlightBytes = Math.max(TRANSFER_MIN_IN_FLIGHT_BYTES, Math.floor(adaptiveInFlightBytes / 2));
+        chunkSize = Math.max(MIN_CHUNK_SIZE, Math.floor(chunkSize / 2));
+        smoothChunks = 0;
       }
     }
   }
@@ -860,6 +882,30 @@ function clearActiveSend(ch: RTCDataChannel) {
 
 function confirmedTransferOffset(id: string, total: number) {
   return Math.min(Math.max(remoteProgressOffsets.get(id) || 0, 0), total);
+}
+
+function maxTransferInFlightBytes() {
+  return isMobileRuntime()
+    ? TRANSFER_MOBILE_MAX_IN_FLIGHT_BYTES
+    : TRANSFER_DESKTOP_MAX_IN_FLIGHT_BYTES;
+}
+
+function initialTransferInFlightBytes() {
+  return isMobileRuntime()
+    ? TRANSFER_MIN_IN_FLIGHT_BYTES
+    : 512 * 1024;
+}
+
+function resetCongestedFileChannel(ch: RTCDataChannel | null, force = false) {
+  if (!ch || ch.readyState === "closed" || ch.readyState === "closing") return;
+  if (force || ch.bufferedAmount > 0 || activeSendChannel === ch) {
+    try {
+      ch.close();
+    } catch (error) {
+      console.warn("[file-transfer] Failed to close congested channel:", error);
+    }
+    window.dispatchEvent(new CustomEvent("file-transfer-channel-reset-needed"));
+  }
 }
 
 async function sendFileViaNativeHostChannel(file: File) {

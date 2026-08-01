@@ -16,7 +16,7 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessa
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 const FILE_TRANSFER_CHUNK_SIZE: usize = 60 * 1024 - FILE_TRANSFER_FRAME_HEADER_BYTES;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-const FILE_TRANSFER_BUFFER_HIGH_WATER: usize = 256 * 1024;
+const FILE_TRANSFER_BUFFER_HIGH_WATER: usize = 512 * 1024;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 const FILE_TRANSFER_BUFFER_DRAIN_TIMEOUT_MS: u128 = 30_000;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -1894,6 +1894,18 @@ async fn has_active_file_transfer_channel(state: State<'_, AppState>) -> Result<
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
+async fn cancel_active_file_transfer(state: State<'_, AppState>) -> Result<(), String> {
+    let channel = state.active_file_channel.lock().await.take();
+    if let Some(dc) = channel {
+        dc.close()
+            .await
+            .map_err(|e| format!("無法關閉檔案傳輸通道: {}", e))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[tauri::command]
 async fn pick_transfer_files() -> Result<Vec<SelectedTransferFile>, String> {
     let files = rfd::AsyncFileDialog::new()
         .pick_files()
@@ -2317,6 +2329,8 @@ pub fn run() {
             send_custom_signaling_message,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             has_active_file_transfer_channel,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            cancel_active_file_transfer,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             pick_transfer_files,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
