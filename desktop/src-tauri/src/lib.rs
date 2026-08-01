@@ -1112,8 +1112,9 @@ async fn handle_remote_offer_as_host(
                     })
                 }));
             }
+            let receive_download_dir = app.path().download_dir().ok();
             let file_state = Arc::new(tokio::sync::Mutex::new(
-                syn_core::file_transfer::FileTransferState::new(),
+                syn_core::file_transfer::FileTransferState::with_download_dir(receive_download_dir),
             ));
             let app_for_file_events = app.clone();
             let dc_for_file_events = Arc::clone(&d);
@@ -1998,7 +1999,7 @@ async fn send_file_to_client(
         }
     }
 
-    send_file_end(&dc).await?;
+    send_file_end(&dc, &id).await?;
     wait_for_remote_file_complete(&state, &id).await?;
     Ok(())
 }
@@ -2024,7 +2025,7 @@ async fn send_selected_file_to_client(
         transferred += chunk.len() as u64;
     }
 
-    send_file_end(&dc).await?;
+    send_file_end(&dc, &id).await?;
     wait_for_remote_file_complete(&state, &id).await?;
     Ok(())
 }
@@ -2141,8 +2142,11 @@ fn create_file_chunk_frame(offset: u64, chunk: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-async fn send_file_end(dc: &Arc<webrtc::data_channel::RTCDataChannel>) -> Result<(), String> {
-    let end_msg = serde_json::json!({ "action": "end" });
+async fn send_file_end(
+    dc: &Arc<webrtc::data_channel::RTCDataChannel>,
+    id: &str,
+) -> Result<(), String> {
+    let end_msg = serde_json::json!({ "action": "end", "id": id });
     dc.send_text(end_msg.to_string())
         .await
         .map(|_| ())

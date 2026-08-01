@@ -997,6 +997,18 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
   }
 
   if (msg.action === "cancel") {
+    if (msg.id) {
+      cancelledTransferIds.add(msg.id);
+      pendingResumeResolvers.get(msg.id)?.(0);
+      pendingResumeResolvers.delete(msg.id);
+      pendingCompleteResolvers.get(msg.id)?.(null);
+      pendingCompleteResolvers.delete(msg.id);
+    }
+    if (activeSendAbort && (!msg.id || latestTransfer?.id === msg.id)) {
+      activeSendAbort.abort();
+      activeSendAbort = null;
+      activeSendChannel = null;
+    }
     if (activeReceive?.sink) {
       await activeReceive.sink.abort().catch(() => {});
     }
