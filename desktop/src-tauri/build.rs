@@ -1,4 +1,15 @@
 fn main() {
+    let manifest_dir = std::path::PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string()),
+    );
+    let git_dir = manifest_dir.join("../..").join(".git");
+    println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
+    if let Ok(head) = std::fs::read_to_string(git_dir.join("HEAD")) {
+        if let Some(reference) = head.trim().strip_prefix("ref: ") {
+            println!("cargo:rerun-if-changed={}", git_dir.join(reference).display());
+        }
+    }
+
     let git_commit = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()

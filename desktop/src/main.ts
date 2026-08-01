@@ -2426,6 +2426,7 @@ function bindIncomingDataChannel(ch: RTCDataChannel) {
       bindSystemControlChannel(ch);
       break;
     case "file-transfer":
+      recordNegotiatedFileTransferLimit(ch);
       dataChannelFileTransfer = ch;
       bindFileTransferChannel(ch);
       break;
@@ -2440,6 +2441,7 @@ function bindIncomingDataChannel(ch: RTCDataChannel) {
 
 function getOrRecoverFileTransferChannel() {
   if (dataChannelFileTransfer?.readyState === "open") {
+    recordNegotiatedFileTransferLimit(dataChannelFileTransfer);
     return dataChannelFileTransfer;
   }
   if (dataChannelFileTransfer?.readyState === "connecting") {
@@ -2457,10 +2459,18 @@ function getOrRecoverFileTransferChannel() {
   if (!transportAlive || !currentRemoteId || !currentRemotePin) return null;
 
   const channel = pc.createDataChannel("file-transfer", { ordered: true });
+  recordNegotiatedFileTransferLimit(channel);
   dataChannelFileTransfer = channel;
   bindFileTransferChannel(channel);
   scheduleFileTransferRenegotiation();
   return channel;
+}
+
+function recordNegotiatedFileTransferLimit(ch: RTCDataChannel) {
+  const maxMessageSize = peerConnection?.sctp?.maxMessageSize;
+  if (typeof maxMessageSize === "number" && Number.isFinite(maxMessageSize) && maxMessageSize > 0) {
+    (ch as any).__synMaxMessageSize = maxMessageSize;
+  }
 }
 
 function scheduleFileTransferRenegotiation() {

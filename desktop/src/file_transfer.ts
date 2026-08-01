@@ -30,6 +30,7 @@ type ReceiveState = {
   fingerprint: string;
   received: number;
   chunks: BlobPart[];
+  channel: RTCDataChannel;
   sink?: BrowserReceiveSink;
 };
 
@@ -57,17 +58,21 @@ type BrowserSelectedFile = {
 
 type PendingSendFile = NativeSelectedFile | BrowserSelectedFile;
 
-const MIN_CHUNK_SIZE = 64 * 1024;
+const MIN_CHUNK_SIZE = 32 * 1024;
 const MAX_CHUNK_SIZE = 512 * 1024;
 const DESKTOP_CHUNK_SIZE = 256 * 1024;
 const BUFFER_HIGH_WATER = 16 * 1024 * 1024;
 const BUFFER_LOW_WATER = 4 * 1024 * 1024;
+const MOBILE_BUFFER_HIGH_WATER = 1024 * 1024;
+const MOBILE_BUFFER_LOW_WATER = 256 * 1024;
 const TRANSFER_UI_INTERVAL_MS = 120;
 const CHUNK_GROW_AFTER = 16;
 const FRAME_HEADER_BYTES = 16;
+const FALLBACK_MAX_MESSAGE_SIZE = 60 * 1024;
 const FRAME_MAGIC = 0x3253594e; // "2SYN"
 
 let activeSendAbort: AbortController | null = null;
+let activeSendChannel: RTCDataChannel | null = null;
 let activeReceive: ReceiveState | null = null;
 let latestTransfer: TransferUiState | null = null;
 let nativeReceiveListenerInstalled = false;
@@ -78,6 +83,7 @@ const pendingSendFiles: PendingSendFile[] = [];
 const partialReceives = new Map<string, ReceiveState>();
 const pendingResumeResolvers = new Map<string, (offset: number) => void>();
 const pendingCompleteResolvers = new Map<string, (message: TransferMessage | null) => void>();
+const remoteProgressOffsets = new Map<string, number>();
 const transferStartedAt = new Map<string, number>();
 const cancelledTransferIds = new Set<string>();
 let transferHideTimer: number | null = null;
@@ -86,24 +92,27 @@ let channelWaitAbort: AbortController | null = null;
 
 export function bindFileTransferChannel(ch: RTCDataChannel) {
   ch.binaryType = "arraybuffer";
-  ch.bufferedAmountLowThreshold = BUFFER_LOW_WATER;
+  ch.bufferedAmountLowThreshold = channelBufferLowWater();
   ch.onopen = () => {
     console.log("[file-transfer] DataChannel opened");
-    if (!activeTransferRunning) updateTransferUi(null);
   };
   ch.onclose = () => {
     console.log("[file-transfer] DataChannel closed");
-    activeSendAbort?.abort();
-    activeSendAbort = null;
+    const interruptedSend = activeSendChannel === ch;
+    if (interruptedSend) {
+      activeSendAbort?.abort();
+      activeSendAbort = null;
+      activeSendChannel = null;
+    }
     const currentTransfer = latestTransfer;
-    const interruptedReceive = !!activeReceive && activeReceive.received < activeReceive.size;
-    if (activeReceive?.sink) {
+    const interruptedReceive = activeReceive?.channel === ch && activeReceive.received < activeReceive.size;
+    if (interruptedReceive && activeReceive?.sink) {
       void activeReceive.sink.abort().catch(() => {});
-    } else if (activeReceive && activeReceive.received < activeReceive.size) {
+    } else if (interruptedReceive && activeReceive) {
       rememberPartialReceive(activeReceive);
     }
-    activeReceive = null;
-    if (currentTransfer && (isActiveTransferStatus(currentTransfer.status) || interruptedReceive)) {
+    if (activeReceive?.channel === ch) activeReceive = null;
+    if (currentTransfer && ((interruptedSend && isActiveTransferStatus(currentTransfer.status)) || interruptedReceive)) {
       updateTransferUi({
         ...currentTransfer,
         status: "failed",
@@ -113,7 +122,7 @@ export function bindFileTransferChannel(ch: RTCDataChannel) {
   };
   ch.onerror = (event) => {
     console.warn("[file-transfer] DataChannel error:", event);
-    if (latestTransfer && isActiveTransferStatus(latestTransfer.status)) {
+    if (activeSendChannel === ch && latestTransfer && isActiveTransferStatus(latestTransfer.status)) {
       updateTransferUi({ ...latestTransfer, status: "failed" });
     }
   };
@@ -275,7 +284,7 @@ function bindQueueActions(getChannel: () => RTCDataChannel | null) {
           return;
         }
         transferStartedAt.delete(waitingId);
-        const sent = await sendFiles(files, channel);
+        const sent = await sendFiles(files, channel, getChannel, waitController.signal);
         if (sent) clearPendingFiles();
       } finally {
         if (channelWaitAbort === waitController) channelWaitAbort = null;
@@ -419,6 +428,7 @@ export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
   channelWaitAbort = null;
   activeSendAbort?.abort();
   activeSendAbort = null;
+  activeSendChannel = null;
   if (latestTransfer?.id) {
     cancelledTransferIds.add(latestTransfer.id);
     pendingCompleteResolvers.get(latestTransfer.id)?.(null);
@@ -451,16 +461,40 @@ async function waitForOpenTransferChannel(
   return null;
 }
 
-async function sendFiles(files: PendingSendFile[], ch: RTCDataChannel | null) {
+async function sendFiles(
+  files: PendingSendFile[],
+  ch: RTCDataChannel | null,
+  getChannel?: () => RTCDataChannel | null,
+  signal?: AbortSignal,
+) {
   if (ch?.readyState === "open") {
     activeTransferRunning = true;
     try {
+      let channel = ch;
       for (const pending of files) {
         if (pending.kind !== "browser") {
           showTransferNotice(transferText("file_transfer_browser_required", "This connection requires browser-selected files."));
           return false;
         }
-        const sent = await sendFile(pending.file, ch);
+        let sent = false;
+        for (let attempt = 0; attempt < 3 && !sent; attempt++) {
+          sent = await sendFile(pending.file, channel);
+          if (sent) break;
+          if (!getChannel || signal?.aborted || attempt >= 2) return false;
+
+          updateTransferUi({
+            id: `reconnect-${Date.now()}`,
+            name: pending.name,
+            direction: "send",
+            transferred: 0,
+            total: pending.size,
+            status: "preparing",
+            detail: transferText("file_transfer_waiting_receiver", "Waiting for receiver..."),
+          });
+          const recovered = await waitForOpenTransferChannel(getChannel, signal || new AbortController().signal);
+          if (!recovered || signal?.aborted) return false;
+          channel = recovered;
+        }
         if (!sent) return false;
         removePendingFile(pending);
       }
@@ -533,6 +567,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
   const fingerprint = fileFingerprint(file);
   const abort = new AbortController();
   activeSendAbort = abort;
+  activeSendChannel = ch;
   updateTransferUi({
     id,
     name: file.name,
@@ -553,7 +588,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
       status: "failed",
       detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
     });
-    activeSendAbort = null;
+    clearActiveSend(ch);
     return false;
   }
 
@@ -568,6 +603,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
   });
   let offset = await waitForResumeOffset(id, abort.signal);
   offset = Math.min(Math.max(offset, 0), file.size);
+  remoteProgressOffsets.set(id, offset);
   updateTransferUi({
     id,
     name: file.name,
@@ -578,7 +614,10 @@ async function sendFile(file: File, ch: RTCDataChannel) {
     detail: offset > 0 ? transferText("file_transfer_resuming", "Resuming transfer") : undefined,
   });
   let lastUiUpdateAt = 0;
-  let chunkSize = initialChunkSize();
+  const maxChunkSize = maximumChunkPayload(ch);
+  let chunkSize = Math.min(initialChunkSize(), maxChunkSize);
+  const bufferHighWater = channelBufferHighWater();
+  const bufferLowWater = channelBufferLowWater();
   let smoothChunks = 0;
   while (offset < file.size) {
     if (abort.signal.aborted) {
@@ -589,12 +628,12 @@ async function sendFile(file: File, ch: RTCDataChannel) {
     const chunkOffset = offset;
     const chunk = await file.slice(chunkOffset, chunkOffset + chunkSize).arrayBuffer();
     if (ch.readyState !== "open") {
-      activeSendAbort = null;
+      clearActiveSend(ch);
       updateTransferUi({
         id,
         name: file.name,
         direction: "send",
-        transferred: offset,
+        transferred: confirmedTransferOffset(id, file.size),
         total: file.size,
         status: "failed",
         detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
@@ -605,12 +644,12 @@ async function sendFile(file: File, ch: RTCDataChannel) {
       ch.send(createChunkFrame(chunkOffset, chunk));
     } catch (error) {
       console.warn("[file-transfer] Failed to send file chunk:", error);
-      activeSendAbort = null;
+      clearActiveSend(ch);
       updateTransferUi({
         id,
         name: file.name,
         direction: "send",
-        transferred: offset,
+        transferred: confirmedTransferOffset(id, file.size),
         total: file.size,
         status: "failed",
         detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
@@ -626,63 +665,67 @@ async function sendFile(file: File, ch: RTCDataChannel) {
         id,
         name: file.name,
         direction: "send",
-        transferred: offset,
+        transferred: confirmedTransferOffset(id, file.size),
         total: file.size,
         status: "transferring",
+        detail: transferText("file_transfer_buffered", "{0} queued for network delivery")
+          .replace("{0}", formatBytes(Math.max(0, offset - confirmedTransferOffset(id, file.size)))),
       });
     }
 
-    if (ch.bufferedAmount > BUFFER_HIGH_WATER) {
+    if (ch.bufferedAmount > bufferHighWater) {
       chunkSize = Math.max(MIN_CHUNK_SIZE, Math.floor(chunkSize / 2));
       smoothChunks = 0;
       updateTransferUi({
         id,
         name: file.name,
         direction: "send",
-        transferred: offset,
+        transferred: confirmedTransferOffset(id, file.size),
         total: file.size,
         status: "transferring",
         detail: transferText("file_transfer_waiting_network", "Waiting for the transfer buffer to drain..."),
       });
-      const writable = await waitForBufferedAmount(ch, BUFFER_LOW_WATER, abort.signal, (buffered) => {
+      const writable = await waitForBufferedAmount(ch, bufferLowWater, abort.signal, (buffered) => {
         updateTransferUi({
           id,
           name: file.name,
           direction: "send",
-          transferred: offset,
+          transferred: confirmedTransferOffset(id, file.size),
           total: file.size,
           status: "transferring",
           detail: transferText("file_transfer_buffered", "{0} queued for network delivery").replace("{0}", formatBytes(buffered)),
         });
       });
       if (!writable) {
-        sendControlMessage(ch, { action: "cancel", id });
-        activeSendAbort = null;
+        if (cancelledTransferIds.has(id)) {
+          sendControlMessage(ch, { action: "cancel", id });
+        }
+        clearActiveSend(ch);
         if (abort.signal.aborted || cancelledTransferIds.has(id)) return false;
         updateTransferUi({
           id,
           name: file.name,
           direction: "send",
-          transferred: offset,
+          transferred: confirmedTransferOffset(id, file.size),
           total: file.size,
           status: "failed",
           detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
         });
         return false;
       }
-    } else if (smoothChunks >= CHUNK_GROW_AFTER && chunkSize < MAX_CHUNK_SIZE) {
-      chunkSize = Math.min(MAX_CHUNK_SIZE, chunkSize * 2);
+    } else if (smoothChunks >= CHUNK_GROW_AFTER && chunkSize < maxChunkSize) {
+      chunkSize = Math.min(maxChunkSize, chunkSize * 2);
       smoothChunks = 0;
     }
   }
 
   if (!sendControlMessage(ch, { action: "end", id })) {
-    activeSendAbort = null;
+    clearActiveSend(ch);
     updateTransferUi({
       id,
       name: file.name,
       direction: "send",
-      transferred: offset,
+      transferred: confirmedTransferOffset(id, file.size),
       total: file.size,
       status: "failed",
       detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
@@ -693,13 +736,13 @@ async function sendFile(file: File, ch: RTCDataChannel) {
     id,
     name: file.name,
     direction: "send",
-    transferred: file.size,
+    transferred: confirmedTransferOffset(id, file.size),
     total: file.size,
     status: "transferring",
     detail: transferText("file_transfer_waiting_remote_save", "Waiting for remote save..."),
   });
   const complete = await waitForRemoteComplete(id, abort.signal);
-  activeSendAbort = null;
+  clearActiveSend(ch);
   if (!complete) {
     if (abort.signal.aborted) {
       if (cancelledTransferIds.has(id)) return false;
@@ -707,7 +750,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
         id,
         name: file.name,
         direction: "send",
-        transferred: file.size,
+        transferred: confirmedTransferOffset(id, file.size),
         total: file.size,
         status: "cancelled",
       });
@@ -717,7 +760,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
       id,
       name: file.name,
       direction: "send",
-      transferred: file.size,
+      transferred: confirmedTransferOffset(id, file.size),
       total: file.size,
       status: "failed",
       detail: transferText("file_transfer_remote_save_timeout", "Remote save was not confirmed. Please check the receiver."),
@@ -735,8 +778,19 @@ async function sendFile(file: File, ch: RTCDataChannel) {
     status: "complete",
     detail: completePath || transferText("file_transfer_remote_saved", "Remote saved the file"),
   });
+  remoteProgressOffsets.delete(id);
   console.log(`[file-transfer] Finished sending file: ${file.name}`);
   return true;
+}
+
+function clearActiveSend(ch: RTCDataChannel) {
+  if (activeSendChannel !== ch) return;
+  activeSendAbort = null;
+  activeSendChannel = null;
+}
+
+function confirmedTransferOffset(id: string, total: number) {
+  return Math.min(Math.max(remoteProgressOffsets.get(id) || 0, 0), total);
 }
 
 async function sendFileViaNativeHostChannel(file: File) {
@@ -861,6 +915,7 @@ async function handleIncomingMessage(data: unknown, ch: RTCDataChannel) {
 async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
   if (msg.action === "resume") {
     if (msg.id) {
+      remoteProgressOffsets.set(msg.id, Math.max(msg.offset || 0, 0));
       pendingResumeResolvers.get(msg.id)?.(msg.offset || 0);
       pendingResumeResolvers.delete(msg.id);
     }
@@ -869,6 +924,7 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
 
   if (msg.action === "progress") {
     const received = Math.min(Math.max(msg.received || 0, 0), msg.size || 0);
+    if (msg.id) remoteProgressOffsets.set(msg.id, received);
     updateTransferUi({
       id: msg.id || latestTransfer?.id || `remote-progress-${Date.now()}`,
       name: sanitizeFileName(msg.name || latestTransfer?.name || "transfer"),
@@ -895,6 +951,7 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
       status: "complete",
       detail: msg.path || transferText("file_transfer_remote_saved", "Remote saved the file"),
     });
+    if (msg.id) remoteProgressOffsets.delete(msg.id);
     return;
   }
 
@@ -909,6 +966,7 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
       fingerprint,
       received: partial?.size === msg.size ? partial.received : 0,
       chunks: partial?.size === msg.size ? partial.chunks : [],
+      channel: ch,
       sink,
     };
     ch.send(JSON.stringify({ action: "resume", id: activeReceive.id, offset: activeReceive.received }));
@@ -1135,6 +1193,25 @@ function initialChunkSize() {
   return isMobileRuntime() ? MIN_CHUNK_SIZE : DESKTOP_CHUNK_SIZE;
 }
 
+function maximumChunkPayload(ch: RTCDataChannel) {
+  const reported = Number((ch as any).__synMaxMessageSize || 0);
+  const negotiatedMax = Number.isFinite(reported) && reported > FRAME_HEADER_BYTES
+    ? Math.min(reported, MAX_CHUNK_SIZE + FRAME_HEADER_BYTES)
+    : FALLBACK_MAX_MESSAGE_SIZE;
+  const maxMessageSize = isMobileRuntime()
+    ? Math.min(negotiatedMax, FALLBACK_MAX_MESSAGE_SIZE)
+    : negotiatedMax;
+  return Math.max(MIN_CHUNK_SIZE, maxMessageSize - FRAME_HEADER_BYTES);
+}
+
+function channelBufferHighWater() {
+  return isMobileRuntime() ? MOBILE_BUFFER_HIGH_WATER : BUFFER_HIGH_WATER;
+}
+
+function channelBufferLowWater() {
+  return isMobileRuntime() ? MOBILE_BUFFER_LOW_WATER : BUFFER_LOW_WATER;
+}
+
 function updateTransferUi(state: TransferUiState | null) {
   if (transferHideTimer !== null) {
     window.clearTimeout(transferHideTimer);
@@ -1339,8 +1416,12 @@ function showTransferNotice(message: string) {
   const progressContainers = Array.from(document.querySelectorAll<HTMLElement>("[data-transfer-progress]"));
   progressContainers.forEach((container) => {
     const filenameEl = container.querySelector<HTMLElement>("[data-transfer-filename]");
+    const pctEl = container.querySelector<HTMLElement>("[data-transfer-pct]");
+    const barEl = container.querySelector<HTMLElement>("[data-transfer-bar]");
     const detailEl = container.querySelector<HTMLElement>("[data-transfer-detail]");
     if (filenameEl) filenameEl.textContent = message;
+    if (pctEl) pctEl.textContent = "0%";
+    if (barEl) barEl.style.width = "0%";
     if (detailEl) detailEl.style.display = "none";
     container.style.display = "flex";
   });

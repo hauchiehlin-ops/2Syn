@@ -1,6 +1,6 @@
 [package]
 name = "syn-desktop"
-version = "5.2.4"
+version = "5.2.6"
 edition = "2021"
 default-run = "syn-desktop"
 
