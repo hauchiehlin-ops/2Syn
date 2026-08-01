@@ -450,6 +450,7 @@ let isHostMode: boolean = false; // 標記目前是否為被控端
 let rustOfferProcessed: boolean = false; // 標記 Rust 是否已經處理完 Offer
 let remoteLogsTimeout: ReturnType<typeof setTimeout> | null = null; // 遠端日誌索取逾時計時器
 let connectionTimeoutTimer: ReturnType<typeof setTimeout> | null = null; // 連線逾時計時器
+let deferredRtcFailedTimer: ReturnType<typeof setTimeout> | null = null;
 let activeSyncStatefulLabels: (() => void) | null = null; // 動態語意狀態標籤同步回調
 let dataChannelControl: RTCDataChannel | null = null;
 let dataChannelUnreliable: RTCDataChannel | null = null;
@@ -741,8 +742,10 @@ const fallbackTranslations: Record<string, string> = {
   "tools_title": "Advanced Tools",
   "file_transfer_title": "File Transfer",
   "drop_zone_title": "Send files",
-  "drop_zone": "Drop files here or choose files",
-  "btn_pick_transfer_files": "Choose Files",
+  "drop_zone": "Drop files here or choose local files",
+  "btn_pick_transfer_files": "Choose Local Files",
+  "file_transfer_pick_local": "Local Files",
+  "file_transfer_pick_local_title": "Choose files from this device to send to the remote host",
   "btn_cancel_transfer": "Cancel Transfer",
   "file_transfer_float": "Files",
   "file_transfer_not_connected": "Connect to a device first",
@@ -752,6 +755,11 @@ const fallbackTranslations: Record<string, string> = {
   "file_transfer_browser_download": "Saved by this device's download flow",
   "file_transfer_drop_overlay": "Release to send files",
   "file_transfer_failed": "Transfer failed",
+  "file_transfer_queue_empty": "No files selected",
+  "file_transfer_queue_count": "{0} file(s) selected",
+  "file_transfer_queue_more": "+ {0} more",
+  "file_transfer_send_selected": "Transfer",
+  "file_transfer_clear_selected": "Clear",
   "log_title": "System Logs",
   "err_rtc_failed": "P2P connection failed. The local and remote devices might be behind a strict symmetric NAT or firewall and cannot punch through. Please click \"🚀 Enable Relay Mode\" to establish connection.",
   "err_target_offline": "The remote device is offline. Please make sure the device ID is correct.",
@@ -1204,9 +1212,10 @@ function updateDomTranslations() {
     if (btnFileTransferFloat) btnFileTransferFloat.textContent = "📁 " + t("file_transfer_float");
     const btnFileTransferDirect = document.getElementById("btn-file-transfer-direct");
     if (btnFileTransferDirect) {
-      btnFileTransferDirect.setAttribute("title", t("file_transfer_float"));
-      btnFileTransferDirect.setAttribute("aria-label", t("file_transfer_float"));
+      btnFileTransferDirect.setAttribute("title", t("file_transfer_pick_local_title"));
+      btnFileTransferDirect.setAttribute("aria-label", t("file_transfer_pick_local_title"));
     }
+    setTextContent("txt-btn-file-transfer-direct", t("file_transfer_pick_local"));
     
     const btnTouchMode = document.getElementById("btn-touch-mode");
     if (btnTouchMode) btnTouchMode.textContent = "🖱️ " + t("ui_trackpad_mode");
@@ -2822,12 +2831,33 @@ function updateConnectionStatusUI(state: string) {
       videoContainer.style.transition = "filter 0.5s ease";
     }
   } else if (state === "connected") {
+    if (deferredRtcFailedTimer) {
+      clearTimeout(deferredRtcFailedTimer);
+      deferredRtcFailedTimer = null;
+    }
     if (videoContainer) {
       videoContainer.style.filter = "none";
     }
   }
 
   if (state === "failed") {
+    const pickerActive = Boolean((window as any).__fileTransferPickerActive);
+    if (pickerActive) {
+      if (deferredRtcFailedTimer) clearTimeout(deferredRtcFailedTimer);
+      deferredRtcFailedTimer = setTimeout(() => {
+        deferredRtcFailedTimer = null;
+        const currentState = peerConnection?.connectionState;
+        const currentIceState = peerConnection?.iceConnectionState;
+        if (currentState === "failed" || currentIceState === "failed") {
+          updateConnectionStatusUI("failed");
+        }
+      }, 5000);
+      return;
+    }
+    if (deferredRtcFailedTimer) {
+      clearTimeout(deferredRtcFailedTimer);
+      deferredRtcFailedTimer = null;
+    }
     alert(t("err_rtc_failed"));
     const fixBtn = document.getElementById("btn-fix-network");
     if (fixBtn && fixBtn.style.display !== "none") {
@@ -3898,9 +3928,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     }
     const btnFileTransferDirect = document.getElementById("btn-file-transfer-direct");
     if (btnFileTransferDirect) {
-      btnFileTransferDirect.setAttribute("title", t("file_transfer_float"));
-      btnFileTransferDirect.setAttribute("aria-label", t("file_transfer_float"));
+      btnFileTransferDirect.setAttribute("title", t("file_transfer_pick_local_title"));
+      btnFileTransferDirect.setAttribute("aria-label", t("file_transfer_pick_local_title"));
     }
+    setTextContent("txt-btn-file-transfer-direct", t("file_transfer_pick_local"));
     const btnSendKeys = document.getElementById("btn-send-keys");
     if (btnSendKeys) {
       btnSendKeys.textContent = "⌨️ " + t("ui_shortcuts");

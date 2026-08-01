@@ -38,6 +38,8 @@ let activeSendAbort: AbortController | null = null;
 let activeReceive: ReceiveState | null = null;
 let latestTransfer: TransferUiState | null = null;
 let nativeReceiveListenerInstalled = false;
+let activeQueueSending = false;
+const pendingSendFiles: File[] = [];
 const partialReceives = new Map<string, ReceiveState>();
 const pendingResumeResolvers = new Map<string, (offset: number) => void>();
 
@@ -81,8 +83,10 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
   const fileInput = document.createElement("input");
   fileInput.type = "file";
   fileInput.multiple = true;
+  fileInput.accept = "*/*";
   fileInput.style.display = "none";
   document.body.appendChild(fileInput);
+  bindQueueActions(getChannel);
 
   const showZone = () => {
     dropZone?.classList.add("file-drop-zone-active");
@@ -109,6 +113,7 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
       showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
       return;
     }
+    setFilePickerActive(true);
     fileInput.click();
   };
 
@@ -127,9 +132,13 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
 
   fileInput.addEventListener("change", async () => {
     if (fileInput.files) {
-      await sendFiles(Array.from(fileInput.files), getOpenChannel(false));
+      addPendingFiles(Array.from(fileInput.files));
     }
     fileInput.value = "";
+    window.setTimeout(() => setFilePickerActive(false), 1200);
+  });
+  window.addEventListener("focus", () => {
+    window.setTimeout(() => setFilePickerActive(false), 1200);
   });
 
   let dragCounter = 0;
@@ -159,7 +168,100 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
 
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
-    await sendFiles(Array.from(files), getOpenChannel(false));
+    addPendingFiles(Array.from(files));
+  });
+}
+
+function bindQueueActions(getChannel: () => RTCDataChannel | null) {
+  document.querySelectorAll<HTMLButtonElement>("[data-transfer-queue-send]").forEach((button) => {
+    if (button.dataset.bound === "true") return;
+    button.dataset.bound = "true";
+    button.addEventListener("click", async () => {
+      if (activeQueueSending || pendingSendFiles.length === 0) return;
+      activeQueueSending = true;
+      updateQueueUi();
+      const files = [...pendingSendFiles];
+      try {
+        const sent = await sendFiles(files, getChannel());
+        if (sent) clearPendingFiles();
+      } finally {
+        activeQueueSending = false;
+        updateQueueUi();
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-transfer-queue-clear]").forEach((button) => {
+    if (button.dataset.bound === "true") return;
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => {
+      if (activeQueueSending) return;
+      clearPendingFiles();
+    });
+  });
+}
+
+function addPendingFiles(files: File[]) {
+  const existing = new Set(pendingSendFiles.map(fileQueueKey));
+  files.forEach((file) => {
+    const key = fileQueueKey(file);
+    if (!existing.has(key)) {
+      pendingSendFiles.push(file);
+      existing.add(key);
+    }
+  });
+  updateQueueUi();
+}
+
+function clearPendingFiles() {
+  pendingSendFiles.length = 0;
+  updateQueueUi();
+}
+
+function updateQueueUi() {
+  const queues = Array.from(document.querySelectorAll<HTMLElement>("[data-transfer-queue]"));
+  const totalSize = pendingSendFiles.reduce((sum, file) => sum + file.size, 0);
+  const title = pendingSendFiles.length === 0
+    ? transferText("file_transfer_queue_empty", "No files selected")
+    : transferText("file_transfer_queue_count", "{0} file(s) selected").replace("{0}", String(pendingSendFiles.length));
+
+  queues.forEach((queue) => {
+    queue.style.display = pendingSendFiles.length > 0 ? "flex" : "none";
+    const titleEl = queue.querySelector<HTMLElement>("[data-transfer-queue-title]");
+    const sizeEl = queue.querySelector<HTMLElement>("[data-transfer-queue-size]");
+    const listEl = queue.querySelector<HTMLElement>("[data-transfer-queue-list]");
+    const sendButton = queue.querySelector<HTMLButtonElement>("[data-transfer-queue-send]");
+    const clearButton = queue.querySelector<HTMLButtonElement>("[data-transfer-queue-clear]");
+
+    if (titleEl) titleEl.textContent = title;
+    if (sizeEl) sizeEl.textContent = formatBytes(totalSize);
+    if (listEl) {
+      listEl.textContent = "";
+      pendingSendFiles.slice(0, 6).forEach((file) => {
+        const item = document.createElement("li");
+        const name = document.createElement("span");
+        const size = document.createElement("span");
+        name.textContent = file.name;
+        size.textContent = formatBytes(file.size);
+        item.append(name, size);
+        listEl.appendChild(item);
+      });
+      if (pendingSendFiles.length > 6) {
+        const item = document.createElement("li");
+        item.textContent = transferText("file_transfer_queue_more", "+ {0} more").replace("{0}", String(pendingSendFiles.length - 6));
+        listEl.appendChild(item);
+      }
+    }
+    if (sendButton) {
+      sendButton.textContent = activeQueueSending
+        ? transferText("file_transfer_sending", "Sending")
+        : transferText("file_transfer_send_selected", "Transfer");
+      sendButton.disabled = activeQueueSending || pendingSendFiles.length === 0;
+    }
+    if (clearButton) {
+      clearButton.textContent = transferText("file_transfer_clear_selected", "Clear");
+      clearButton.disabled = activeQueueSending;
+    }
   });
 }
 
@@ -197,24 +299,35 @@ export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
 async function sendFiles(files: File[], ch: RTCDataChannel | null) {
   if (ch?.readyState === "open") {
     for (const file of files) {
-      await sendFile(file, ch);
+      const sent = await sendFile(file, ch);
+      if (!sent) return false;
     }
-    return;
+    return true;
   }
 
   if (isDesktopTauri()) {
     if (!(await hasNativeHostFileChannel())) {
       showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
-      return;
+      return false;
     }
 
     for (const file of files) {
-      await sendFileViaNativeHostChannel(file);
+      const sent = await sendFileViaNativeHostChannel(file);
+      if (!sent) return false;
     }
-    return;
+    return true;
   }
 
   showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
+  return false;
+}
+
+function setFilePickerActive(active: boolean) {
+  (window as any).__fileTransferPickerActive = active;
+}
+
+function fileQueueKey(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified || 0}`;
 }
 
 async function sendFile(file: File, ch: RTCDataChannel) {
@@ -239,7 +352,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
   while (offset < file.size) {
     if (abort.signal.aborted) {
       ch.send(JSON.stringify({ action: "cancel", id }));
-      return;
+      return false;
     }
 
     const chunk = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
@@ -270,6 +383,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
     status: "complete",
   });
   console.log(`[file-transfer] Finished sending file: ${file.name}`);
+  return true;
 }
 
 async function sendFileViaNativeHostChannel(file: File) {
@@ -302,6 +416,7 @@ async function sendFileViaNativeHostChannel(file: File) {
       total: file.size,
       status: "complete",
     });
+    return true;
   } catch (error) {
     console.warn("[file-transfer] Native host send failed:", error);
     updateTransferUi({
@@ -313,6 +428,7 @@ async function sendFileViaNativeHostChannel(file: File) {
       status: "failed",
       detail: `${transferText("file_transfer_failed", "Transfer failed")}: ${String(error)}`,
     });
+    return false;
   }
 }
 
@@ -571,4 +687,16 @@ function transferText(key: string, fallback: string) {
   const translate = (window as any).t as ((key: string) => string) | undefined;
   const value = translate?.(key);
   return value && value !== key ? value : fallback;
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }

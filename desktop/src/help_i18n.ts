@@ -715,7 +715,9 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
         <h3>檔案傳輸與接收位置</h3>
         <ul>
           <li>client 連到遠端後，可直接在遠端畫面點常駐「檔案」按鈕選檔，或把檔案拖進遠端畫面送到 host，不需要離開遠端操作畫面。</li>
+          <li>選擇單一或多個檔案後會先顯示待傳清單與總大小；確認後按「傳輸」才會開始送出。</li>
           <li>host 端已有 client 連線時，主畫面的「檔案傳輸」區會使用目前活躍連線把檔案送到 client，不會要求重新連線。</li>
+          <li>桌面原生版會開啟本機磁碟檔案選擇器；Web/iOS/Android 由系統或瀏覽器提供檔案來源，但 2syn 不會把來源限制成雲端硬碟。</li>
           <li>檔案會透過目前 WebRTC 連線直接傳到另一端，不經伺服器、不寫入後端資料庫。</li>
           <li>不限制檔案格式，也沒有硬編碼的檔案數量上限；多檔依序傳送。檔案大小實際受裝置記憶體、瀏覽器/系統檔案 API、DataChannel 穩定度與接收端磁碟空間限制。</li>
           <li>中斷後重新選擇同一檔案會協商已收到的 offset 並續傳；桌面原生接收端會以 .part 暫存檔保存進度，Web/iOS/Android 可在同一工作階段仍保留暫存資料時續傳。</li>
@@ -749,7 +751,9 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
         <h3>文件传输与接收位置</h3>
         <ul>
           <li>client 连接到远程后，可直接在远程画面点击常驻“文件”按钮选文件，或把文件拖进远程画面发送到 host，不需要离开远程操作画面。</li>
+          <li>选择单个或多个文件后会先显示待传清单与总大小；确认后点击“传输”才会开始发送。</li>
           <li>host 端已有 client 连接时，主画面的“文件传输”区域会使用当前活动连接把文件发回 client，不会要求重新连接。</li>
+          <li>桌面原生版会打开本机磁盘文件选择器；Web/iOS/Android 由系统或浏览器提供文件来源，但 2syn 不会把来源限制成云端硬盘。</li>
           <li>文件会通过当前 WebRTC 连接直接传到另一端，不经过服务器，也不写入后端数据库。</li>
           <li>不限制文件格式，也没有硬编码的文件数量上限；多文件依次传送。文件大小实际受设备内存、浏览器/系统文件 API、DataChannel 稳定度与接收端磁盘空间限制。</li>
           <li>中断后重新选择同一文件会协商已收到的 offset 并续传；桌面原生接收端会以 .part 临时文件保存进度，Web/iOS/Android 可在同一工作阶段仍保留临时数据时续传。</li>
@@ -783,7 +787,9 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
         <h3>File Transfer &amp; Receive Location</h3>
         <ul>
           <li>After a client connects, use the always-visible Files button in the remote screen or drop files onto the remote screen to send them to the host without leaving the session.</li>
+          <li>After one or more files are selected, 2syn shows a pending transfer list and total size; transfer starts only after pressing Transfer.</li>
           <li>When a desktop host already has a connected client, the host app's File Transfer area uses the active session to send files back to the client and does not require a new connection.</li>
+          <li>Desktop apps open the local disk file picker. Web, iOS, and Android use the system or browser file source picker, but 2syn does not limit the picker to cloud drives.</li>
           <li>Files move directly through the active WebRTC session. They do not pass through a 2syn file server and are not written to a backend database.</li>
           <li>File formats are not restricted, and there is no hard-coded file count limit; multiple files are sent sequentially. Practical size limits depend on device memory, browser/system file APIs, DataChannel stability, and receiver disk space.</li>
           <li>If a transfer is interrupted, selecting the same file again negotiates the received offset and resumes from there. Desktop receivers persist progress in .part files; Web/iOS/Android can resume while the same app or page session still retains temporary transfer data.</li>

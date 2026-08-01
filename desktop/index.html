@@ -7,7 +7,7 @@
   <meta name="description" content="2syn_Duel — Secure WebRTC remote desktop with end-to-end encryption.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>2syn_Duel v5.1.0</title>
+  <title>2syn_Duel v5.1.1</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
@@ -20,7 +20,10 @@
     <!-- 連線工具列（可收合）：把 模式 / 顯示大小 / 登出 整併成單一面板，預設只露出把手 -->
     <div id="session-toolbar" style="display: none; position: absolute; top: max(env(safe-area-inset-top), 50px); right: 16px; z-index: 1100; flex-direction: column; align-items: flex-end; gap: 8px; touch-action: manipulation;">
       <button id="btn-toolbar-toggle" aria-label="Toolbar" style="width: 44px; height: 44px; border-radius: 22px; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.18); color: white; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.35); transition: all 0.2s;">⚙️</button>
-      <button id="btn-file-transfer-direct" class="session-file-direct" type="button" aria-label="Files" title="Files">📁</button>
+      <button id="btn-file-transfer-direct" class="session-file-direct" type="button" aria-label="Choose local files" title="Choose local files">
+        <span aria-hidden="true">📁</span>
+        <span id="txt-btn-file-transfer-direct">Local Files</span>
+      </button>
       <div id="toolbar-actions" style="display: none; flex-direction: column; align-items: flex-end; gap: 8px;">
         <button id="btn-touch-mode-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">🖱️ Trackpad</button>
         <button id="btn-toggle-keyboard-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">⌨️ Keyboard</button>
@@ -41,6 +44,17 @@
       <button class="btn-secondary" type="button" data-transfer-cancel>
         <span data-transfer-cancel-label>Cancel Transfer</span>
       </button>
+    </div>
+    <div id="session-file-transfer-queue" class="file-transfer-queue session-file-transfer-queue" data-transfer-queue style="display: none;">
+      <div class="file-transfer-queue-header">
+        <span data-transfer-queue-title>No files selected</span>
+        <span data-transfer-queue-size>0 B</span>
+      </div>
+      <ul class="file-transfer-queue-list" data-transfer-queue-list></ul>
+      <div class="file-transfer-queue-actions">
+        <button class="btn-secondary" type="button" data-transfer-queue-clear>Clear</button>
+        <button class="btn-primary" type="button" data-transfer-queue-send>Transfer</button>
+      </div>
     </div>
     <div id="file-drop-overlay" aria-hidden="true">
       <div id="txt-file-drop-overlay">Release to send files</div>
@@ -231,12 +245,23 @@
               <span class="file-drop-icon">📁</span>
               <span class="file-drop-copy">
                 <strong id="txt-drop-zone-title">Send files</strong>
-                <span id="txt-drop-zone">Drop files here or choose files</span>
+                <span id="txt-drop-zone">Drop files here or choose local files</span>
               </span>
             </div>
             <button id="btn-pick-transfer-files" class="btn-secondary file-picker-button" type="button">
-              <span id="txt-btn-pick-transfer-files">Choose Files</span>
+              <span id="txt-btn-pick-transfer-files">Choose Local Files</span>
             </button>
+            <div id="file-transfer-queue" class="file-transfer-queue" data-transfer-queue style="display: none;">
+              <div class="file-transfer-queue-header">
+                <span data-transfer-queue-title>No files selected</span>
+                <span data-transfer-queue-size>0 B</span>
+              </div>
+              <ul class="file-transfer-queue-list" data-transfer-queue-list></ul>
+              <div class="file-transfer-queue-actions">
+                <button class="btn-secondary" type="button" data-transfer-queue-clear>Clear</button>
+                <button class="btn-primary" type="button" data-transfer-queue-send>Transfer</button>
+              </div>
+            </div>
             <div id="transfer-progress-container" class="transfer-progress-container" data-transfer-progress style="display: none;">
               <div class="transfer-progress-header">
                 <span id="transfer-filename" data-transfer-filename>--</span>
