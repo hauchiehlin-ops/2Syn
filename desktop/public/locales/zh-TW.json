@@ -430,5 +430,10 @@
   "file_transfer_remote_saved": "遠端已保存檔案",
   "file_transfer_remote_save_timeout": "尚未收到遠端保存確認，請檢查接收端。",
   "file_transfer_browser_required": "此連線需要使用瀏覽器選檔。",
-  "file_transfer_native_streaming": "正在從磁碟串流傳送..."
+  "file_transfer_native_streaming": "正在從磁碟串流傳送...",
+  "file_transfer_channel_closed": "檔案傳輸通道已關閉，請重新連線後再試。",
+  "file_transfer_already_running": "已有檔案正在傳輸中。",
+  "file_transfer_waiting_network": "等待傳輸緩衝區送出中...",
+  "file_transfer_buffered": "仍有 {0} 在網路佇列中等待送出",
+  "file_transfer_browser_saved_selected": "已儲存到選擇的位置"
 }

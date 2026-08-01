@@ -427,5 +427,10 @@
   "file_transfer_remote_saved": "Remote saved the file",
   "file_transfer_remote_save_timeout": "Remote save was not confirmed. Please check the receiver.",
   "file_transfer_browser_required": "This connection requires browser-selected files.",
-  "file_transfer_native_streaming": "Streaming from disk..."
+  "file_transfer_native_streaming": "Streaming from disk...",
+  "file_transfer_channel_closed": "File transfer channel closed. Please reconnect and retry.",
+  "file_transfer_already_running": "A file transfer is already running.",
+  "file_transfer_waiting_network": "Waiting for the transfer buffer to drain...",
+  "file_transfer_buffered": "{0} queued for network delivery",
+  "file_transfer_browser_saved_selected": "Saved to the selected location"
 }

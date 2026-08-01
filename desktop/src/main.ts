@@ -769,6 +769,11 @@ const fallbackTranslations: Record<string, string> = {
   "file_transfer_remote_save_timeout": "Remote save was not confirmed. Please check the receiver.",
   "file_transfer_browser_required": "This connection requires browser-selected files.",
   "file_transfer_native_streaming": "Streaming from disk...",
+  "file_transfer_channel_closed": "File transfer channel closed. Please reconnect and retry.",
+  "file_transfer_already_running": "A file transfer is already running.",
+  "file_transfer_waiting_network": "Waiting for the transfer buffer to drain...",
+  "file_transfer_buffered": "{0} queued for network delivery",
+  "file_transfer_browser_saved_selected": "Saved to the selected location",
   "log_title": "System Logs",
   "err_rtc_failed": "P2P connection failed. The local and remote devices might be behind a strict symmetric NAT or firewall and cannot punch through. Please click \"🚀 Enable Relay Mode\" to establish connection.",
   "err_target_offline": "The remote device is offline. Please make sure the device ID is correct.",
@@ -2704,6 +2709,19 @@ function bindSystemControlChannel(ch: RTCDataChannel) {
     }
   };
 }
+
+window.addEventListener("file-transfer-priority-change", (event) => {
+  const active = !!(event as CustomEvent<{ active?: boolean }>).detail?.active;
+  if (!dataChannelSystemControl || dataChannelSystemControl.readyState !== "open") return;
+  try {
+    dataChannelSystemControl.send(JSON.stringify({
+      type: "file_transfer_priority",
+      active,
+    }));
+  } catch (error) {
+    console.warn("[file-transfer] Failed to update transfer priority mode:", error);
+  }
+});
 
 
 

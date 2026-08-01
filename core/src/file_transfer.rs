@@ -1,8 +1,11 @@
 use dirs::download_dir;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+
+const FRAME_HEADER_BYTES: usize = 16;
+const FRAME_MAGIC: u32 = 0x3253_594e; // "2SYN"
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "action")]
@@ -13,6 +16,7 @@ pub enum FileTransferMessage {
         name: String,
         size: u64,
         fingerprint: Option<String>,
+        protocol: Option<String>,
     },
     #[serde(rename = "resume")]
     Resume {
@@ -75,6 +79,7 @@ impl FileTransferState {
                     name,
                     size,
                     fingerprint,
+                    protocol: _,
                 } => {
                     if let Some(mut dl_dir) = download_dir() {
                         dl_dir.push("2syn-transfers");
@@ -100,10 +105,16 @@ impl FileTransferState {
                         self.current_file = OpenOptions::new()
                             .write(true)
                             .create(true)
-                            .append(existing_len > 0)
                             .truncate(existing_len == 0)
                             .open(part_path)
-                            .ok();
+                            .ok()
+                            .and_then(|mut file| {
+                                if file.seek(SeekFrom::Start(existing_len)).is_ok() {
+                                    Some(file)
+                                } else {
+                                    None
+                                }
+                            });
                         self.outgoing_messages.push(
                             serde_json::json!({
                                 "action": "resume",
@@ -180,12 +191,26 @@ impl FileTransferState {
     }
 
     pub fn handle_binary(&mut self, data: &[u8]) {
+        if let Some((offset, payload)) = parse_chunk_frame(data) {
+            self.write_chunk_at(offset, payload);
+            return;
+        }
+        self.write_chunk_at(self.current_received, data);
+    }
+
+    fn write_chunk_at(&mut self, offset: u64, data: &[u8]) {
         if let Some(ref mut file) = self.current_file {
+            if offset != self.current_received {
+                if let Err(e) = file.seek(SeekFrom::Start(offset)) {
+                    eprintln!("[file-transfer] Failed to seek chunk offset {}: {}", offset, e);
+                    return;
+                }
+            }
             if let Err(e) = file.write_all(data) {
                 eprintln!("[file-transfer] Failed to write binary chunk: {}", e);
                 return;
             }
-            self.current_received += data.len() as u64;
+            self.current_received = self.current_received.max(offset.saturating_add(data.len() as u64));
             if self.current_received == self.current_expected_size
                 || self.current_received.saturating_sub(self.last_progress_reported) >= 1024 * 1024
             {
@@ -282,4 +307,22 @@ fn resume_part_path(dir: &Path, file_name: &str, size: u64, fingerprint: Option<
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| format!("{}-{}", file_name, size));
     dir.join(format!(".{}.part", token))
+}
+
+fn parse_chunk_frame(data: &[u8]) -> Option<(u64, &[u8])> {
+    if data.len() < FRAME_HEADER_BYTES {
+        return None;
+    }
+    let magic = u32::from_be_bytes(data[0..4].try_into().ok()?);
+    if magic != FRAME_MAGIC {
+        return None;
+    }
+    let high = u32::from_be_bytes(data[4..8].try_into().ok()?);
+    let low = u32::from_be_bytes(data[8..12].try_into().ok()?);
+    let length = u32::from_be_bytes(data[12..16].try_into().ok()?) as usize;
+    if length > data.len().saturating_sub(FRAME_HEADER_BYTES) {
+        return None;
+    }
+    let offset = ((high as u64) << 32) | low as u64;
+    Some((offset, &data[FRAME_HEADER_BYTES..FRAME_HEADER_BYTES + length]))
 }

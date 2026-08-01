@@ -397,5 +397,10 @@
   "file_transfer_remote_saved": "원격에서 파일을 저장했습니다",
   "file_transfer_remote_save_timeout": "원격 저장을 확인하지 못했습니다. 수신 장치를 확인하세요.",
   "file_transfer_browser_required": "이 연결은 브라우저에서 선택한 파일이 필요합니다.",
-  "file_transfer_native_streaming": "디스크에서 스트리밍 중..."
+  "file_transfer_native_streaming": "디스크에서 스트리밍 중...",
+  "file_transfer_channel_closed": "파일 전송 채널이 닫혔습니다. 다시 연결한 뒤 재시도하세요.",
+  "file_transfer_already_running": "파일 전송이 이미 진행 중입니다.",
+  "file_transfer_waiting_network": "전송 버퍼가 비워지기를 기다리는 중...",
+  "file_transfer_buffered": "{0} 네트워크 전송 대기 중",
+  "file_transfer_browser_saved_selected": "선택한 위치에 저장됨"
 }

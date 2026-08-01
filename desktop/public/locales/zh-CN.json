@@ -398,5 +398,10 @@
   "file_transfer_remote_saved": "远端已保存文件",
   "file_transfer_remote_save_timeout": "尚未收到远端保存确认，请检查接收端。",
   "file_transfer_browser_required": "此连接需要使用浏览器选档。",
-  "file_transfer_native_streaming": "正在从磁盘流式传送..."
+  "file_transfer_native_streaming": "正在从磁盘流式传送...",
+  "file_transfer_channel_closed": "文件传输通道已关闭，请重新连接后再试。",
+  "file_transfer_already_running": "已有文件正在传输中。",
+  "file_transfer_waiting_network": "正在等待传输缓冲区送出...",
+  "file_transfer_buffered": "仍有 {0} 在网络队列中等待送出",
+  "file_transfer_browser_saved_selected": "已保存到选择的位置"
 }

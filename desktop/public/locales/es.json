@@ -397,5 +397,10 @@
   "file_transfer_remote_saved": "El remoto guardó el archivo",
   "file_transfer_remote_save_timeout": "No se confirmó el guardado remoto. Revisa el receptor.",
   "file_transfer_browser_required": "Esta conexión requiere archivos seleccionados en el navegador.",
-  "file_transfer_native_streaming": "Transmitiendo desde el disco..."
+  "file_transfer_native_streaming": "Transmitiendo desde el disco...",
+  "file_transfer_channel_closed": "El canal de transferencia de archivos se cerró. Vuelve a conectar e inténtalo de nuevo.",
+  "file_transfer_already_running": "Ya hay una transferencia de archivos en curso.",
+  "file_transfer_waiting_network": "Esperando a que se vacíe el búfer de transferencia...",
+  "file_transfer_buffered": "{0} en cola para entrega por red",
+  "file_transfer_browser_saved_selected": "Guardado en la ubicación seleccionada"
 }

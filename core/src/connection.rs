@@ -1,6 +1,6 @@
 use crate::CoreError;
 use crate::input::SecureInputPacket;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::{Mutex, watch};
 use std::time::Duration;
@@ -67,6 +67,7 @@ pub struct ConnectionManager {
     current_metrics: Arc<Mutex<NetworkMetrics>>,
     current_config: Arc<Mutex<QualityConfig>>,
     config_tx: watch::Sender<QualityConfig>,
+    transfer_priority_active: Arc<AtomicBool>,
 }
 
 impl Default for ConnectionManager {
@@ -88,6 +89,7 @@ impl ConnectionManager {
             })),
             current_config: Arc::new(Mutex::new(default_config)),
             config_tx,
+            transfer_priority_active: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -164,7 +166,23 @@ impl ConnectionManager {
             config.target_height = 1440;
         }
 
+        if self.transfer_priority_active.load(Ordering::Relaxed) {
+            config.target_fps = config.target_fps.min(15).max(1);
+            config.bitrate_limit_kbps = config.bitrate_limit_kbps.min(2500);
+            config.target_width = config.target_width.min(1920);
+            config.target_height = config.target_height.min(1080);
+        }
+
         config
+    }
+
+    pub async fn set_transfer_priority(&self, active: bool) {
+        self.transfer_priority_active.store(active, Ordering::Relaxed);
+        let metrics = self.get_current_metrics().await;
+        let new_config = self.decide_quality(&metrics);
+        let mut current_c = self.current_config.lock().await;
+        *current_c = new_config.clone();
+        let _ = self.config_tx.send(new_config);
     }
 
     pub async fn get_current_config(&self) -> QualityConfig {

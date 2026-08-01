@@ -399,5 +399,10 @@
   "file_transfer_remote_saved": "リモートがファイルを保存しました",
   "file_transfer_remote_save_timeout": "リモート保存を確認できませんでした。受信側を確認してください。",
   "file_transfer_browser_required": "この接続ではブラウザで選択したファイルが必要です。",
-  "file_transfer_native_streaming": "ディスクからストリーミング中..."
+  "file_transfer_native_streaming": "ディスクからストリーミング中...",
+  "file_transfer_channel_closed": "ファイル転送チャネルが閉じました。再接続してから再試行してください。",
+  "file_transfer_already_running": "ファイル転送がすでに実行中です。",
+  "file_transfer_waiting_network": "転送バッファが空くのを待機中...",
+  "file_transfer_buffered": "{0} がネットワーク送信待ちです",
+  "file_transfer_browser_saved_selected": "選択した場所に保存しました"
 }

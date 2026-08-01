@@ -397,5 +397,10 @@
   "file_transfer_remote_saved": "Удаленная сторона сохранила файл",
   "file_transfer_remote_save_timeout": "Сохранение на удаленной стороне не подтверждено. Проверьте получателя.",
   "file_transfer_browser_required": "Для этого подключения нужны файлы, выбранные в браузере.",
-  "file_transfer_native_streaming": "Потоковая передача с диска..."
+  "file_transfer_native_streaming": "Потоковая передача с диска...",
+  "file_transfer_channel_closed": "Канал передачи файлов закрыт. Подключитесь снова и повторите попытку.",
+  "file_transfer_already_running": "Передача файла уже выполняется.",
+  "file_transfer_waiting_network": "Ожидание освобождения буфера передачи...",
+  "file_transfer_buffered": "{0} ожидает отправки по сети",
+  "file_transfer_browser_saved_selected": "Сохранено в выбранное расположение"
 }

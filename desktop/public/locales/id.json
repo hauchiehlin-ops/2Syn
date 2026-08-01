@@ -397,5 +397,10 @@
   "file_transfer_remote_saved": "Remote menyimpan file",
   "file_transfer_remote_save_timeout": "Penyimpanan remote belum dikonfirmasi. Periksa penerima.",
   "file_transfer_browser_required": "Koneksi ini memerlukan file yang dipilih lewat browser.",
-  "file_transfer_native_streaming": "Streaming dari disk..."
+  "file_transfer_native_streaming": "Streaming dari disk...",
+  "file_transfer_channel_closed": "Kanal transfer file tertutup. Sambungkan ulang lalu coba lagi.",
+  "file_transfer_already_running": "Transfer file sudah berjalan.",
+  "file_transfer_waiting_network": "Menunggu buffer transfer kosong...",
+  "file_transfer_buffered": "{0} mengantre untuk dikirim lewat jaringan",
+  "file_transfer_browser_saved_selected": "Disimpan ke lokasi yang dipilih"
 }

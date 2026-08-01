@@ -397,5 +397,10 @@
   "file_transfer_remote_saved": "Peranti jauh telah menyimpan fail",
   "file_transfer_remote_save_timeout": "Simpanan jauh belum disahkan. Sila semak penerima.",
   "file_transfer_browser_required": "Sambungan ini memerlukan fail yang dipilih melalui pelayar.",
-  "file_transfer_native_streaming": "Menstrim daripada cakera..."
+  "file_transfer_native_streaming": "Menstrim daripada cakera...",
+  "file_transfer_channel_closed": "Saluran pemindahan fail telah ditutup. Sambung semula dan cuba lagi.",
+  "file_transfer_already_running": "Pemindahan fail sedang berjalan.",
+  "file_transfer_waiting_network": "Menunggu penimbal pemindahan dikosongkan...",
+  "file_transfer_buffered": "{0} menunggu penghantaran rangkaian",
+  "file_transfer_browser_saved_selected": "Disimpan ke lokasi yang dipilih"
 }

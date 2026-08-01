@@ -397,5 +397,10 @@
   "file_transfer_remote_saved": "Remote hat die Datei gespeichert",
   "file_transfer_remote_save_timeout": "Remote-Speicherung wurde nicht bestätigt. Bitte Empfänger prüfen.",
   "file_transfer_browser_required": "Diese Verbindung erfordert im Browser ausgewählte Dateien.",
-  "file_transfer_native_streaming": "Streaming von der Festplatte..."
+  "file_transfer_native_streaming": "Streaming von der Festplatte...",
+  "file_transfer_channel_closed": "Der Dateiübertragungskanal wurde geschlossen. Bitte erneut verbinden und wiederholen.",
+  "file_transfer_already_running": "Eine Dateiübertragung läuft bereits.",
+  "file_transfer_waiting_network": "Warte, bis der Übertragungspuffer geleert ist...",
+  "file_transfer_buffered": "{0} warten auf Netzwerkzustellung",
+  "file_transfer_browser_saved_selected": "Am ausgewählten Ort gespeichert"
 }

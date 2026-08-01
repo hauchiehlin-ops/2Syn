@@ -14,7 +14,13 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-const FILE_TRANSFER_CHUNK_SIZE: usize = 64 * 1024;
+const FILE_TRANSFER_CHUNK_SIZE: usize = 256 * 1024;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+const FILE_TRANSFER_BUFFER_HIGH_WATER: usize = 16 * 1024 * 1024;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+const FILE_TRANSFER_FRAME_HEADER_BYTES: usize = 16;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+const FILE_TRANSFER_FRAME_MAGIC: u32 = 0x3253_594e; // "2SYN"
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[derive(serde::Serialize)]
@@ -949,6 +955,27 @@ async fn handle_remote_offer_as_host(
                             }
                         }
                         Err(err) => eprintln!("[input-unreliable] deserialize failed: {:?}", err),
+                    }
+                })
+            }));
+        } else if label == "system-control" {
+            let app_for_system = app.clone();
+            d.on_message(Box::new(move |msg| {
+                let data = msg.data.to_vec();
+                let app = app_for_system.clone();
+                Box::pin(async move {
+                    if let Ok(text) = String::from_utf8(data) {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if json["type"] == "file_transfer_priority" {
+                                let active = json["active"].as_bool().unwrap_or(false);
+                                let state = app.state::<AppState>();
+                                state.connection_manager.set_transfer_priority(active).await;
+                                println!(
+                                    "[file-transfer] Transfer priority mode {}",
+                                    if active { "enabled" } else { "disabled" }
+                                );
+                            }
+                        }
                     }
                 })
             }));
@@ -1944,7 +1971,7 @@ async fn send_file_to_client(
         if n == 0 {
             break;
         }
-        send_file_chunk(&dc, &buf[..n]).await?;
+        send_file_chunk(&dc, transferred, &buf[..n]).await?;
         transferred += n as u64;
         if transferred == metadata.len() || transferred.saturating_sub(last_reported) >= 1024 * 1024 {
             last_reported = transferred;
@@ -1980,8 +2007,10 @@ async fn send_selected_file_to_client(
         .await?
         .min(bytes.len() as u64) as usize;
 
+    let mut transferred = offset as u64;
     for chunk in bytes[offset..].chunks(FILE_TRANSFER_CHUNK_SIZE) {
-        send_file_chunk(&dc, chunk).await?;
+        send_file_chunk(&dc, transferred, chunk).await?;
+        transferred += chunk.len() as u64;
     }
 
     send_file_end(&dc).await?;
@@ -2022,7 +2051,8 @@ async fn send_file_start(
         "id": id,
         "name": file_name,
         "size": size,
-        "fingerprint": fingerprint
+        "fingerprint": fingerprint,
+        "protocol": "offset-v1"
     });
     dc.send_text(start_msg.to_string())
         .await
@@ -2032,7 +2062,7 @@ async fn send_file_start(
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 async fn wait_for_resume_offset(state: &State<'_, AppState>, id: &str) -> Result<u64, String> {
-    for _ in 0..30 {
+    for _ in 0..600 {
         if let Some(offset) = state.file_resume_offsets.lock().await.remove(id) {
             return Ok(offset);
         }
@@ -2068,16 +2098,17 @@ fn file_resume_fingerprint(
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 async fn send_file_chunk(
     dc: &Arc<webrtc::data_channel::RTCDataChannel>,
+    offset: u64,
     chunk: &[u8],
 ) -> Result<(), String> {
     use bytes::Bytes;
     use webrtc::data_channel::data_channel_state::RTCDataChannelState;
 
-    dc.send(&Bytes::copy_from_slice(chunk))
+    dc.send(&Bytes::from(create_file_chunk_frame(offset, chunk)))
         .await
         .map_err(|e| format!("檔案區塊傳送失敗: {}", e))?;
 
-    while dc.buffered_amount().await > 10 * 1024 * 1024 {
+    while dc.buffered_amount().await > FILE_TRANSFER_BUFFER_HIGH_WATER {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         if dc.ready_state() != RTCDataChannelState::Open {
             return Err("檔案傳輸通道已關閉".to_string());
@@ -2085,6 +2116,17 @@ async fn send_file_chunk(
     }
 
     Ok(())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn create_file_chunk_frame(offset: u64, chunk: &[u8]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(FILE_TRANSFER_FRAME_HEADER_BYTES + chunk.len());
+    frame.extend_from_slice(&FILE_TRANSFER_FRAME_MAGIC.to_be_bytes());
+    frame.extend_from_slice(&((offset >> 32) as u32).to_be_bytes());
+    frame.extend_from_slice(&(offset as u32).to_be_bytes());
+    frame.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
+    frame.extend_from_slice(chunk);
+    frame
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]

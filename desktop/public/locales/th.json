@@ -397,5 +397,10 @@
   "file_transfer_remote_saved": "ปลายทางบันทึกไฟล์แล้ว",
   "file_transfer_remote_save_timeout": "ยังไม่ได้รับการยืนยันการบันทึกจากปลายทาง โปรดตรวจสอบฝั่งรับ",
   "file_transfer_browser_required": "การเชื่อมต่อนี้ต้องใช้ไฟล์ที่เลือกผ่านเบราว์เซอร์",
-  "file_transfer_native_streaming": "กำลังสตรีมจากดิสก์..."
+  "file_transfer_native_streaming": "กำลังสตรีมจากดิสก์...",
+  "file_transfer_channel_closed": "ช่องทางถ่ายโอนไฟล์ถูกปิด โปรดเชื่อมต่อใหม่แล้วลองอีกครั้ง",
+  "file_transfer_already_running": "กำลังถ่ายโอนไฟล์อยู่แล้ว",
+  "file_transfer_waiting_network": "กำลังรอให้บัฟเฟอร์การถ่ายโอนว่าง...",
+  "file_transfer_buffered": "{0} รอส่งผ่านเครือข่าย",
+  "file_transfer_browser_saved_selected": "บันทึกไปยังตำแหน่งที่เลือกแล้ว"
 }
