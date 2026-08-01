@@ -94,7 +94,15 @@ Marque「Modo Privacidad」en la interfaz 2syn del **host** para oscurecer la pa
 
 ## 8. Transferencia de Archivos
 
-Cuando la conexión es estable (conexión directa P2P), arrastre archivos a la ventana 2syn desde el lado iOS o el lado del host para iniciar una transferencia. Todas las transferencias están cifradas de extremo a extremo a través del WebRTC Data Channel.
+Después de conectarse, envíe archivos soltándolos en el cuadro File Transfer, eligiéndolos con el botón, o usando Files en la barra flotante de la sesión. Los archivos se mueven directamente por el WebRTC Data Channel activo con cifrado de extremo a extremo, sin servidor de archivos 2syn ni base de datos backend.
+
+Las apps de escritorio guardan archivos recibidos en Downloads/`2syn-transfers` y muestran la ruta completa en el progreso. Si el nombre existe, se agregan sufijos como `(1)` o `(2)`. Web, iOS y Android usan el flujo de descargas/archivos de la plataforma.
+
+### 8.1 Libreta de direcciones y contraseñas guardadas
+
+La libreta puede guardar ID de dispositivo, alias y contraseña de inicio de sesión. Connect rellena el ID remoto y la contraseña guardada. Estos datos permanecen en el almacenamiento local del navegador/App del dispositivo actual. Vacíe el campo de contraseña o elimine la entrada si no desea conservarla.
+
+My MAC/Wake-on-LAN y HWID local se han eliminado de la interfaz principal. Ya no son necesarios para conexiones normales ni se usan para limitar la edición gratuita.
 
 ---
 
@@ -116,11 +124,11 @@ R: Toque el botón「🔇 Tocar para activar audio」en la pantalla. iOS requier
 R: La Tasa de Bits Adaptativa (ABR) ajusta automáticamente la calidad según las condiciones de red. La calidad disminuye para mantener la fluidez en redes deficientes y se recupera automáticamente cuando la red mejora.
 
 **P: ¿Apple Pencil no tiene efecto de presión?**
-R: Asegúrese de que 2syn en su iPad es la última versión y que 2syn en el host se ha actualizado a v3.5.11 o posterior.
+R: Asegúrese de que 2syn en su iPad es la última versión y que 2syn en el host se ha actualizado a v4.2.0 o posterior.
 
 **P: ¿No se puede conectar después de escanear el código QR?**
 R: El código QR solo contiene el ID. Confirme que 2syn en el host está en ejecución y mostrando el mismo ID.
 
 ---
 
-*2syn v3.5.11 · Soporte: contáctenos a través de las reseñas de la App Store o los canales oficiales*
+*2syn v4.2.0 · Soporte: contáctenos a través de las reseñas de la App Store o los canales oficiales*

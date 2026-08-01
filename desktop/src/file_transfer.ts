@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+
 type TransferDirection = "send" | "receive";
 
 type TransferMessage =
@@ -14,6 +16,7 @@ type TransferUiState = {
   transferred: number;
   total: number;
   status: TransferStatus;
+  detail?: string;
 };
 
 type ReceiveState = {
@@ -57,7 +60,11 @@ export function bindFileTransferChannel(ch: RTCDataChannel) {
 // 處理拖曳上傳至 WebRTC DataChannel
 export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | null) {
   const dropZone = document.getElementById("file-drop-zone");
-  if (!dropZone) return;
+  const pickButtons = [
+    document.getElementById("btn-pick-transfer-files"),
+    document.getElementById("btn-file-transfer-float"),
+  ].filter((el): el is HTMLElement => !!el);
+  if (!dropZone && pickButtons.length === 0) return;
 
   const fileInput = document.createElement("input");
   fileInput.type = "file";
@@ -65,20 +72,45 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
   fileInput.style.display = "none";
   document.body.appendChild(fileInput);
 
-  const isInlineZone = dropZone.classList.contains("inline-drop-zone");
   const showZone = () => {
-    dropZone.style.display = "flex";
-    dropZone.classList.add("file-drop-zone-active");
+    dropZone?.classList.add("file-drop-zone-active");
+    document.body.classList.add("file-transfer-dragging");
   };
   const hideZone = () => {
-    dropZone.classList.remove("file-drop-zone-active");
-    if (!isInlineZone) dropZone.style.display = "none";
+    dropZone?.classList.remove("file-drop-zone-active");
+    document.body.classList.remove("file-transfer-dragging");
   };
 
-  dropZone.addEventListener("click", () => fileInput.click());
+  const getOpenChannel = () => {
+    const ch = getChannel();
+    if (!ch || ch.readyState !== "open") {
+      showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
+      return null;
+    }
+    return ch;
+  };
+
+  const openPicker = () => {
+    if (!getOpenChannel()) return;
+    fileInput.click();
+  };
+
+  dropZone?.addEventListener("click", openPicker);
+  dropZone?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openPicker();
+  });
+  pickButtons.forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      openPicker();
+    });
+  });
+
   fileInput.addEventListener("change", async () => {
     if (fileInput.files) {
-      await sendFiles(Array.from(fileInput.files), getChannel());
+      await sendFiles(Array.from(fileInput.files), getOpenChannel());
     }
     fileInput.value = "";
   });
@@ -110,7 +142,7 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
 
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
-    await sendFiles(Array.from(files), getChannel());
+    await sendFiles(Array.from(files), getOpenChannel());
   });
 }
 
@@ -126,7 +158,7 @@ export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
 
 async function sendFiles(files: File[], ch: RTCDataChannel | null) {
   if (!ch || ch.readyState !== "open") {
-    showTransferNotice("File transfer channel is not open");
+    showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
     return;
   }
 
@@ -190,7 +222,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
 
 async function handleIncomingMessage(data: unknown) {
   if (typeof data === "string" && data.startsWith("{")) {
-    handleControlMessage(JSON.parse(data) as TransferMessage);
+    await handleControlMessage(JSON.parse(data) as TransferMessage);
     return;
   }
 
@@ -214,7 +246,7 @@ async function handleIncomingMessage(data: unknown) {
   });
 }
 
-function handleControlMessage(msg: TransferMessage) {
+async function handleControlMessage(msg: TransferMessage) {
   if (msg.action === "start") {
     activeReceive = {
       id: msg.id || `${Date.now()}`,
@@ -247,7 +279,7 @@ function handleControlMessage(msg: TransferMessage) {
     if (receive.size > 0 && blob.size !== receive.size) {
       console.warn(`[file-transfer] Size mismatch for ${receive.name}: ${blob.size}/${receive.size}`);
     }
-    downloadBlob(blob, receive.name);
+    const savedDetail = await saveReceivedBlob(blob, receive.name);
     updateTransferUi({
       id: receive.id,
       name: receive.name,
@@ -255,6 +287,7 @@ function handleControlMessage(msg: TransferMessage) {
       transferred: blob.size,
       total: receive.size,
       status: "complete",
+      detail: savedDetail,
     });
   }
 }
@@ -274,32 +307,48 @@ function waitForBufferedAmount(ch: RTCDataChannel, target: number, signal: Abort
 
 function updateTransferUi(state: TransferUiState | null) {
   latestTransfer = state;
-  const progressContainer = document.getElementById("transfer-progress-container");
-  const filenameEl = document.getElementById("transfer-filename");
-  const pctEl = document.getElementById("transfer-pct");
-  const barEl = document.getElementById("transfer-progress-bar");
-  const cancelBtn = document.getElementById("btn-cancel-transfer") as HTMLButtonElement | null;
+  const progressContainers = Array.from(document.querySelectorAll<HTMLElement>("[data-transfer-progress]"));
 
-  if (!progressContainer) return;
+  if (progressContainers.length === 0) return;
   if (!state) {
-    progressContainer.style.display = "none";
+    progressContainers.forEach((container) => {
+      container.style.display = "none";
+    });
     return;
   }
 
   const pct = state.total > 0 ? Math.min(100, Math.round((state.transferred / state.total) * 100)) : 0;
-  progressContainer.style.display = "flex";
-  if (filenameEl) {
-    const verb = state.direction === "send" ? "Sending" : "Receiving";
-    filenameEl.textContent = `${verb}: ${state.name}`;
-  }
-  if (pctEl) pctEl.textContent = `${pct}%`;
-  if (barEl) barEl.style.width = `${pct}%`;
-  if (cancelBtn) cancelBtn.disabled = state.status === "complete" || state.status === "failed";
+  progressContainers.forEach((container) => {
+    const filenameEl = container.querySelector<HTMLElement>("[data-transfer-filename]");
+    const pctEl = container.querySelector<HTMLElement>("[data-transfer-pct]");
+    const barEl = container.querySelector<HTMLElement>("[data-transfer-bar]");
+    const detailEl = container.querySelector<HTMLElement>("[data-transfer-detail]");
+    const cancelBtn = container.querySelector<HTMLButtonElement>("[data-transfer-cancel]");
+
+    container.style.display = "flex";
+    if (filenameEl) {
+      const verb = state.direction === "send"
+        ? transferText("file_transfer_sending", "Sending")
+        : transferText("file_transfer_receiving", "Receiving");
+      filenameEl.textContent = `${verb}: ${state.name}`;
+    }
+    if (pctEl) pctEl.textContent = `${pct}%`;
+    if (barEl) barEl.style.width = `${pct}%`;
+    if (detailEl) {
+      detailEl.textContent = state.detail || "";
+      detailEl.style.display = state.detail ? "block" : "none";
+    }
+    if (cancelBtn) cancelBtn.disabled = state.status === "complete" || state.status === "failed";
+  });
 
   if (state.status === "complete" || state.status === "cancelled" || state.status === "failed") {
     setTimeout(() => {
-      if (latestTransfer?.id === state.id) progressContainer.style.display = "none";
-    }, 2500);
+      if (latestTransfer?.id === state.id) {
+        progressContainers.forEach((container) => {
+          container.style.display = "none";
+        });
+      }
+    }, state.detail ? 7000 : 2500);
   }
 }
 
@@ -314,6 +363,29 @@ function downloadBlob(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
+async function saveReceivedBlob(blob: Blob, name: string) {
+  if (isDesktopTauri()) {
+    try {
+      const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+      const path = await invoke<string>("save_received_file", { name, bytes });
+      return transferText("file_transfer_saved_to", "Saved to: {0}").replace("{0}", path);
+    } catch (error) {
+      console.warn("[file-transfer] Native save failed, falling back to browser download:", error);
+    }
+  }
+
+  downloadBlob(blob, name);
+  return transferText("file_transfer_browser_download", "Saved by this device's download flow");
+}
+
+function isDesktopTauri() {
+  const win = window as any;
+  if (typeof win.__TAURI_INTERNALS__?.invoke !== "function") return false;
+  const ua = navigator.userAgent.toLowerCase();
+  if (/iphone|ipad|ipod|android/.test(ua)) return false;
+  return !(/macintosh/.test(ua) && navigator.maxTouchPoints > 2);
+}
+
 function sanitizeFileName(name: string) {
   const leaf = name.split(/[\\/]/).pop() || "download.bin";
   const cleaned = leaf.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim();
@@ -322,11 +394,23 @@ function sanitizeFileName(name: string) {
 
 function showTransferNotice(message: string) {
   console.warn(`[file-transfer] ${message}`);
-  const filenameEl = document.getElementById("transfer-filename");
-  if (filenameEl) filenameEl.textContent = message;
-  const progressContainer = document.getElementById("transfer-progress-container");
-  if (progressContainer) {
-    progressContainer.style.display = "flex";
-    setTimeout(() => { progressContainer.style.display = "none"; }, 2500);
-  }
+  const progressContainers = Array.from(document.querySelectorAll<HTMLElement>("[data-transfer-progress]"));
+  progressContainers.forEach((container) => {
+    const filenameEl = container.querySelector<HTMLElement>("[data-transfer-filename]");
+    const detailEl = container.querySelector<HTMLElement>("[data-transfer-detail]");
+    if (filenameEl) filenameEl.textContent = message;
+    if (detailEl) detailEl.style.display = "none";
+    container.style.display = "flex";
+  });
+  setTimeout(() => {
+    progressContainers.forEach((container) => {
+      container.style.display = "none";
+    });
+  }, 2500);
+}
+
+function transferText(key: string, fallback: string) {
+  const translate = (window as any).t as ((key: string) => string) | undefined;
+  const value = translate?.(key);
+  return value && value !== key ? value : fallback;
 }

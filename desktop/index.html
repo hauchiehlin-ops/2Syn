@@ -7,7 +7,7 @@
   <meta name="description" content="2syn_Duel — Secure WebRTC remote desktop with end-to-end encryption.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>2syn_Duel v4.2.0</title>
+  <title>2syn_Duel v5.0.0</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
@@ -23,9 +23,26 @@
       <div id="toolbar-actions" style="display: none; flex-direction: column; align-items: flex-end; gap: 8px;">
         <button id="btn-touch-mode-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">🖱️ Trackpad</button>
         <button id="btn-toggle-keyboard-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">⌨️ Keyboard</button>
+        <button id="btn-file-transfer-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">📁 Files</button>
         <button id="btn-display-mode-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">🔍 原始大小</button>
         <button id="btn-session-disconnect" style="background: rgba(220, 38, 38, 0.45); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(220, 38, 38, 0.6); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">🚪 登出</button>
       </div>
+    </div>
+    <div id="session-transfer-progress-container" class="transfer-progress-container session-transfer-progress" data-transfer-progress style="display: none;">
+      <div class="transfer-progress-header">
+        <span data-transfer-filename>--</span>
+        <span data-transfer-pct>0%</span>
+      </div>
+      <div class="transfer-progress-track">
+        <div class="transfer-progress-bar" data-transfer-bar></div>
+      </div>
+      <div class="transfer-progress-detail" data-transfer-detail></div>
+      <button class="btn-secondary" type="button" data-transfer-cancel>
+        <span data-transfer-cancel-label>Cancel Transfer</span>
+      </button>
+    </div>
+    <div id="file-drop-overlay" aria-hidden="true">
+      <div id="txt-file-drop-overlay">Release to send files</div>
     </div>
     <div id="pointer-lock-tooltip" style="display: none; position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 110; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); color: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; pointer-events: none; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: opacity 0.3s ease;">
       Pointer locked. Press ESC to exit.
@@ -210,18 +227,26 @@
           <div class="file-transfer-panel">
             <h3 id="txt-file-transfer-title">File Transfer</h3>
             <div id="file-drop-zone" class="inline-drop-zone" role="button" tabindex="0">
-              <span id="txt-drop-zone">Drag & Drop files here or Click to upload</span>
+              <span class="file-drop-icon">📁</span>
+              <span class="file-drop-copy">
+                <strong id="txt-drop-zone-title">Send files</strong>
+                <span id="txt-drop-zone">Drop files here or choose files</span>
+              </span>
             </div>
-            <div id="transfer-progress-container" class="transfer-progress-container" style="display: none;">
+            <button id="btn-pick-transfer-files" class="btn-secondary file-picker-button" type="button">
+              <span id="txt-btn-pick-transfer-files">Choose Files</span>
+            </button>
+            <div id="transfer-progress-container" class="transfer-progress-container" data-transfer-progress style="display: none;">
               <div class="transfer-progress-header">
-                <span id="transfer-filename">--</span>
-                <span id="transfer-pct">0%</span>
+                <span id="transfer-filename" data-transfer-filename>--</span>
+                <span id="transfer-pct" data-transfer-pct>0%</span>
               </div>
               <div class="transfer-progress-track">
-                <div id="transfer-progress-bar" class="transfer-progress-bar"></div>
+                <div id="transfer-progress-bar" class="transfer-progress-bar" data-transfer-bar></div>
               </div>
-              <button id="btn-cancel-transfer" class="btn-secondary" type="button">
-                <span id="txt-btn-cancel-transfer">Cancel Transfer</span>
+              <div class="transfer-progress-detail" data-transfer-detail></div>
+              <button id="btn-cancel-transfer" class="btn-secondary" type="button" data-transfer-cancel>
+                <span id="txt-btn-cancel-transfer" data-transfer-cancel-label>Cancel Transfer</span>
               </button>
             </div>
           </div>
@@ -258,16 +283,6 @@
                padding:12px; background:white; border-radius:10px; margin-top:4px;">
             <canvas id="id-qr-canvas" width="160" height="160"></canvas>
             <span id="txt-id-qr-hint" style="color:#333; font-size:11px; text-align:center;">用 iOS 相機掃描，免手動輸入 ID</span>
-          </div>
-          <div class="host-only host-file-send-panel">
-            <label for="host-file-path-input" id="txt-host-send-file-label">Send file to connected client</label>
-            <div class="host-file-send-row">
-              <input type="text" id="host-file-path-input" placeholder="/path/to/file" autocomplete="off">
-              <button id="btn-host-send-file" class="btn-secondary" type="button">
-                <span id="txt-btn-host-send-file">Send</span>
-              </button>
-            </div>
-            <div id="host-file-send-status"></div>
           </div>
           <div class="info-row" style="flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); width: 100%;">
             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">

@@ -73,3 +73,10 @@ Jika terdapat perubahan ketara pada dasar ini, kami akan menyiarkan pengumuman d
 ## Lapan. Hubungi Kami
 
 Jika anda mempunyai sebarang soalan mengenai Dasar Privasi ini, sila hubungi kami melalui halaman ulasan App Store atau saluran sokongan pelanggan rasmi kami.
+---
+
+## 9. Buku Alamat Tempatan, Kata Laluan Disimpan dan Pemindahan Fail
+
+Device ID, nama panggilan dan kata laluan log masuk yang anda pilih untuk simpan kekal dalam storan tempatan peranti ini dan tidak dimuat naik ke pelayan 2syn.
+
+Pemindahan fail berlaku terus antara peranti melalui sesi WebRTC disulitkan hujung-ke-hujung. Penerima desktop menyimpan fail ke Downloads/2syn-transfers; 2syn tidak menyimpan salinan fail yang dipindahkan.

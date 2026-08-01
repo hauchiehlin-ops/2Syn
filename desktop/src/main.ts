@@ -740,15 +740,17 @@ const fallbackTranslations: Record<string, string> = {
   "toggle_panel_title": "Toggle Advanced Panel",
   "tools_title": "Advanced Tools",
   "file_transfer_title": "File Transfer",
-  "drop_zone": "Drag & Drop files here or Click to upload",
+  "drop_zone_title": "Send files",
+  "drop_zone": "Drop files here or choose files",
+  "btn_pick_transfer_files": "Choose Files",
   "btn_cancel_transfer": "Cancel Transfer",
-  "host_send_file_label": "Send file to connected client",
-  "host_send_file_button": "Send",
-  "host_send_file_ready": "Paste a local file path while a client is connected.",
-  "host_send_file_sending": "Sending file...",
-  "host_send_file_done": "File sent to client.",
-  "host_send_file_empty": "Please enter a local file path.",
-  "host_send_file_failed": "Failed to send file: {0}",
+  "file_transfer_float": "Files",
+  "file_transfer_not_connected": "Connect to a device first",
+  "file_transfer_sending": "Sending",
+  "file_transfer_receiving": "Receiving",
+  "file_transfer_saved_to": "Saved to: {0}",
+  "file_transfer_browser_download": "Saved by this device's download flow",
+  "file_transfer_drop_overlay": "Release to send files",
   "log_title": "System Logs",
   "err_rtc_failed": "P2P connection failed. The local and remote devices might be behind a strict symmetric NAT or firewall and cannot punch through. Please click \"🚀 Enable Relay Mode\" to establish connection.",
   "err_target_offline": "The remote device is offline. Please make sure the device ID is correct.",
@@ -1047,10 +1049,14 @@ function updateDomTranslations() {
   setTextContent("lbl-privacy-mode", t("privacy_mode"));
   setTextContent("txt-monitor-title", t("monitor_title"));
   setTextContent("txt-file-transfer-title", t("file_transfer_title"));
+  setTextContent("txt-drop-zone-title", t("drop_zone_title"));
   setTextContent("txt-drop-zone", t("drop_zone"));
+  setTextContent("txt-btn-pick-transfer-files", t("btn_pick_transfer_files"));
   setTextContent("txt-btn-cancel-transfer", t("btn_cancel_transfer"));
-  setTextContent("txt-host-send-file-label", t("host_send_file_label"));
-  setTextContent("txt-btn-host-send-file", t("host_send_file_button"));
+  setTextContent("txt-file-drop-overlay", t("file_transfer_drop_overlay"));
+  document.querySelectorAll<HTMLElement>("[data-transfer-cancel-label]").forEach((el) => {
+    el.textContent = t("btn_cancel_transfer");
+  });
   
   setTextContent("lbl-metric-fps", t("metric_fps"));
   setTextContent("lbl-metric-color", t("metric_color"));
@@ -1193,6 +1199,8 @@ function updateDomTranslations() {
     if (btnToggleKeyboardFloat) btnToggleKeyboardFloat.textContent = "⌨️ " + t("ui_keyboard");
     const btnDisplayModeFloat = document.getElementById("btn-display-mode-float");
     if (btnDisplayModeFloat) btnDisplayModeFloat.textContent = "🔍 " + t("btn_original_size");
+    const btnFileTransferFloat = document.getElementById("btn-file-transfer-float");
+    if (btnFileTransferFloat) btnFileTransferFloat.textContent = "📁 " + t("file_transfer_float");
     
     const btnTouchMode = document.getElementById("btn-touch-mode");
     if (btnTouchMode) btnTouchMode.textContent = "🖱️ " + t("ui_trackpad_mode");
@@ -3551,42 +3559,8 @@ function initSmartAutoMode() {
 }
 
 function initFileTransfer() {
-  const btnCancel = document.getElementById("btn-cancel-transfer");
-
-  if (btnCancel) {
+  document.querySelectorAll<HTMLButtonElement>("[data-transfer-cancel]").forEach((btnCancel) => {
     btnCancel.addEventListener("click", () => cancelActiveFileTransfer(dataChannelFileTransfer));
-  }
-}
-
-function initHostFileSender() {
-  const input = document.getElementById("host-file-path-input") as HTMLInputElement | null;
-  const button = document.getElementById("btn-host-send-file") as HTMLButtonElement | null;
-  const status = document.getElementById("host-file-send-status");
-  if (!input || !button || !status) return;
-
-  status.textContent = t("host_send_file_ready");
-  button.addEventListener("click", async () => {
-    const path = input.value.trim();
-    if (!path) {
-      status.textContent = t("host_send_file_empty");
-      return;
-    }
-    if (!isDesktopTauri()) {
-      status.textContent = t("host_send_file_failed").replace("{0}", "Tauri backend unavailable");
-      return;
-    }
-
-    button.disabled = true;
-    status.textContent = t("host_send_file_sending");
-    try {
-      await invoke("send_file_to_client", { path });
-      status.textContent = t("host_send_file_done");
-      input.value = "";
-    } catch (e) {
-      status.textContent = t("host_send_file_failed").replace("{0}", String(e));
-    } finally {
-      button.disabled = false;
-    }
   });
 }
 
@@ -3911,6 +3885,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     const btnToggleKeyboard = document.getElementById("btn-toggle-keyboard");
     if (btnToggleKeyboard) {
       btnToggleKeyboard.textContent = "⌨️ " + t("ui_keyboard");
+    }
+    const btnFileTransferFloat = document.getElementById("btn-file-transfer-float");
+    if (btnFileTransferFloat) {
+      btnFileTransferFloat.textContent = "📁 " + t("file_transfer_float");
     }
     const btnSendKeys = document.getElementById("btn-send-keys");
     if (btnSendKeys) {
@@ -6463,7 +6441,6 @@ async function initializeApp() {
   initClipboardCopy();
   initSmartAutoMode();
   initFileTransfer();
-  initHostFileSender();
   initRemoteLogsDiagnostics();
   initTailscaleGuide();
   initPinToggle();

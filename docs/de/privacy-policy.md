@@ -73,3 +73,10 @@ Bei wesentlichen Änderungen dieser Richtlinie werden wir eine Ankündigung in d
 ## Acht. Kontakt
 
 Wenn Sie Fragen zu dieser Datenschutzerklärung haben, kontaktieren Sie uns bitte über die App Store-Bewertungsseite oder unsere offiziellen Kundensupport-Kanäle.
+---
+
+## 9. Lokales Adressbuch, gespeicherte Passwörter und Dateiübertragung
+
+Geräte-IDs, Spitznamen und optional gespeicherte Login-Passwörter bleiben im lokalen Speicher dieses Geräts und werden nicht auf 2syn-Server hochgeladen.
+
+Dateiübertragungen laufen direkt zwischen Geräten über die aktuelle Ende-zu-Ende verschlüsselte WebRTC-Sitzung. Desktop-Empfänger speichern Dateien unter Downloads/2syn-transfers; 2syn bewahrt keine Kopien übertragener Dateien auf.

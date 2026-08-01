@@ -94,7 +94,15 @@ Centang「Mode Privasi」di antarmuka 2syn **host** untuk menggelapkan layar hos
 
 ## 8. Transfer File
 
-Ketika koneksi stabil (koneksi langsung P2P), seret file ke jendela 2syn dari sisi iOS atau sisi host untuk memicu transfer. Semua transfer dienkripsi end-to-end melalui WebRTC Data Channel.
+Setelah terhubung, kirim file dengan menjatuhkannya ke kotak File Transfer, memilih file dari tombol, atau memakai tombol Files pada toolbar mengambang sesi. File dikirim langsung melalui WebRTC Data Channel aktif dengan enkripsi end-to-end, tanpa server file 2syn dan tanpa database backend.
+
+Aplikasi desktop menyimpan file yang diterima ke folder Downloads/`2syn-transfers` dan menampilkan path lengkap di UI progres. Jika nama file sudah ada, suffix seperti `(1)` atau `(2)` ditambahkan. Web, iOS, dan Android memakai alur unduhan/file dari platform.
+
+### 8.1 Buku Alamat dan Kata Sandi Tersimpan
+
+Buku alamat dapat menyimpan device ID, nama panggilan, dan kata sandi login. Connect akan mengisi remote ID dan kata sandi yang tersimpan. Data ini tetap berada di penyimpanan lokal browser/App perangkat saat ini. Kosongkan kolom kata sandi atau hapus entri jika tidak ingin menyimpannya.
+
+My MAC/Wake-on-LAN dan HWID lokal telah dihapus dari antarmuka utama. Keduanya tidak diperlukan untuk koneksi normal dan tidak dipakai untuk membatasi edisi gratis.
 
 ---
 
@@ -116,11 +124,11 @@ J: Ketuk tombol「🔇 Ketuk untuk mengaktifkan audio」di layar. iOS memerlukan
 J: Bitrate Adaptif (ABR) secara otomatis menyesuaikan kualitas berdasarkan kondisi jaringan. Kualitas menurun untuk menjaga kelancaran pada jaringan yang buruk dan pulih secara otomatis saat jaringan membaik.
 
 **T: Apple Pencil tidak memiliki efek tekanan?**
-J: Pastikan 2syn di iPad Anda adalah versi terbaru dan 2syn di host telah diperbarui ke v3.5.11 atau lebih baru.
+J: Pastikan 2syn di iPad Anda adalah versi terbaru dan 2syn di host telah diperbarui ke v4.2.0 atau lebih baru.
 
 **T: Tidak dapat terhubung setelah memindai kode QR?**
 J: Kode QR hanya berisi ID. Konfirmasikan bahwa 2syn di host sedang berjalan dan menampilkan ID yang sama.
 
 ---
 
-*2syn v3.5.11 · Dukungan: hubungi kami melalui ulasan App Store atau saluran resmi*
+*2syn v4.2.0 · Dukungan: hubungi kami melalui ulasan App Store atau saluran resmi*

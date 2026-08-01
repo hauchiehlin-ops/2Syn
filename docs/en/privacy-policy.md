@@ -73,3 +73,12 @@ If there are significant changes to this policy, we will post an announcement wi
 ## 8. Contact Us
 
 If you have any questions about this Privacy Policy, please contact us via the App Store review page or our official customer support channels.
+---
+
+## 9. Local Address Book, Saved Passwords, and File Transfer
+
+Device IDs, nicknames, and any login password you choose to save in the address book remain in local storage on the current device and are not uploaded to 2syn servers. You can clear the password field or delete the address book entry at any time.
+
+File transfers move directly between devices through the active end-to-end encrypted WebRTC session. Desktop receivers save files to the system Downloads folder under `2syn-transfers`; web, iOS, and Android use the platform download/files flow. 2syn does not keep copies of transferred files.
+
+The free edition interface no longer displays My MAC/Wake-on-LAN or local HWID, and HWID is not used as a normal connection restriction.

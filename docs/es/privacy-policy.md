@@ -73,3 +73,10 @@ Si hay cambios significativos en esta política, publicaremos un anuncio dentro 
 ## Ocho. Contáctenos
 
 Si tiene alguna pregunta sobre esta Política de Privacidad, comuníquese con nosotros a través de la página de reseñas de la App Store o nuestros canales oficiales de atención al cliente.
+---
+
+## 9. Libreta local, contraseñas guardadas y transferencia de archivos
+
+Los ID de dispositivo, alias y cualquier contraseña que decida guardar permanecen en el almacenamiento local de este dispositivo y no se suben a servidores de 2syn.
+
+Las transferencias de archivos se realizan directamente entre dispositivos por la sesión WebRTC cifrada de extremo a extremo. En escritorio se guardan en Downloads/2syn-transfers; 2syn no conserva copias de los archivos transferidos.

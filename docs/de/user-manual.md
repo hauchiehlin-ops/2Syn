@@ -94,7 +94,15 @@ Aktivieren Sie「Datenschutzmodus」in der 2syn-Oberfläche auf dem **Host**, um
 
 ## 8. Dateiübertragung
 
-Bei stabiler Verbindung (P2P-Direktverbindung) ziehen Sie Dateien in das 2syn-Fenster von der iOS-Seite oder dem Host, um eine Übertragung auszulösen. Alle Übertragungen sind Ende-zu-Ende-verschlüsselt über den WebRTC Data Channel.
+Nach dem Verbinden können Dateien per Drag-and-drop in das Dateiübertragungsfeld, über die Dateiauswahl oder über die Files-Schaltfläche in der schwebenden Sitzungsleiste gesendet werden. Dateien werden direkt über den aktiven WebRTC Data Channel Ende-zu-Ende verschlüsselt übertragen, ohne 2syn-Dateiserver und ohne Backend-Datenbank.
+
+Desktop-Apps speichern empfangene Dateien im Downloads-Ordner unter `2syn-transfers` und zeigen den vollständigen Pfad in der Fortschrittsanzeige an. Bei gleichen Dateinamen werden Suffixe wie `(1)` oder `(2)` ergänzt. Web, iOS und Android verwenden den Download-/Dateifluss der Plattform.
+
+### 8.1 Adressbuch und gespeicherte Passwörter
+
+Das Adressbuch kann Geräte-ID, Spitznamen und Login-Passwort speichern. Connect füllt die Remote-ID und das gespeicherte Passwort aus. Diese Daten bleiben im lokalen Browser-/App-Speicher des aktuellen Geräts. Leeren Sie das Passwortfeld oder entfernen Sie den Eintrag, wenn es nicht gespeichert bleiben soll.
+
+My MAC/Wake-on-LAN und lokale HWID wurden aus der Hauptoberfläche entfernt. Sie sind für normale Verbindungen nicht erforderlich und werden nicht zur Einschränkung der kostenlosen Version genutzt.
 
 ---
 
@@ -116,11 +124,11 @@ A: Tippen Sie auf die Schaltfläche「🔇 Tippen zum Aktivieren des Tons」auf 
 A: Adaptiver Bitrate (ABR) passt die Qualität automatisch basierend auf den Netzwerkbedingungen an. Die Qualität sinkt, um bei schlechtem Netz die Flüssigkeit aufrechtzuerhalten, und erholt sich automatisch, wenn sich das Netzwerk verbessert.
 
 **F: Apple Pencil hat keinen Druckeffekt?**
-A: Stellen Sie sicher, dass 2syn auf Ihrem iPad die neueste Version ist und dass 2syn auf dem Host auf v3.5.11 oder höher aktualisiert wurde.
+A: Stellen Sie sicher, dass 2syn auf Ihrem iPad die neueste Version ist und dass 2syn auf dem Host auf v4.2.0 oder höher aktualisiert wurde.
 
 **F: Nach dem Scannen des QR-Codes keine Verbindung möglich?**
 A: Der QR-Code enthält nur die ID. Vergewissern Sie sich, dass 2syn auf dem Host läuft und dieselbe ID anzeigt.
 
 ---
 
-*2syn v3.5.11 · Support: Kontaktieren Sie uns über App Store-Bewertungen oder offizielle Kanäle*
+*2syn v4.2.0 · Support: Kontaktieren Sie uns über App Store-Bewertungen oder offizielle Kanäle*

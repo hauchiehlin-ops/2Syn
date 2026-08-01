@@ -20,6 +20,25 @@
 
 # 歷程
 
+## 2026-08-01 — 同步今日功能至操作手冊、隱私政策與多國語系
+
+- **問題/目標**：今日新增的檔案傳輸保存位置、地址簿保存登入密碼、免費版移除 MAC/WOL/HWID 等變更，若只改 UI 與程式碼，操作手冊與隱私政策會落後，且非中英文語系會缺少新增檔案傳輸提示文字。
+- **根因/做法**：
+  1. `desktop/src/help_i18n.ts` 保留既有 11 國語系說明內容，追加各語系的「檔案傳輸與接收位置」、「地址簿與保存密碼」、「本機地址簿與檔案保存」說明。
+  2. `desktop/public/locales/*.json` 全語系補齊 `drop_zone_title`、`btn_pick_transfer_files`、`file_transfer_saved_to` 等新增檔案傳輸 UI key，避免落回英文 fallback。
+  3. `docs/*/user-manual.md` 與 `docs/*/privacy-policy.md` 全語系同步公開文件：說明桌面端接收檔案會寫入 Downloads/2syn-transfers、web/iOS/Android 交由平台下載流程、地址簿密碼只保存在本機，以及免費版不再以 MAC/HWID 作為一般操作前提。
+- **驗證**：JSON 解析檢查與全語系 `2syn-transfers` 文件覆蓋檢查通過；後續以 `npm run build` 驗證 TypeScript/前端整合。
+
+## 2026-08-01 — 檔案傳輸改為自然選檔/拖放流程
+
+- **問題/目標**：檔案傳輸同時存在「拖放/點擊上傳」與 Host 端「輸入本機檔案路徑」兩套操作。後者像除錯入口，不符合一般使用者在桌面、手機或瀏覽器裡挑檔案傳送的直覺。
+- **根因/做法**：
+  1. 移除前端 Host 檔案路徑欄位與 `initHostFileSender()` 綁定，避免桌面端走一條與 web/iOS/Android 不一致的路徑。
+  2. `desktop/src/file_transfer.ts` 將側欄檔案區、連線中浮動工具列「檔案」按鈕、全頁拖放統一到瀏覽器 File API + WebRTC `file-transfer` DataChannel。
+  3. `desktop/index.html`/`desktop/src/style.css` 新增連線畫面中的傳輸進度浮層與拖放提示；使用者不用離開遠端畫面，也能選檔、看進度、取消傳輸。
+  4. 桌面原生版接收完成後改由 `save_received_file` 寫入系統下載資料夾的 `2syn-transfers` 子資料夾，並在進度 UI 顯示完整保存路徑；檔名重複時自動加上 `(1)`、`(2)` 類序號。
+- **平台覆蓋**：不依賴 Tauri 原生 file dialog、不新增資料庫，也不要求平台專屬路徑格式；桌面 app、Android/iOS WebView 與純網頁版共用同一套 HTML File/Blob 操作。拖放在支援的桌面/瀏覽器生效，手機與受限瀏覽器則透過「選擇檔案」入口走同一條傳輸路徑。
+
 ## 2026-08-01 — 地址簿新增連線密碼保存
 
 - **問題/目標**：地址簿只能保存裝置 ID/名稱，使用者下次連線仍要重新輸入 access PIN；需要保存登入資訊，並確保 web、iOS、Android、desktop client 都可用。

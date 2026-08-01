@@ -73,3 +73,10 @@ Jika ada perubahan signifikan pada kebijakan ini, kami akan memposting pengumuma
 ## Delapan. Hubungi Kami
 
 Jika Anda memiliki pertanyaan tentang Kebijakan Privasi ini, silakan hubungi kami melalui halaman ulasan App Store atau saluran dukungan pelanggan resmi kami.
+---
+
+## 9. Buku Alamat Lokal, Kata Sandi Tersimpan, dan Transfer File
+
+Device ID, nama panggilan, dan kata sandi login yang Anda pilih untuk disimpan tetap berada di penyimpanan lokal perangkat ini dan tidak diunggah ke server 2syn.
+
+Transfer file berlangsung langsung antar perangkat melalui sesi WebRTC terenkripsi end-to-end. Penerima desktop menyimpan file ke Downloads/2syn-transfers; 2syn tidak menyimpan salinan file yang ditransfer.

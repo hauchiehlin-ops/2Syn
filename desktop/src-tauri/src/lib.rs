@@ -1851,6 +1851,77 @@ async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result
     Ok(())
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[tauri::command]
+async fn save_received_file(app: tauri::AppHandle, name: String, bytes: Vec<u8>) -> Result<String, String> {
+    let safe_name = sanitize_received_file_name(&name);
+    let mut dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("無法取得下載資料夾: {}", e))?;
+    dir.push("2syn-transfers");
+
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| format!("無法建立接收資料夾: {}", e))?;
+
+    let path = unique_received_file_path(&dir, &safe_name);
+    tokio::fs::write(&path, bytes)
+        .await
+        .map_err(|e| format!("無法儲存接收檔案: {}", e))?;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn sanitize_received_file_name(name: &str) -> String {
+    let leaf = std::path::Path::new(name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download.bin");
+    let cleaned: String = leaf
+        .chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            ch if ch.is_control() => '_',
+            ch => ch,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string();
+
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        "download.bin".to_string()
+    } else {
+        cleaned
+    }
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn unique_received_file_path(dir: &std::path::Path, file_name: &str) -> std::path::PathBuf {
+    let candidate = dir.join(file_name);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let path = std::path::Path::new(file_name);
+    let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or("download");
+    let extension = path.extension().and_then(|value| value.to_str());
+
+    for index in 1..10_000 {
+        let name = match extension {
+            Some(ext) if !ext.is_empty() => format!("{} ({}).{}", stem, index, ext),
+            _ => format!("{} ({})", stem, index),
+        };
+        let candidate = dir.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    dir.join(format!("{}-{}", uuid::Uuid::new_v4(), file_name))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -1931,6 +2002,8 @@ pub fn run() {
             send_custom_signaling_message,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             send_file_to_client,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            save_received_file,
             read_clipboard,
             write_clipboard,
             wake_device,

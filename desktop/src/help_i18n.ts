@@ -1,10 +1,12 @@
 // 11 國語系操作說明與隱私政策專業文檔字典
-export const I18N_HELP_DOCS: Record<string, {
+type HelpDoc = {
   tabControls: string;
   tabPrivacy: string;
   controlsHtml: string;
   privacyHtml: string;
-}> = {
+};
+
+const BASE_HELP_DOCS: Record<string, HelpDoc> = {
   "zh-TW": {
     tabControls: "操作指南",
     tabPrivacy: "隱私政策",
@@ -705,3 +707,310 @@ export const I18N_HELP_DOCS: Record<string, {
     `
   }
 };
+
+const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
+  "zh-TW": {
+    controlsHtml: `
+      <div>
+        <h3>檔案傳輸與接收位置</h3>
+        <ul>
+          <li>連線後可在側欄「檔案傳輸」區拖放檔案、點選「選擇檔案」，或在遠端畫面浮動工具列點「檔案」傳送。</li>
+          <li>檔案會透過目前 WebRTC 連線直接傳到另一端，不經伺服器、不寫入後端資料庫。</li>
+          <li>桌面原生版收到檔案後會固定存到系統下載資料夾的 <strong>2syn-transfers</strong> 子資料夾，完成時會顯示完整路徑；網頁版、iOS 與 Android 會交由該平台的下載/檔案流程保存。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>地址簿與保存密碼</h3>
+        <ul>
+          <li>地址簿可保存裝置 ID、暱稱與登入密碼，方便下次快速連線。點選地址簿 Connect 時會自動填入遠端 ID 與保存的密碼。</li>
+          <li>地址簿資料保存在目前裝置的本機瀏覽器/App 儲存空間；若不希望保留密碼，可清空密碼欄位或刪除該地址簿項目。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>免費版介面調整</h3>
+        <ul>
+          <li>本版本已移除 My MAC/Wake-on-LAN 與本機 HWID 顯示。它們不再是一般連線操作必要項目，也不會作為免費版連線限制。</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. 本機地址簿與檔案保存</h3>
+        <p>地址簿中的裝置資訊與使用者選擇保存的登入密碼只保存在目前裝置的本機儲存空間，不會上傳到 2syn 伺服器。檔案傳輸走目前 WebRTC 端到端加密連線；桌面原生版接收檔案會寫入您的 Downloads/2syn-transfers，本服務不會保留檔案副本。</p>
+      </div>
+    `
+  },
+  "zh-CN": {
+    controlsHtml: `
+      <div>
+        <h3>文件传输与接收位置</h3>
+        <ul>
+          <li>连接后可在侧栏“文件传输”区域拖放文件、点击“选择文件”，或在远程画面浮动工具栏点击“文件”发送。</li>
+          <li>文件会通过当前 WebRTC 连接直接传到另一端，不经过服务器，也不写入后端数据库。</li>
+          <li>桌面原生版收到文件后会固定保存到系统下载文件夹的 <strong>2syn-transfers</strong> 子文件夹，完成时会显示完整路径；网页版、iOS 与 Android 会交由平台下载/文件流程保存。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>地址簿与保存密码</h3>
+        <ul>
+          <li>地址簿可保存设备 ID、昵称与登录密码，便于下次快速连接。点击地址簿 Connect 时会自动填入远程 ID 与保存的密码。</li>
+          <li>地址簿资料保存在当前设备的本地浏览器/App 存储空间；如不希望保留密码，可清空密码栏或删除该地址簿项目。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>免费版界面调整</h3>
+        <ul>
+          <li>本版本已移除 My MAC/Wake-on-LAN 与本机 HWID 显示。它们不再是一般连接操作必要项目，也不会作为免费版连接限制。</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. 本地地址簿与文件保存</h3>
+        <p>地址簿中的设备资料与用户选择保存的登录密码只保存在当前设备的本地存储空间，不会上传到 2syn 服务器。文件传输走当前 WebRTC 端到端加密连接；桌面原生版接收文件会写入您的 Downloads/2syn-transfers，本服务不会保留文件副本。</p>
+      </div>
+    `
+  },
+  "en": {
+    controlsHtml: `
+      <div>
+        <h3>File Transfer &amp; Receive Location</h3>
+        <ul>
+          <li>After connecting, send files by dropping them into the File Transfer box, choosing files from the button, or using the Files button in the in-session floating toolbar.</li>
+          <li>Files move directly through the active WebRTC session. They do not pass through a 2syn file server and are not written to a backend database.</li>
+          <li>Desktop apps save received files to the system Downloads folder under <strong>2syn-transfers</strong> and show the full path when complete. Web, iOS, and Android hand the file to the platform download/files flow.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Address Book &amp; Saved Passwords</h3>
+        <ul>
+          <li>The address book can save a device ID, nickname, and login password for faster future connections. Clicking Connect fills the remote ID and saved password.</li>
+          <li>Address book data stays in this device's local browser/app storage. Clear the password field or remove the entry if you do not want the password retained.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Free Edition UI Changes</h3>
+        <ul>
+          <li>My MAC/Wake-on-LAN and local HWID display have been removed. They are no longer required for normal connections and are not used to limit the free edition.</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. Local Address Book &amp; File Storage</h3>
+        <p>Device entries and any login password you choose to save in the address book remain in local storage on this device and are not uploaded to 2syn servers. File transfers use the current end-to-end encrypted WebRTC session; desktop receivers write files to Downloads/2syn-transfers, and 2syn does not keep file copies.</p>
+      </div>
+    `
+  },
+  "ja": {
+    controlsHtml: `
+      <div>
+        <h3>ファイル転送と保存場所</h3>
+        <ul>
+          <li>接続後、ファイル転送欄へドラッグ、ファイル選択ボタン、またはセッション中のフローティングツールバーの「Files」から送信できます。</li>
+          <li>ファイルは現在の WebRTC セッションを通じて直接送信され、2syn のファイルサーバーやバックエンドデータベースには保存されません。</li>
+          <li>デスクトップ版で受信したファイルは Downloads 内の <strong>2syn-transfers</strong> に保存され、完了時に完全なパスが表示されます。Web/iOS/Android では各プラットフォームのダウンロード/ファイル保存処理に渡されます。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>アドレス帳と保存パスワード</h3>
+        <ul>
+          <li>アドレス帳にはデバイス ID、ニックネーム、ログインパスワードを保存できます。Connect を押すと遠隔 ID と保存済みパスワードが入力されます。</li>
+          <li>アドレス帳データはこの端末のローカルブラウザ/App ストレージにのみ保存されます。保存したくない場合はパスワード欄を空にするか、項目を削除してください。</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. ローカルアドレス帳とファイル保存</h3>
+        <p>アドレス帳のデバイス情報と任意で保存したログインパスワードは、この端末のローカルストレージにのみ保存され、2syn サーバーにはアップロードされません。ファイル転送は現在のエンドツーエンド暗号化 WebRTC セッションを使用し、デスクトップ版では Downloads/2syn-transfers に保存されます。</p>
+      </div>
+    `
+  },
+  "ko": {
+    controlsHtml: `
+      <div>
+        <h3>파일 전송 및 저장 위치</h3>
+        <ul>
+          <li>연결 후 파일 전송 영역에 드롭하거나 파일 선택 버튼, 또는 세션 중 플로팅 툴바의 Files 버튼으로 파일을 보낼 수 있습니다.</li>
+          <li>파일은 현재 WebRTC 세션을 통해 직접 전송되며 2syn 파일 서버나 백엔드 데이터베이스에 저장되지 않습니다.</li>
+          <li>데스크톱 앱은 받은 파일을 Downloads의 <strong>2syn-transfers</strong> 폴더에 저장하고 완료 시 전체 경로를 표시합니다. Web/iOS/Android는 플랫폼의 다운로드/파일 흐름에 맡깁니다.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>주소록 및 저장된 비밀번호</h3>
+        <ul>
+          <li>주소록은 장치 ID, 별칭, 로그인 비밀번호를 저장할 수 있습니다. Connect를 누르면 원격 ID와 저장된 비밀번호가 자동 입력됩니다.</li>
+          <li>주소록 데이터는 이 장치의 로컬 브라우저/App 저장소에만 보관됩니다. 비밀번호를 보관하지 않으려면 비밀번호 칸을 비우거나 항목을 삭제하세요.</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. 로컬 주소록 및 파일 저장</h3>
+        <p>주소록의 장치 정보와 사용자가 저장한 로그인 비밀번호는 이 장치의 로컬 저장소에만 보관되며 2syn 서버로 업로드되지 않습니다. 파일 전송은 현재의 종단간 암호화 WebRTC 세션을 사용하며, 데스크톱 수신 파일은 Downloads/2syn-transfers에 저장됩니다.</p>
+      </div>
+    `
+  },
+  "de": {
+    controlsHtml: `
+      <div>
+        <h3>Dateiübertragung &amp; Speicherort</h3>
+        <ul>
+          <li>Nach dem Verbinden können Dateien per Drag-and-drop in das Dateiübertragungsfeld, über die Dateiauswahl oder über die Schaltfläche Files in der schwebenden Sitzungsleiste gesendet werden.</li>
+          <li>Dateien werden direkt über die aktive WebRTC-Sitzung übertragen, ohne 2syn-Dateiserver und ohne Backend-Datenbank.</li>
+          <li>Desktop-Apps speichern empfangene Dateien im Downloads-Ordner unter <strong>2syn-transfers</strong> und zeigen nach Abschluss den vollständigen Pfad an. Web, iOS und Android verwenden den Download-/Dateifluss der Plattform.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Adressbuch &amp; gespeicherte Passwörter</h3>
+        <ul>
+          <li>Das Adressbuch kann Geräte-ID, Spitznamen und Login-Passwort speichern. Connect füllt die Remote-ID und das gespeicherte Passwort aus.</li>
+          <li>Adressbuchdaten bleiben im lokalen Browser-/App-Speicher dieses Geräts. Leeren Sie das Passwortfeld oder entfernen Sie den Eintrag, wenn es nicht gespeichert bleiben soll.</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. Lokales Adressbuch &amp; Dateispeicherung</h3>
+        <p>Geräteeinträge und optional gespeicherte Login-Passwörter bleiben im lokalen Speicher dieses Geräts und werden nicht auf 2syn-Server hochgeladen. Dateiübertragungen nutzen die aktuelle Ende-zu-Ende verschlüsselte WebRTC-Sitzung; Desktop-Empfänger speichern Dateien unter Downloads/2syn-transfers.</p>
+      </div>
+    `
+  },
+  "th": {
+    controlsHtml: `
+      <div>
+        <h3>การถ่ายโอนไฟล์และตำแหน่งรับไฟล์</h3>
+        <ul>
+          <li>หลังเชื่อมต่อแล้ว สามารถลากไฟล์ลงในช่อง File Transfer เลือกไฟล์จากปุ่ม หรือใช้ปุ่ม Files บนแถบลอยระหว่างเซสชันได้</li>
+          <li>ไฟล์ถูกส่งตรงผ่านเซสชัน WebRTC ปัจจุบัน ไม่ผ่านเซิร์ฟเวอร์ไฟล์ของ 2syn และไม่บันทึกลงฐานข้อมูล backend</li>
+          <li>แอปเดสก์ท็อปจะบันทึกไฟล์ที่รับไว้ในโฟลเดอร์ Downloads/<strong>2syn-transfers</strong> และแสดงพาธเต็มเมื่อเสร็จสิ้น ส่วน Web/iOS/Android จะส่งต่อให้ระบบดาวน์โหลด/ไฟล์ของแพลตฟอร์มนั้น</li>
+        </ul>
+      </div>
+      <div>
+        <h3>สมุดที่อยู่และรหัสผ่านที่บันทึกไว้</h3>
+        <ul>
+          <li>สมุดที่อยู่สามารถบันทึก Device ID ชื่อเล่น และรหัสผ่านเข้าสู่ระบบได้ ปุ่ม Connect จะเติม Remote ID และรหัสผ่านที่บันทึกไว้ให้อัตโนมัติ</li>
+          <li>ข้อมูลสมุดที่อยู่เก็บเฉพาะในพื้นที่จัดเก็บของเบราว์เซอร์/App บนอุปกรณ์นี้ หากไม่ต้องการเก็บรหัสผ่าน ให้ล้างช่องรหัสผ่านหรือลบรายการนั้น</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. สมุดที่อยู่ในเครื่องและการบันทึกไฟล์</h3>
+        <p>ข้อมูลอุปกรณ์และรหัสผ่านเข้าสู่ระบบที่เลือกบันทึกในสมุดที่อยู่จะอยู่ในพื้นที่จัดเก็บของอุปกรณ์นี้เท่านั้น และจะไม่ถูกอัปโหลดไปยังเซิร์ฟเวอร์ 2syn การถ่ายโอนไฟล์ใช้เซสชัน WebRTC ที่เข้ารหัสแบบ end-to-end; เดสก์ท็อปจะบันทึกไฟล์ไว้ที่ Downloads/2syn-transfers</p>
+      </div>
+    `
+  },
+  "id": {
+    controlsHtml: `
+      <div>
+        <h3>Transfer File &amp; Lokasi Penerimaan</h3>
+        <ul>
+          <li>Setelah terhubung, kirim file dengan menjatuhkannya ke kotak File Transfer, memilih file dari tombol, atau memakai tombol Files pada toolbar mengambang sesi.</li>
+          <li>File dikirim langsung melalui sesi WebRTC aktif, tidak melalui server file 2syn dan tidak ditulis ke database backend.</li>
+          <li>Aplikasi desktop menyimpan file yang diterima ke folder Downloads/<strong>2syn-transfers</strong> dan menampilkan path lengkap saat selesai. Web, iOS, dan Android memakai alur unduhan/file dari platform.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Buku Alamat &amp; Kata Sandi Tersimpan</h3>
+        <ul>
+          <li>Buku alamat dapat menyimpan device ID, nama panggilan, dan kata sandi login. Connect akan mengisi remote ID dan kata sandi yang tersimpan.</li>
+          <li>Data buku alamat tetap berada di penyimpanan lokal browser/App perangkat ini. Kosongkan kolom kata sandi atau hapus entri jika tidak ingin menyimpannya.</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. Buku Alamat Lokal &amp; Penyimpanan File</h3>
+        <p>Entri perangkat dan kata sandi login yang Anda pilih untuk disimpan tetap berada di penyimpanan lokal perangkat ini dan tidak diunggah ke server 2syn. Transfer file memakai sesi WebRTC terenkripsi end-to-end saat ini; penerima desktop menyimpan file ke Downloads/2syn-transfers.</p>
+      </div>
+    `
+  },
+  "ms": {
+    controlsHtml: `
+      <div>
+        <h3>Pemindahan Fail &amp; Lokasi Terima</h3>
+        <ul>
+          <li>Selepas bersambung, hantar fail dengan melepaskannya ke kotak File Transfer, memilih fail melalui butang, atau menggunakan butang Files pada toolbar terapung sesi.</li>
+          <li>Fail dihantar terus melalui sesi WebRTC aktif, tanpa pelayan fail 2syn dan tanpa pangkalan data backend.</li>
+          <li>Aplikasi desktop menyimpan fail diterima ke folder Downloads/<strong>2syn-transfers</strong> dan memaparkan path penuh apabila selesai. Web, iOS dan Android menggunakan aliran muat turun/fail platform.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Buku Alamat &amp; Kata Laluan Disimpan</h3>
+        <ul>
+          <li>Buku alamat boleh menyimpan device ID, nama panggilan dan kata laluan log masuk. Connect akan mengisi remote ID dan kata laluan yang disimpan.</li>
+          <li>Data buku alamat kekal dalam storan tempatan browser/App peranti ini. Kosongkan medan kata laluan atau padam entri jika tidak mahu menyimpannya.</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. Buku Alamat Tempatan &amp; Penyimpanan Fail</h3>
+        <p>Entri peranti dan kata laluan log masuk yang anda pilih untuk simpan kekal dalam storan tempatan peranti ini dan tidak dimuat naik ke pelayan 2syn. Pemindahan fail menggunakan sesi WebRTC disulitkan end-to-end semasa; penerima desktop menyimpan fail ke Downloads/2syn-transfers.</p>
+      </div>
+    `
+  },
+  "ru": {
+    controlsHtml: `
+      <div>
+        <h3>Передача файлов и место сохранения</h3>
+        <ul>
+          <li>После подключения отправляйте файлы, перетаскивая их в область File Transfer, выбирая через кнопку или используя кнопку Files на плавающей панели сеанса.</li>
+          <li>Файлы передаются напрямую через активный сеанс WebRTC, без файлового сервера 2syn и без записи в backend-базу данных.</li>
+          <li>Настольное приложение сохраняет полученные файлы в Downloads/<strong>2syn-transfers</strong> и показывает полный путь после завершения. Web, iOS и Android используют системный механизм загрузок/файлов.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Адресная книга и сохраненные пароли</h3>
+        <ul>
+          <li>Адресная книга может хранить ID устройства, название и пароль входа. Connect автоматически заполнит удаленный ID и сохраненный пароль.</li>
+          <li>Данные адресной книги остаются в локальном хранилище браузера/App этого устройства. Очистите поле пароля или удалите запись, если пароль не должен сохраняться.</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. Локальная адресная книга и хранение файлов</h3>
+        <p>Записи устройств и выбранные вами сохраненные пароли остаются в локальном хранилище этого устройства и не загружаются на серверы 2syn. Передача файлов использует текущий сквозно зашифрованный сеанс WebRTC; настольные получатели сохраняют файлы в Downloads/2syn-transfers.</p>
+      </div>
+    `
+  },
+  "es": {
+    controlsHtml: `
+      <div>
+        <h3>Transferencia de archivos y ubicación</h3>
+        <ul>
+          <li>Después de conectarse, envíe archivos soltándolos en el cuadro File Transfer, eligiéndolos con el botón, o usando Files en la barra flotante de la sesión.</li>
+          <li>Los archivos se mueven directamente por la sesión WebRTC activa, sin servidor de archivos 2syn ni base de datos backend.</li>
+          <li>Las apps de escritorio guardan archivos recibidos en Downloads/<strong>2syn-transfers</strong> y muestran la ruta completa al finalizar. Web, iOS y Android usan el flujo de descargas/archivos de la plataforma.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Libreta de direcciones y contraseñas guardadas</h3>
+        <ul>
+          <li>La libreta puede guardar ID de dispositivo, alias y contraseña de inicio de sesión. Connect rellena el ID remoto y la contraseña guardada.</li>
+          <li>Los datos permanecen en el almacenamiento local del navegador/App de este dispositivo. Vacíe el campo de contraseña o elimine la entrada si no desea conservarla.</li>
+        </ul>
+      </div>
+    `,
+    privacyHtml: `
+      <div>
+        <h3>4. Libreta local y almacenamiento de archivos</h3>
+        <p>Las entradas de dispositivo y cualquier contraseña que decida guardar permanecen en el almacenamiento local de este dispositivo y no se suben a servidores de 2syn. Las transferencias usan la sesión WebRTC cifrada de extremo a extremo; en escritorio se guardan en Downloads/2syn-transfers.</p>
+      </div>
+    `
+  }
+};
+
+export const I18N_HELP_DOCS: Record<string, HelpDoc> = Object.fromEntries(
+  Object.entries(BASE_HELP_DOCS).map(([lang, doc]) => {
+    const update = TODAY_HELP_UPDATES[lang] || TODAY_HELP_UPDATES.en || {};
+    return [lang, {
+      ...doc,
+      controlsHtml: `${doc.controlsHtml}${update.controlsHtml || ""}`,
+      privacyHtml: `${doc.privacyHtml}${update.privacyHtml || ""}`,
+    }];
+  })
+);

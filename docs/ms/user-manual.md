@@ -94,7 +94,15 @@ Tandakan「Mod Privasi」dalam antara muka 2syn **hos** untuk menghitamkan skrin
 
 ## 8. Pemindahan Fail
 
-Apabila sambungan stabil (sambungan terus P2P), seret fail ke dalam tetingkap 2syn dari mana-mana pihak iOS atau pihak hos untuk mencetuskan pemindahan. Semua pemindahan disulitkan hujung-ke-hujung melalui WebRTC Data Channel.
+Selepas bersambung, hantar fail dengan melepaskannya ke kotak File Transfer, memilih fail melalui butang, atau menggunakan butang Files pada toolbar terapung sesi. Fail dihantar terus melalui WebRTC Data Channel aktif dengan penyulitan hujung-ke-hujung, tanpa pelayan fail 2syn dan tanpa pangkalan data backend.
+
+Aplikasi desktop menyimpan fail diterima ke folder Downloads/`2syn-transfers` dan memaparkan path penuh dalam UI kemajuan. Jika nama fail sudah wujud, suffix seperti `(1)` atau `(2)` ditambah. Web, iOS dan Android menggunakan aliran muat turun/fail platform.
+
+### 8.1 Buku Alamat dan Kata Laluan Disimpan
+
+Buku alamat boleh menyimpan device ID, nama panggilan dan kata laluan log masuk. Connect akan mengisi remote ID dan kata laluan yang disimpan. Data ini kekal dalam storan tempatan browser/App peranti semasa. Kosongkan medan kata laluan atau padam entri jika tidak mahu menyimpannya.
+
+My MAC/Wake-on-LAN dan HWID tempatan telah dikeluarkan daripada antaramuka utama. Ia tidak diperlukan untuk sambungan biasa dan tidak digunakan untuk mengehadkan edisi percuma.
 
 ---
 
@@ -116,11 +124,11 @@ J: Ketik butang「🔇 Ketik untuk aktifkan audio」pada skrin. iOS memerlukan g
 J: Kadar Bit Adaptif (ABR) secara automatik melaraskan kualiti berdasarkan keadaan rangkaian. Kualiti menurun untuk mengekalkan kelancaran pada rangkaian yang lemah dan pulih secara automatik apabila rangkaian bertambah baik.
 
 **S: Apple Pencil tiada kesan tekanan?**
-J: Pastikan 2syn pada iPad anda adalah versi terkini dan 2syn pada hos telah dikemas kini ke v3.5.11 atau lebih baharu.
+J: Pastikan 2syn pada iPad anda adalah versi terkini dan 2syn pada hos telah dikemas kini ke v4.2.0 atau lebih baharu.
 
 **S: Tidak dapat disambungkan selepas mengimbas kod QR?**
 J: Kod QR hanya mengandungi ID. Sahkan bahawa 2syn pada hos sedang berjalan dan menunjukkan ID yang sama.
 
 ---
 
-*2syn v3.5.11 · Sokongan: hubungi kami melalui ulasan App Store atau saluran rasmi*
+*2syn v4.2.0 · Sokongan: hubungi kami melalui ulasan App Store atau saluran rasmi*
