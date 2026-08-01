@@ -14,9 +14,9 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-const FILE_TRANSFER_CHUNK_SIZE: usize = 256 * 1024;
+const FILE_TRANSFER_CHUNK_SIZE: usize = 60 * 1024 - FILE_TRANSFER_FRAME_HEADER_BYTES;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-const FILE_TRANSFER_BUFFER_HIGH_WATER: usize = 16 * 1024 * 1024;
+const FILE_TRANSFER_BUFFER_HIGH_WATER: usize = 1024 * 1024;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 const FILE_TRANSFER_FRAME_HEADER_BYTES: usize = 16;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -1092,12 +1092,23 @@ async fn handle_remote_offer_as_host(
                 }));
 
                 let app_for_close = app.clone();
+                let dc_for_close = Arc::clone(&d);
                 d.on_close(Box::new(move || {
                     let app = app_for_close.clone();
+                    let dc = Arc::clone(&dc_for_close);
                     Box::pin(async move {
                         let state = app.state::<AppState>();
-                        *state.active_file_channel.lock().await = None;
-                        println!("[file-transfer] Active file channel cleared");
+                        let mut active = state.active_file_channel.lock().await;
+                        let is_current = active
+                            .as_ref()
+                            .map(|current| Arc::ptr_eq(current, &dc))
+                            .unwrap_or(false);
+                        if is_current {
+                            *active = None;
+                            println!("[file-transfer] Active file channel cleared");
+                        } else {
+                            println!("[file-transfer] Ignored close from superseded file channel");
+                        }
                     })
                 }));
             }

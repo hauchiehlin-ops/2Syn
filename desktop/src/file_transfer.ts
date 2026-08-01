@@ -175,6 +175,16 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
       showTransferNotice(transferText("file_transfer_already_running", "A file transfer is already running."));
       return;
     }
+
+    // Browser and mobile file pickers must open directly from the user's click.
+    // Channel readiness is checked when Transfer is pressed, so selecting files
+    // remains available while a temporarily interrupted channel recovers.
+    if (!isDesktopTauri()) {
+      setFilePickerActive(true);
+      fileInput.click();
+      return;
+    }
+
     const hasOpenJsChannel = !!getUsableChannel(false);
     if (hasOpenJsChannel) {
       // WKWebView/Safari requires the file input to open in the original click gesture.
