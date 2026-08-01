@@ -79,6 +79,7 @@ const partialReceives = new Map<string, ReceiveState>();
 const pendingResumeResolvers = new Map<string, (offset: number) => void>();
 const pendingCompleteResolvers = new Map<string, (message: TransferMessage | null) => void>();
 const transferStartedAt = new Map<string, number>();
+const cancelledTransferIds = new Set<string>();
 let transferHideTimer: number | null = null;
 let noticeHideTimer: number | null = null;
 
@@ -386,16 +387,22 @@ export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
   activeSendAbort?.abort();
   activeSendAbort = null;
   if (latestTransfer?.id) {
+    cancelledTransferIds.add(latestTransfer.id);
     pendingCompleteResolvers.get(latestTransfer.id)?.(null);
     pendingCompleteResolvers.delete(latestTransfer.id);
+    pendingResumeResolvers.get(latestTransfer.id)?.(0);
+    pendingResumeResolvers.delete(latestTransfer.id);
   }
   if (activeReceive) {
     if (ch) sendControlMessage(ch, { action: "cancel", id: activeReceive.id });
     if (activeReceive.sink) void activeReceive.sink.abort().catch(() => {});
     activeReceive = null;
   }
+  activeQueueSending = false;
   activeTransferRunning = false;
-  updateTransferUi(latestTransfer ? { ...latestTransfer, status: "cancelled" } : null);
+  emitTransferPriorityState(false);
+  updateTransferUi(null);
+  updateQueueUi();
 }
 
 async function sendFiles(files: PendingSendFile[], ch: RTCDataChannel | null) {
@@ -419,6 +426,7 @@ async function sendFiles(files: PendingSendFile[], ch: RTCDataChannel | null) {
 
   if (isDesktopTauri()) {
     if (!(await hasNativeHostFileChannel())) {
+      resetStaleTransferUi();
       showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
       return false;
     }
@@ -438,6 +446,7 @@ async function sendFiles(files: PendingSendFile[], ch: RTCDataChannel | null) {
     }
   }
 
+  resetStaleTransferUi();
   showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
   return false;
 }
@@ -474,6 +483,7 @@ function fileQueueKey(file: PendingSendFile) {
 
 async function sendFile(file: File, ch: RTCDataChannel) {
   const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  cancelledTransferIds.delete(id);
   const fingerprint = fileFingerprint(file);
   const abort = new AbortController();
   activeSendAbort = abort;
@@ -602,6 +612,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
       if (!writable) {
         sendControlMessage(ch, { action: "cancel", id });
         activeSendAbort = null;
+        if (abort.signal.aborted || cancelledTransferIds.has(id)) return false;
         updateTransferUi({
           id,
           name: file.name,
@@ -645,6 +656,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
   activeSendAbort = null;
   if (!complete) {
     if (abort.signal.aborted) {
+      if (cancelledTransferIds.has(id)) return false;
       updateTransferUi({
         id,
         name: file.name,
@@ -1153,6 +1165,16 @@ function isActiveTransferStatus(status: TransferStatus) {
   return status === "preparing" || status === "transferring";
 }
 
+function resetStaleTransferUi() {
+  if (activeTransferRunning) return;
+  if (transferHideTimer !== null) {
+    window.clearTimeout(transferHideTimer);
+    transferHideTimer = null;
+  }
+  latestTransfer = null;
+  emitTransferPriorityState(false);
+}
+
 function transferProgressDetail(state: TransferUiState) {
   if (state.status !== "transferring" && state.status !== "preparing") return "";
   const startedAt = transferStartedAt.get(state.id) || Date.now();
@@ -1263,10 +1285,11 @@ function showTransferNotice(message: string) {
     window.clearTimeout(noticeHideTimer);
     noticeHideTimer = null;
   }
-  if (latestTransfer) {
+  if (latestTransfer && isActiveTransferStatus(latestTransfer.status) && activeTransferRunning) {
     updateTransferUi({ ...latestTransfer, detail: message });
     return;
   }
+  resetStaleTransferUi();
   const progressContainers = Array.from(document.querySelectorAll<HTMLElement>("[data-transfer-progress]"));
   progressContainers.forEach((container) => {
     const filenameEl = container.querySelector<HTMLElement>("[data-transfer-filename]");
