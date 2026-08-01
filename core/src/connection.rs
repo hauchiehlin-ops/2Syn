@@ -167,8 +167,11 @@ impl ConnectionManager {
         }
 
         if self.transfer_priority_active.load(Ordering::Relaxed) {
-            config.target_fps = config.target_fps.min(15).max(1);
-            config.bitrate_limit_kbps = config.bitrate_limit_kbps.min(2500);
+            // File data runs on separate SCTP streams, so keep the interactive
+            // desktop usable while reserving headroom for the transfer instead
+            // of collapsing the video stream to a choppy 15 fps preview.
+            config.target_fps = config.target_fps.min(30).max(24);
+            config.bitrate_limit_kbps = config.bitrate_limit_kbps.min(6000);
             config.target_width = config.target_width.min(1920);
             config.target_height = config.target_height.min(1080);
         }

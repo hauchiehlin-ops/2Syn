@@ -42,6 +42,12 @@ struct AppState {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     active_file_channel: tokio::sync::Mutex<Option<Arc<webrtc::data_channel::RTCDataChannel>>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    active_file_control_channel: tokio::sync::Mutex<Option<Arc<webrtc::data_channel::RTCDataChannel>>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    active_file_data_channels: tokio::sync::Mutex<Vec<Arc<webrtc::data_channel::RTCDataChannel>>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    file_receive_state: tokio::sync::Mutex<Option<Arc<tokio::sync::Mutex<syn_core::file_transfer::FileTransferState>>>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     file_resume_offsets: tokio::sync::Mutex<std::collections::HashMap<String, u64>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     file_complete_confirmations: tokio::sync::Mutex<std::collections::HashSet<String>>,
@@ -1070,6 +1076,133 @@ async fn handle_remote_offer_as_host(
                     })
                 }));
             }
+        } else if label == "file-transfer-control" {
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            {
+                let receive_download_dir = app.path().download_dir().ok();
+                let file_state = Arc::new(tokio::sync::Mutex::new(
+                    syn_core::file_transfer::FileTransferState::with_download_dir(receive_download_dir),
+                ));
+                let app_for_receive_state = app.clone();
+                let state_for_receive = Arc::clone(&file_state);
+                tokio::spawn(async move {
+                    *app_for_receive_state
+                        .state::<AppState>()
+                        .file_receive_state
+                        .lock()
+                        .await = Some(state_for_receive);
+                });
+
+                let app_for_initial_state = app.clone();
+                let dc_for_initial_state = Arc::clone(&d);
+                tokio::spawn(async move {
+                    *app_for_initial_state
+                        .state::<AppState>()
+                        .active_file_control_channel
+                        .lock()
+                        .await = Some(dc_for_initial_state);
+                });
+
+                let dc_for_state = Arc::clone(&d);
+                let app_for_state = app.clone();
+                d.on_open(Box::new(move || {
+                    let dc = Arc::clone(&dc_for_state);
+                    let app = app_for_state.clone();
+                    Box::pin(async move {
+                        *app.state::<AppState>().active_file_control_channel.lock().await = Some(dc);
+                        println!("[file-transfer] Split control channel is ready");
+                    })
+                }));
+
+                let app_for_close = app.clone();
+                let dc_for_close = Arc::clone(&d);
+                d.on_close(Box::new(move || {
+                    let app = app_for_close.clone();
+                    let dc = Arc::clone(&dc_for_close);
+                    Box::pin(async move {
+                        let state = app.state::<AppState>();
+                        let mut active = state.active_file_control_channel.lock().await;
+                        if active.as_ref().map(|current| Arc::ptr_eq(current, &dc)).unwrap_or(false) {
+                            *active = None;
+                        }
+                    })
+                }));
+
+                let app_for_file_events = app.clone();
+                let dc_for_file_events = Arc::clone(&d);
+                d.on_message(Box::new(move |msg| {
+                    let data = msg.data.to_vec();
+                    let file_state = Arc::clone(&file_state);
+                    let app = app_for_file_events.clone();
+                    let dc = Arc::clone(&dc_for_file_events);
+                    Box::pin(async move {
+                        let Ok(text_str) = std::str::from_utf8(&data) else { return; };
+                        if !text_str.starts_with("{") { return; }
+                        *app
+                            .state::<AppState>()
+                            .file_receive_state
+                            .lock()
+                            .await = Some(Arc::clone(&file_state));
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(text_str) {
+                            record_file_transfer_control_message(&app, &value).await;
+                        }
+                        let mut state = file_state.lock().await;
+                        state.handle_message(text_str);
+                        for outgoing in state.take_outgoing_messages() {
+                            let _ = dc.send_text(outgoing).await;
+                        }
+                        emit_completed_file_transfer(&app, &mut state).await;
+                    })
+                }));
+            }
+        } else if label.starts_with("file-transfer-data-") {
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            {
+                let app_for_initial_state = app.clone();
+                let dc_for_initial_state = Arc::clone(&d);
+                tokio::spawn(async move {
+                    app_for_initial_state
+                        .state::<AppState>()
+                        .active_file_data_channels
+                        .lock()
+                        .await
+                        .push(dc_for_initial_state);
+                });
+                let app_for_close = app.clone();
+                let dc_for_close = Arc::clone(&d);
+                d.on_close(Box::new(move || {
+                    let app = app_for_close.clone();
+                    let dc = Arc::clone(&dc_for_close);
+                    Box::pin(async move {
+                        app.state::<AppState>()
+                            .active_file_data_channels
+                            .lock()
+                            .await
+                            .retain(|current| !Arc::ptr_eq(current, &dc));
+                    })
+                }));
+                let app_for_data = app.clone();
+                d.on_message(Box::new(move |msg| {
+                    let data = msg.data.to_vec();
+                    let app = app_for_data.clone();
+                    Box::pin(async move {
+                        let state = app.state::<AppState>();
+                        let file_state = state.file_receive_state.lock().await.clone();
+                        let Some(file_state) = file_state else { return; };
+                        let mut receiver = file_state.lock().await;
+                        receiver.handle_binary(&data);
+                        let outgoing = receiver.take_outgoing_messages();
+                        emit_completed_file_transfer(&app, &mut receiver).await;
+                        drop(receiver);
+                        if outgoing.is_empty() { return; }
+                        if let Ok(control) = active_file_control_channel(&state).await {
+                            for message in outgoing {
+                                let _ = control.send_text(message).await;
+                            }
+                        }
+                    })
+                }));
+            }
         } else if label == "file-transfer" {
             // 檔案傳輸 DataChannel
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -1881,22 +2014,62 @@ fn build_monitor_list_message(app: &tauri::AppHandle) -> Option<serde_json::Valu
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn record_file_transfer_control_message(
+    app: &tauri::AppHandle,
+    value: &serde_json::Value,
+) {
+    let state = app.state::<AppState>();
+    match value.get("action").and_then(|value| value.as_str()) {
+        Some("resume") => {
+            if let Some(id) = value.get("id").and_then(|value| value.as_str()) {
+                let offset = value.get("offset").and_then(|value| value.as_u64()).unwrap_or(0);
+                state.file_resume_offsets.lock().await.insert(id.to_string(), offset);
+            }
+        }
+        Some("complete") => {
+            if let Some(id) = value.get("id").and_then(|value| value.as_str()) {
+                state.file_complete_confirmations.lock().await.insert(id.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn emit_completed_file_transfer(
+    app: &tauri::AppHandle,
+    receiver: &mut syn_core::file_transfer::FileTransferState,
+) {
+    if let Some(completed) = receiver.take_completed() {
+        let _ = app.emit(
+            "file-transfer-received",
+            serde_json::json!({
+                "name": completed.name,
+                "path": completed.path.to_string_lossy().to_string(),
+                "size": completed.size
+            }),
+        );
+    }
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 async fn has_active_file_transfer_channel(state: State<'_, AppState>) -> Result<bool, String> {
-    use webrtc::data_channel::data_channel_state::RTCDataChannelState;
-
-    let channel = state.active_file_channel.lock().await.clone();
-    Ok(channel
-        .as_ref()
-        .map(|dc| dc.ready_state() == RTCDataChannelState::Open)
-        .unwrap_or(false))
+    Ok(active_file_control_channel(&state).await.is_ok())
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 async fn cancel_active_file_transfer(state: State<'_, AppState>) -> Result<(), String> {
-    let channel = state.active_file_channel.lock().await.take();
-    if let Some(dc) = channel {
+    let mut channels = Vec::new();
+    if let Some(dc) = state.active_file_channel.lock().await.take() {
+        channels.push(dc);
+    }
+    if let Some(dc) = state.active_file_control_channel.lock().await.take() {
+        channels.push(dc);
+    }
+    channels.extend(std::mem::take(&mut *state.active_file_data_channels.lock().await));
+    for dc in channels {
         dc.close()
             .await
             .map_err(|e| format!("無法關閉檔案傳輸通道: {}", e))?;
@@ -1960,7 +2133,7 @@ async fn send_file_to_client(
         .ok_or_else(|| "無法取得檔名".to_string())?
         .to_string();
 
-    let dc = active_file_channel(&state).await?;
+    let dc = active_file_control_channel(&state).await?;
     let fingerprint = file_resume_fingerprint(
         &file_name,
         metadata.len(),
@@ -1997,7 +2170,7 @@ async fn send_file_to_client(
         if n == 0 {
             break;
         }
-        send_file_chunk(&dc, transferred, &buf[..n]).await?;
+        send_file_chunk_round_robin(&state, &dc, transferred, &buf[..n]).await?;
         transferred += n as u64;
         if transferred == metadata.len() || transferred.saturating_sub(last_reported) >= 1024 * 1024 {
             last_reported = transferred;
@@ -2026,7 +2199,7 @@ async fn send_selected_file_to_client(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let file_name = sanitize_received_file_name(&name);
-    let dc = active_file_channel(&state).await?;
+    let dc = active_file_control_channel(&state).await?;
     let fingerprint = file_resume_fingerprint(&file_name, bytes.len() as u64, None);
     let id = send_file_start(&dc, &file_name, bytes.len() as u64, &fingerprint).await?;
     let offset = wait_for_resume_offset(&state, &id)
@@ -2035,7 +2208,7 @@ async fn send_selected_file_to_client(
 
     let mut transferred = offset as u64;
     for chunk in bytes[offset..].chunks(FILE_TRANSFER_CHUNK_SIZE) {
-        send_file_chunk(&dc, transferred, chunk).await?;
+        send_file_chunk_round_robin(&state, &dc, transferred, chunk).await?;
         transferred += chunk.len() as u64;
     }
 
@@ -2045,23 +2218,48 @@ async fn send_selected_file_to_client(
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-async fn active_file_channel(
+async fn active_file_control_channel(
     state: &State<'_, AppState>,
 ) -> Result<Arc<webrtc::data_channel::RTCDataChannel>, String> {
     use webrtc::data_channel::data_channel_state::RTCDataChannelState;
 
-    let dc = state
-        .active_file_channel
-        .lock()
-        .await
-        .clone()
-        .ok_or_else(|| "檔案傳輸通道尚未開啟".to_string())?;
-
-    if dc.ready_state() != RTCDataChannelState::Open {
-        return Err("檔案傳輸通道尚未開啟".to_string());
+    let split = state.active_file_control_channel.lock().await.clone();
+    let legacy = state.active_file_channel.lock().await.clone();
+    for candidate in [split, legacy].into_iter().flatten() {
+        if candidate.ready_state() == RTCDataChannelState::Open {
+            return Ok(candidate);
+        }
     }
+    Err("檔案傳輸通道尚未開啟".to_string())
+}
 
-    Ok(dc)
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn send_file_chunk_round_robin(
+    state: &State<'_, AppState>,
+    control: &Arc<webrtc::data_channel::RTCDataChannel>,
+    offset: u64,
+    chunk: &[u8],
+) -> Result<(), String> {
+    use webrtc::data_channel::data_channel_state::RTCDataChannelState;
+
+    let split_control = state.active_file_control_channel.lock().await.clone();
+    if !split_control
+        .as_ref()
+        .map(|channel| Arc::ptr_eq(channel, control))
+        .unwrap_or(false)
+    {
+        return send_file_chunk(control, offset, chunk).await;
+    }
+    let data_channels = state.active_file_data_channels.lock().await.clone();
+    let open_channels: Vec<_> = data_channels
+        .into_iter()
+        .filter(|channel| channel.ready_state() == RTCDataChannelState::Open)
+        .collect();
+    if open_channels.is_empty() {
+        return send_file_chunk(control, offset, chunk).await;
+    }
+    let lane = ((offset / FILE_TRANSFER_CHUNK_SIZE as u64) as usize) % open_channels.len();
+    send_file_chunk(&open_channels[lane], offset, chunk).await
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -2268,6 +2466,12 @@ pub fn run() {
             active_pc: tokio::sync::Mutex::new(None),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             active_file_channel: tokio::sync::Mutex::new(None),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            active_file_control_channel: tokio::sync::Mutex::new(None),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            active_file_data_channels: tokio::sync::Mutex::new(Vec::new()),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            file_receive_state: tokio::sync::Mutex::new(None),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             file_resume_offsets: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]

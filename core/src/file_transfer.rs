@@ -1,5 +1,6 @@
 use dirs::download_dir;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -43,6 +44,11 @@ pub struct FileTransferState {
     current_received: u64,
     current_expected_size: u64,
     current_name: Option<String>,
+    // Data lanes may deliver chunks out of order.  Keep the ranges we have
+    // written and only acknowledge the contiguous prefix, which is also safe
+    // to use as a resume offset after a reconnect.
+    current_ranges: BTreeMap<u64, u64>,
+    end_received: bool,
     last_progress_reported: u64,
     last_completed: Option<CompletedFileTransfer>,
     outgoing_messages: Vec<String>,
@@ -69,6 +75,8 @@ impl FileTransferState {
             current_received: 0,
             current_expected_size: 0,
             current_name: None,
+            current_ranges: BTreeMap::new(),
+            end_received: false,
             last_progress_reported: 0,
             last_completed: None,
             outgoing_messages: Vec::new(),
@@ -108,44 +116,8 @@ impl FileTransferState {
                     if !self.message_matches_current(id.as_deref()) {
                         return;
                     }
-                    if let Some(path) = &self.current_path {
-                        self.current_file = None;
-                        if self.current_expected_size > 0
-                            && self.current_received != self.current_expected_size
-                        {
-                            eprintln!(
-                                "[file-transfer] File size mismatch for {:?}: received {} / expected {} bytes",
-                                path,
-                                self.current_received,
-                                self.current_expected_size
-                            );
-                        } else {
-                            if let Some(part_path) = &self.current_part_path {
-                                let _ = std::fs::rename(part_path, path);
-                            }
-                            println!("[file-transfer] Finished receiving file: {:?}", path);
-                            self.last_completed = Some(CompletedFileTransfer {
-                                name: path
-                                    .file_name()
-                                    .and_then(|value| value.to_str())
-                                    .unwrap_or("download.bin")
-                                    .to_string(),
-                                path: path.clone(),
-                                size: self.current_received,
-                            });
-                            self.outgoing_messages.push(
-                                serde_json::json!({
-                                    "action": "complete",
-                                    "id": self.current_id,
-                                    "name": self.current_name,
-                                    "path": format!("Downloads/2syn-transfers/{}", path.file_name().and_then(|value| value.to_str()).unwrap_or("download.bin")),
-                                    "size": self.current_received
-                                })
-                                .to_string(),
-                            );
-                        }
-                    }
-                    self.reset();
+                    self.end_received = true;
+                    self.finish_if_complete();
                 }
                 FileTransferMessage::Cancel { id } => {
                     if !self.message_matches_current(id.as_deref()) {
@@ -172,23 +144,28 @@ impl FileTransferState {
     }
 
     fn write_chunk_at(&mut self, offset: u64, data: &[u8]) {
+        if offset >= self.current_expected_size {
+            return;
+        }
+        let accepted_len = data
+            .len()
+            .min(self.current_expected_size.saturating_sub(offset) as usize);
+        if accepted_len == 0 {
+            return;
+        }
         if let Some(ref mut file) = self.current_file {
-            if offset != self.current_received {
-                if let Err(e) = file.seek(SeekFrom::Start(offset)) {
-                    eprintln!(
-                        "[file-transfer] Failed to seek chunk offset {}: {}",
-                        offset, e
-                    );
-                    return;
-                }
+            if let Err(e) = file.seek(SeekFrom::Start(offset)) {
+                eprintln!(
+                    "[file-transfer] Failed to seek chunk offset {}: {}",
+                    offset, e
+                );
+                return;
             }
-            if let Err(e) = file.write_all(data) {
+            if let Err(e) = file.write_all(&data[..accepted_len]) {
                 eprintln!("[file-transfer] Failed to write binary chunk: {}", e);
                 return;
             }
-            self.current_received = self
-                .current_received
-                .max(offset.saturating_add(data.len() as u64));
+            self.record_received_range(offset, accepted_len as u64);
             if self.current_received == self.current_expected_size
                 || self
                     .current_received
@@ -207,7 +184,56 @@ impl FileTransferState {
                     .to_string(),
                 );
             }
+            self.finish_if_complete();
         }
+    }
+
+    fn record_received_range(&mut self, offset: u64, len: u64) {
+        let end = offset.saturating_add(len);
+        if self.current_ranges.contains_key(&offset) {
+            return;
+        }
+        self.current_ranges.insert(offset, end);
+        while let Some(next_end) = self.current_ranges.remove(&self.current_received) {
+            self.current_received = next_end;
+        }
+    }
+
+    fn finish_if_complete(&mut self) {
+        if !self.end_received || self.current_received != self.current_expected_size {
+            return;
+        }
+        let Some(path) = self.current_path.clone() else {
+            return;
+        };
+        self.current_file = None;
+        if let Some(part_path) = &self.current_part_path {
+            if let Err(error) = std::fs::rename(part_path, &path) {
+                eprintln!("[file-transfer] Failed to finalize {:?}: {}", path, error);
+                return;
+            }
+        }
+        println!("[file-transfer] Finished receiving file: {:?}", path);
+        self.last_completed = Some(CompletedFileTransfer {
+            name: path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("download.bin")
+                .to_string(),
+            path: path.clone(),
+            size: self.current_received,
+        });
+        self.outgoing_messages.push(
+            serde_json::json!({
+                "action": "complete",
+                "id": self.current_id,
+                "name": self.current_name,
+                "path": format!("Downloads/2syn-transfers/{}", path.file_name().and_then(|value| value.to_str()).unwrap_or("download.bin")),
+                "size": self.current_received
+            })
+            .to_string(),
+        );
+        self.reset();
     }
 
     pub fn take_completed(&mut self) -> Option<CompletedFileTransfer> {
@@ -262,6 +288,11 @@ impl FileTransferState {
         self.current_received = existing_len;
         self.current_expected_size = size;
         self.current_name = Some(safe_name);
+        self.current_ranges.clear();
+        if existing_len > 0 {
+            self.current_ranges.insert(0, existing_len);
+        }
+        self.end_received = false;
         self.last_progress_reported = existing_len;
         self.outgoing_messages.push(
             serde_json::json!({
@@ -290,6 +321,8 @@ impl FileTransferState {
         self.current_received = 0;
         self.current_expected_size = 0;
         self.current_name = None;
+        self.current_ranges.clear();
+        self.end_received = false;
         self.last_progress_reported = 0;
     }
 }
@@ -395,5 +428,37 @@ mod tests {
         let message: serde_json::Value = serde_json::from_str(&outgoing[0]).unwrap();
         assert_eq!(message["action"], "cancel");
         assert_eq!(message["id"], "transfer-1");
+    }
+
+    #[test]
+    fn completes_after_out_of_order_chunks_arrive() {
+        let receive_dir = std::env::temp_dir().join(format!(
+            "2syn-file-transfer-out-of-order-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut state = FileTransferState::with_download_dir(Some(receive_dir.clone()));
+        state.handle_message(
+            r#"{"action":"start","id":"transfer-2","name":"example.txt","size":6,"fingerprint":"example"}"#,
+        );
+        let _ = state.take_outgoing_messages();
+
+        let frame = |offset: u64, payload: &[u8]| {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&FRAME_MAGIC.to_be_bytes());
+            bytes.extend_from_slice(&((offset >> 32) as u32).to_be_bytes());
+            bytes.extend_from_slice(&(offset as u32).to_be_bytes());
+            bytes.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(payload);
+            bytes
+        };
+
+        state.handle_binary(&frame(3, b"def"));
+        state.handle_message(r#"{"action":"end","id":"transfer-2"}"#);
+        assert!(state.take_completed().is_none());
+        state.handle_binary(&frame(0, b"abc"));
+
+        let completed = state.take_completed().expect("file should finish once the gap closes");
+        assert_eq!(std::fs::read(&completed.path).unwrap(), b"abcdef");
+        let _ = std::fs::remove_dir_all(receive_dir);
     }
 }

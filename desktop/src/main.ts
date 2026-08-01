@@ -1,5 +1,11 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { bindFileTransferChannel, dismissOrCancelFileTransfer, setupFileTransferDropZone } from "./file_transfer";
+import {
+  bindFileTransferChannel,
+  bindFileTransferControlChannel,
+  bindFileTransferDataChannel,
+  dismissOrCancelFileTransfer,
+  setupFileTransferDropZone,
+} from "./file_transfer";
 import { I18N_HELP_DOCS } from "./help_i18n";
 import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
@@ -456,7 +462,11 @@ let activeSyncStatefulLabels: (() => void) | null = null; // 動態語意狀態�
 let dataChannelControl: RTCDataChannel | null = null;
 let dataChannelUnreliable: RTCDataChannel | null = null;
 let dataChannelClipboard: RTCDataChannel | null = null;
+// Keep the legacy channel during the rollout. New peers use a dedicated,
+// low-volume control stream plus several data streams for file chunks.
 let dataChannelFileTransfer: RTCDataChannel | null = null;
+let dataChannelFileTransferControl: RTCDataChannel | null = null;
+let dataChannelFileTransferData: RTCDataChannel[] = [];
 let dataChannelSystemControl: RTCDataChannel | null = null;
 let remoteHostOs: "" | "macos" | "windows" | "linux" = ""; // 被控端 OS（host_info 訊息回報）
 let availableMonitors: any[] = [];
@@ -467,6 +477,7 @@ let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追�
 let currentRemotePin: string | null = null;  // 當前連線 PIN，用於媒體凍結時自癒重協商
 let renegotiationInFlight = false;
 let fileTransferRecoveryScheduled = false;
+const FILE_TRANSFER_DATA_LANES = 3;
 let myId: string = "";                        // 本機 9 位數 ID
 let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
 let currentCursorPercentX = 0.5;               // 全域游標百分比 X（用於避讓對焦）
@@ -2122,7 +2133,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
     dataChannelControl = null;
     dataChannelUnreliable = null;
     dataChannelClipboard = null;
-    dataChannelFileTransfer = null;
+    clearFileTransferChannels();
     dataChannelSystemControl = null;
     iceCandidateQueue = [];
   }
@@ -2432,23 +2443,92 @@ function bindIncomingDataChannel(ch: RTCDataChannel) {
       dataChannelFileTransfer = ch;
       bindFileTransferChannel(ch);
       break;
+    case "file-transfer-control":
+      recordNegotiatedFileTransferLimit(ch);
+      dataChannelFileTransferControl = ch;
+      bindFileTransferControlChannel(ch);
+      break;
     case "clipboard":
       dataChannelClipboard = ch;
       bindClipboardChannel(ch);
       break;
     default:
-      console.log(`[WebRTC] Received unhandled DataChannel: ${ch.label}`);
+      if (ch.label.startsWith("file-transfer-data-")) {
+        recordNegotiatedFileTransferLimit(ch);
+        dataChannelFileTransferData.push(ch);
+        bindFileTransferDataChannel(ch);
+      } else {
+        console.log(`[WebRTC] Received unhandled DataChannel: ${ch.label}`);
+      }
   }
 }
 
-function getOrRecoverFileTransferChannel() {
+function preferredFileTransferChannel() {
+  const splitReady = dataChannelFileTransferControl?.readyState === "open"
+    && dataChannelFileTransferData.filter((channel) => channel.readyState === "open").length === FILE_TRANSFER_DATA_LANES;
+  if (splitReady) {
+    recordNegotiatedFileTransferLimit(dataChannelFileTransferControl!);
+    return dataChannelFileTransferControl;
+  }
   if (dataChannelFileTransfer?.readyState === "open") {
     recordNegotiatedFileTransferLimit(dataChannelFileTransfer);
     return dataChannelFileTransfer;
   }
-  if (dataChannelFileTransfer?.readyState === "connecting") {
+  return null;
+}
+
+function createFileTransferChannels(pc: RTCPeerConnection) {
+  dataChannelFileTransfer = pc.createDataChannel("file-transfer", { ordered: true });
+  recordNegotiatedFileTransferLimit(dataChannelFileTransfer);
+  bindFileTransferChannel(dataChannelFileTransfer);
+
+  dataChannelFileTransferControl = pc.createDataChannel("file-transfer-control", { ordered: true });
+  recordNegotiatedFileTransferLimit(dataChannelFileTransferControl);
+  bindFileTransferControlChannel(dataChannelFileTransferControl);
+
+  dataChannelFileTransferData = Array.from({ length: FILE_TRANSFER_DATA_LANES }, (_, index) => {
+    const channel = pc.createDataChannel(`file-transfer-data-${index}`, { ordered: true });
+    recordNegotiatedFileTransferLimit(channel);
+    bindFileTransferDataChannel(channel);
+    return channel;
+  });
+}
+
+function clearFileTransferChannels() {
+  dataChannelFileTransfer = null;
+  dataChannelFileTransferControl = null;
+  dataChannelFileTransferData = [];
+}
+
+function createReplacementFileTransferDataChannels(pc: RTCPeerConnection) {
+  dataChannelFileTransferData = dataChannelFileTransferData
+    .filter((channel) => channel.readyState === "open" || channel.readyState === "connecting");
+  const missing = FILE_TRANSFER_DATA_LANES - dataChannelFileTransferData.length;
+  for (let index = 0; index < missing; index++) {
+    const channel = pc.createDataChannel(`file-transfer-data-recovery-${Date.now()}-${index}`, { ordered: true });
+    recordNegotiatedFileTransferLimit(channel);
+    dataChannelFileTransferData.push(channel);
+    bindFileTransferDataChannel(channel);
+  }
+}
+
+function getOrRecoverFileTransferChannel() {
+  if (dataChannelFileTransferControl?.readyState === "open" && peerConnection
+    && dataChannelFileTransferData.filter((channel) => channel.readyState === "open" || channel.readyState === "connecting").length < FILE_TRANSFER_DATA_LANES) {
+    createReplacementFileTransferDataChannels(peerConnection);
     scheduleFileTransferRenegotiation();
-    return dataChannelFileTransfer;
+  }
+  const preferred = preferredFileTransferChannel();
+  if (preferred) return preferred;
+  if (dataChannelFileTransferControl?.readyState === "open" && peerConnection) {
+    createReplacementFileTransferDataChannels(peerConnection);
+    scheduleFileTransferRenegotiation();
+    if (dataChannelFileTransfer?.readyState === "open") return dataChannelFileTransfer;
+  }
+  if (dataChannelFileTransfer?.readyState === "connecting"
+    || dataChannelFileTransferControl?.readyState === "connecting") {
+    scheduleFileTransferRenegotiation();
+    return dataChannelFileTransfer || dataChannelFileTransferControl;
   }
 
   const pc = peerConnection;
@@ -2460,12 +2540,9 @@ function getOrRecoverFileTransferChannel() {
       || pc.iceConnectionState === "completed");
   if (!transportAlive || !currentRemoteId || !currentRemotePin) return null;
 
-  const channel = pc.createDataChannel("file-transfer", { ordered: true });
-  recordNegotiatedFileTransferLimit(channel);
-  dataChannelFileTransfer = channel;
-  bindFileTransferChannel(channel);
+  createFileTransferChannels(pc);
   scheduleFileTransferRenegotiation();
-  return channel;
+  return dataChannelFileTransfer;
 }
 
 function recordNegotiatedFileTransferLimit(ch: RTCDataChannel) {
@@ -2480,7 +2557,9 @@ function scheduleFileTransferRenegotiation() {
   fileTransferRecoveryScheduled = true;
   const deadline = Date.now() + 12_000;
   const attempt = () => {
-    if (dataChannelFileTransfer?.readyState !== "connecting") {
+    if (dataChannelFileTransfer?.readyState !== "connecting"
+      && dataChannelFileTransferControl?.readyState !== "connecting"
+      && !dataChannelFileTransferData.some((channel) => channel.readyState === "connecting")) {
       fileTransferRecoveryScheduled = false;
       return;
     }
@@ -2564,9 +2643,7 @@ async function startCall(remoteId: string, pin: string) {
     dataChannelSystemControl = pc.createDataChannel("system-control", { ordered: true });
     bindSystemControlChannel(dataChannelSystemControl);
 
-    // 檔案傳輸 DataChannel
-    dataChannelFileTransfer = pc.createDataChannel("file-transfer", { ordered: true });
-    bindFileTransferChannel(dataChannelFileTransfer);
+    createFileTransferChannels(pc);
     
     // 剪貼簿同步 DataChannel
     dataChannelClipboard = pc.createDataChannel("clipboard", { ordered: true });
@@ -2809,9 +2886,10 @@ window.addEventListener("file-transfer-priority-change", (event) => {
 });
 
 window.addEventListener("file-transfer-channel-reset-needed", () => {
-  if (dataChannelFileTransfer?.readyState !== "open") {
-    dataChannelFileTransfer = null;
-  }
+  dataChannelFileTransferData.forEach((channel) => {
+    if (channel.readyState === "open" || channel.readyState === "connecting") channel.close();
+  });
+  dataChannelFileTransferData = [];
   window.setTimeout(() => {
     getOrRecoverFileTransferChannel();
   }, 500);
@@ -3469,9 +3547,7 @@ function initOfflineSdpMode() {
         dataChannelUnreliable.bufferedAmountLowThreshold = 0;
         bindUnreliableChannel(dataChannelUnreliable);
 
-        // 檔案傳輸 DataChannel
-        dataChannelFileTransfer = pc.createDataChannel("file-transfer", { ordered: true });
-        bindFileTransferChannel(dataChannelFileTransfer);
+        createFileTransferChannels(pc);
 
         dataChannelClipboard = pc.createDataChannel("clipboard", { ordered: true });
         bindClipboardChannel(dataChannelClipboard);
@@ -3720,7 +3796,7 @@ function initSmartAutoMode() {
 
 function initFileTransfer() {
   document.querySelectorAll<HTMLButtonElement>("[data-transfer-cancel]").forEach((btnCancel) => {
-    btnCancel.addEventListener("click", () => dismissOrCancelFileTransfer(dataChannelFileTransfer));
+    btnCancel.addEventListener("click", () => dismissOrCancelFileTransfer(preferredFileTransferChannel() || dataChannelFileTransfer));
   });
 }
 
@@ -6297,7 +6373,7 @@ function initQuickMenu() {
       dataChannelControl = null;
       dataChannelUnreliable = null;
       dataChannelClipboard = null;
-      dataChannelFileTransfer = null;
+      clearFileTransferChannels();
       dataChannelSystemControl = null;
       iceCandidateQueue = [];
       resetConnectionUI();
@@ -6421,7 +6497,7 @@ function initQuickMenu() {
         dataChannelControl = null;
         dataChannelUnreliable = null;
         dataChannelClipboard = null;
-        dataChannelFileTransfer = null;
+        clearFileTransferChannels();
         dataChannelSystemControl = null;
         iceCandidateQueue = [];
         resetConnectionUI();

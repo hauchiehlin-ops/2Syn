@@ -31,8 +31,12 @@ type ReceiveState = {
   received: number;
   lastProgressSent: number;
   lastProgressAt: number;
-  chunks: BlobPart[];
-  channel: RTCDataChannel;
+  chunks: Map<number, ArrayBuffer>;
+  ranges: Map<number, number>;
+  endReceived: boolean;
+  finalizing: boolean;
+  writeChain: Promise<void>;
+  controlChannel: RTCDataChannel;
   sink?: BrowserReceiveSink;
 };
 
@@ -77,6 +81,7 @@ const FRAME_MAGIC = 0x3253594e; // "2SYN"
 
 let activeSendAbort: AbortController | null = null;
 let activeSendChannel: RTCDataChannel | null = null;
+let activeSendDataChannels: RTCDataChannel[] = [];
 let activeReceive: ReceiveState | null = null;
 let latestTransfer: TransferUiState | null = null;
 let nativeReceiveListenerInstalled = false;
@@ -94,8 +99,13 @@ const cancelledTransferIds = new Set<string>();
 let transferHideTimer: number | null = null;
 let noticeHideTimer: number | null = null;
 let channelWaitAbort: AbortController | null = null;
+const splitTransferDataChannels = new Set<RTCDataChannel>();
 
 export function bindFileTransferChannel(ch: RTCDataChannel) {
+  bindFileTransferControlChannel(ch);
+}
+
+export function bindFileTransferControlChannel(ch: RTCDataChannel) {
   ch.binaryType = "arraybuffer";
   ch.bufferedAmountLowThreshold = channelBufferLowWater();
   ch.onopen = () => {
@@ -108,15 +118,16 @@ export function bindFileTransferChannel(ch: RTCDataChannel) {
       activeSendAbort?.abort();
       activeSendAbort = null;
       activeSendChannel = null;
+      activeSendDataChannels = [];
     }
     const currentTransfer = latestTransfer;
-    const interruptedReceive = activeReceive?.channel === ch && activeReceive.received < activeReceive.size;
+    const interruptedReceive = activeReceive?.controlChannel === ch && activeReceive.received < activeReceive.size;
     if (interruptedReceive && activeReceive?.sink) {
       void activeReceive.sink.abort().catch(() => {});
     } else if (interruptedReceive && activeReceive) {
       rememberPartialReceive(activeReceive);
     }
-    if (activeReceive?.channel === ch) activeReceive = null;
+    if (activeReceive?.controlChannel === ch) activeReceive = null;
     if (currentTransfer && ((interruptedSend && isActiveTransferStatus(currentTransfer.status)) || interruptedReceive)) {
       updateTransferUi({
         ...currentTransfer,
@@ -133,6 +144,23 @@ export function bindFileTransferChannel(ch: RTCDataChannel) {
   };
   ch.onmessage = async (event) => {
     await handleIncomingMessage(event.data, ch);
+  };
+}
+
+export function bindFileTransferDataChannel(ch: RTCDataChannel) {
+  ch.binaryType = "arraybuffer";
+  ch.bufferedAmountLowThreshold = channelBufferLowWater();
+  splitTransferDataChannels.add(ch);
+  ch.onclose = () => {
+    splitTransferDataChannels.delete(ch);
+    if (activeTransferRunning && activeSendDataChannels.includes(ch)) {
+      activeSendAbort?.abort();
+      window.dispatchEvent(new CustomEvent("file-transfer-channel-reset-needed"));
+    }
+  };
+  ch.onerror = (event) => console.warn("[file-transfer] Data lane error:", event);
+  ch.onmessage = async (event) => {
+    await handleIncomingData(event.data, ch);
   };
 }
 
@@ -468,6 +496,7 @@ export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
   activeSendAbort?.abort();
   activeSendAbort = null;
   activeSendChannel = null;
+  activeSendDataChannels = [];
   if (latestTransfer?.id) {
     cancelledTransferIds.add(latestTransfer.id);
     pendingCompleteResolvers.get(latestTransfer.id)?.(null);
@@ -616,6 +645,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
   const abort = new AbortController();
   activeSendAbort = abort;
   activeSendChannel = ch;
+  activeSendDataChannels = [];
   updateTransferUi({
     id,
     name: file.name,
@@ -651,6 +681,21 @@ async function sendFile(file: File, ch: RTCDataChannel) {
   });
   let offset = await waitForResumeOffset(id, abort.signal);
   offset = Math.min(Math.max(offset, 0), file.size);
+  const dataChannels = transferDataChannels(ch);
+  if (dataChannels.length === 0) {
+    clearActiveSend(ch);
+    updateTransferUi({
+      id,
+      name: file.name,
+      direction: "send",
+      transferred: offset,
+      total: file.size,
+      status: "failed",
+      detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
+    });
+    return false;
+  }
+  activeSendDataChannels = dataChannels;
   remoteProgressOffsets.set(id, offset);
   updateTransferUi({
     id,
@@ -669,6 +714,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
   let smoothChunks = 0;
   let adaptiveInFlightBytes = initialTransferInFlightBytes();
   const maxInFlightBytes = maxTransferInFlightBytes();
+  let laneIndex = 0;
   while (offset < file.size) {
     if (abort.signal.aborted) {
       sendControlMessage(ch, { action: "cancel", id });
@@ -677,7 +723,8 @@ async function sendFile(file: File, ch: RTCDataChannel) {
 
     const chunkOffset = offset;
     const chunk = await file.slice(chunkOffset, chunkOffset + chunkSize).arrayBuffer();
-    if (ch.readyState !== "open") {
+    const dataChannel = dataChannels[laneIndex++ % dataChannels.length];
+    if (ch.readyState !== "open" || dataChannel.readyState !== "open") {
       clearActiveSend(ch);
       updateTransferUi({
         id,
@@ -691,7 +738,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
       return false;
     }
     try {
-      ch.send(createChunkFrame(chunkOffset, chunk));
+      dataChannel.send(createChunkFrame(chunkOffset, chunk));
     } catch (error) {
       console.warn("[file-transfer] Failed to send file chunk:", error);
       clearActiveSend(ch);
@@ -723,7 +770,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
       });
     }
 
-    if (ch.bufferedAmount > bufferHighWater) {
+    if (dataChannel.bufferedAmount > bufferHighWater) {
       chunkSize = Math.max(MIN_CHUNK_SIZE, Math.floor(chunkSize / 2));
       smoothChunks = 0;
       updateTransferUi({
@@ -735,7 +782,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
         status: "transferring",
         detail: transferText("file_transfer_waiting_network", "Waiting for the transfer buffer to drain..."),
       });
-      const writable = await waitForBufferedAmount(ch, bufferLowWater, abort.signal, (buffered) => {
+      const writable = await waitForBufferedAmount(dataChannel, bufferLowWater, abort.signal, (buffered) => {
         updateTransferUi({
           id,
           name: file.name,
@@ -878,6 +925,14 @@ function clearActiveSend(ch: RTCDataChannel) {
   if (activeSendChannel !== ch) return;
   activeSendAbort = null;
   activeSendChannel = null;
+  activeSendDataChannels = [];
+}
+
+function transferDataChannels(controlChannel: RTCDataChannel) {
+  if (controlChannel.label !== "file-transfer-control") {
+    return controlChannel.readyState === "open" ? [controlChannel] : [];
+  }
+  return Array.from(splitTransferDataChannels).filter((channel) => channel.readyState === "open");
 }
 
 function confirmedTransferOffset(id: string, total: number) {
@@ -999,6 +1054,10 @@ async function handleIncomingMessage(data: unknown, ch: RTCDataChannel) {
     return;
   }
 
+  await handleIncomingData(data, ch);
+}
+
+async function handleIncomingData(data: unknown, dataChannel: RTCDataChannel) {
   if (!activeReceive) return;
   const chunk = data instanceof ArrayBuffer
     ? data
@@ -1009,23 +1068,44 @@ async function handleIncomingMessage(data: unknown, ch: RTCDataChannel) {
 
   const framed = parseChunkFrame(chunk);
   const payload = framed?.payload || chunk;
-  if (activeReceive.sink) {
-    await activeReceive.sink.write(framed?.offset ?? activeReceive.received, payload);
-  } else {
-    activeReceive.chunks.push(payload);
-  }
-  activeReceive.received = framed
-    ? Math.max(activeReceive.received, framed.offset + payload.byteLength)
-    : activeReceive.received + payload.byteLength;
-  updateTransferUi({
-    id: activeReceive.id,
-    name: activeReceive.name,
-    direction: "receive",
-    transferred: activeReceive.received,
-    total: activeReceive.size,
-    status: "transferring",
+  const receive = activeReceive;
+  const offset = framed?.offset ?? receive.received;
+  receive.writeChain = receive.writeChain.then(async () => {
+    if (offset >= receive.size || receive.ranges.has(offset)) return;
+    const accepted = payload.slice(0, Math.min(payload.byteLength, receive.size - offset));
+    if (accepted.byteLength === 0) return;
+    if (receive.sink) {
+      await receive.sink.write(offset, accepted);
+    } else {
+      receive.chunks.set(offset, accepted);
+    }
+    receive.ranges.set(offset, offset + accepted.byteLength);
+    while (receive.ranges.has(receive.received)) {
+      receive.received = receive.ranges.get(receive.received)!;
+    }
+    updateTransferUi({
+      id: receive.id,
+      name: receive.name,
+      direction: "receive",
+      transferred: receive.received,
+      total: receive.size,
+      status: "transferring",
+    });
+    sendReceiveProgressIfNeeded(receive, receive.controlChannel);
+    await finishReceiveIfComplete(receive);
+  }).catch((error) => {
+    console.warn("[file-transfer] Failed to write received chunk:", error);
+    updateTransferUi({
+      id: receive.id,
+      name: receive.name,
+      direction: "receive",
+      transferred: receive.received,
+      total: receive.size,
+      status: "failed",
+      detail: transferText("file_transfer_failed", "Transfer failed"),
+    });
   });
-  sendReceiveProgressIfNeeded(activeReceive, ch);
+  await receive.writeChain;
 }
 
 async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
@@ -1083,8 +1163,12 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
       received: partial?.size === msg.size ? partial.received : 0,
       lastProgressSent: partial?.size === msg.size ? partial.received : 0,
       lastProgressAt: 0,
-      chunks: partial?.size === msg.size ? partial.chunks : [],
-      channel: ch,
+      chunks: partial?.size === msg.size ? partial.chunks : new Map(),
+      ranges: partial?.size === msg.size ? partial.ranges : new Map(),
+      endReceived: false,
+      finalizing: false,
+      writeChain: Promise.resolve(),
+      controlChannel: ch,
       sink,
     };
     ch.send(JSON.stringify({ action: "resume", id: activeReceive.id, offset: activeReceive.received }));
@@ -1111,6 +1195,7 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
       activeSendAbort.abort();
       activeSendAbort = null;
       activeSendChannel = null;
+      activeSendDataChannels = [];
     }
     if (activeReceive?.sink) {
       await activeReceive.sink.abort().catch(() => {});
@@ -1127,49 +1212,54 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
 
   if (msg.action === "end" && activeReceive) {
     const receive = activeReceive;
-    activeReceive = null;
-    partialReceives.delete(receive.fingerprint);
-    sendReceiveProgress(ch, receive);
+    receive.endReceived = true;
+    await receive.writeChain;
+    await finishReceiveIfComplete(receive);
+  }
+}
+
+async function finishReceiveIfComplete(receive: ReceiveState) {
+  if (!receive.endReceived || receive.finalizing || receive.received !== receive.size) return;
+  receive.finalizing = true;
+  activeReceive = activeReceive === receive ? null : activeReceive;
+  partialReceives.delete(receive.fingerprint);
+  sendReceiveProgress(receive.controlChannel, receive);
+  try {
+    let savedDetail: string;
     if (receive.sink) {
-      const savedDetail = await receive.sink.close();
-      sendControlMessage(ch, {
-        action: "complete",
-        id: receive.id,
-        name: receive.name,
-        path: savedDetail,
-        size: receive.received,
-      });
-      updateTransferUi({
-        id: receive.id,
-        name: receive.name,
-        direction: "receive",
-        transferred: receive.received,
-        total: receive.size,
-        status: "complete",
-        detail: savedDetail,
-      });
-      return;
+      savedDetail = await receive.sink.close();
+    } else {
+      const orderedChunks = Array.from(receive.chunks.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([, payload]) => payload);
+      savedDetail = await saveReceivedBlob(new Blob(orderedChunks), receive.name);
     }
-    const blob = new Blob(receive.chunks);
-    if (receive.size > 0 && blob.size !== receive.size) {
-      console.warn(`[file-transfer] Size mismatch for ${receive.name}: ${blob.size}/${receive.size}`);
-    }
-    const savedDetail = await saveReceivedBlob(blob, receive.name);
-    sendControlMessage(ch, {
+    sendControlMessage(receive.controlChannel, {
       action: "complete",
       id: receive.id,
       name: receive.name,
       path: savedDetail,
-      size: blob.size,
+      size: receive.size,
     });
     updateTransferUi({
       id: receive.id,
       name: receive.name,
       direction: "receive",
-      transferred: blob.size,
+      transferred: receive.size,
       total: receive.size,
       status: "complete",
       detail: savedDetail,
+    });
+  } catch (error) {
+    console.warn("[file-transfer] Failed to finalize received file:", error);
+    updateTransferUi({
+      id: receive.id,
+      name: receive.name,
+      direction: "receive",
+      transferred: receive.received,
+      total: receive.size,
+      status: "failed",
+      detail: transferText("file_transfer_failed", "Transfer failed"),
     });
   }
 }
