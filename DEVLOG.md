@@ -20,6 +20,16 @@
 
 # 歷程
 
+## 2026-08-01 — 修正浮動快捷列複製/貼上與右鍵定位
+
+- **問題/目標**：浮動快捷列中的「複製」、「貼上」按鈕使用感像沒有作用；「右鍵」會在錯誤位置觸發，容易出現背景/系統右鍵選單，而不是點擊當下活躍應用程式的內容選單。
+- **根因/做法**：
+  1. `desktop/src/main.ts` 的長按浮動選單彈出後，`touchend` 會把 `currentCursorPercentX/Y` 重設為 `0.5/0.5`；選單內「右鍵」之後再讀目前游標座標，就會打到畫面中心而不是長按/選取位置。現在 `showFloatingMenu()` 會保存彈出當下的遠端座標，右鍵固定使用該座標送出 `MouseDown/MouseUp`。
+  2. 「複製」原本只送 Cmd/Ctrl+C，之後要等 host 端 1.5 秒輪詢剪貼簿才會回推到 client，使用者容易誤以為沒反應。新增 session-only `clipboard_request` 訊息：client 按下複製後短延遲主動向 host 拉取剪貼簿；host 收到後即時讀系統剪貼簿並用既有 `clipboard_push` 回傳。
+  3. 浮動列快捷鍵發送節奏從幾乎同時按放改成稍微延長的 key down/up 序列，降低遠端 app 或系統事件佇列漏吃 Cmd/Ctrl+C/V/A 的機率。
+  4. 依後續回饋，將長按/框選後的本機快捷列由橫向 toolbar 改成直向 context-menu 樣式；點「右鍵」時會先立即關閉 2syn 自己的快捷列，再把右鍵事件送到遠端，讓畫面上出現的是遠端當下應用程式自己提供的右鍵選單內容。
+- **驗證**：`cargo check -p syn-desktop` 通過（僅既有 warning）；`desktop/node_modules/.bin/tsc --noEmit` 回傳成功碼 0，但本機 shell 仍會額外印出缺 Java Runtime 的環境訊息。
+
 ## 2026-08-01 — 補齊 Android 剪貼簿、螢幕列表與 Windows 擷取 stub
 
 - **問題/目標**：修掉上一輪盤點後仍存在的三個半成品：Android 原生剪貼簿依賴 WebView fallback、host 螢幕列表偵測暫停、Windows DXGI codec/capturer stub。

@@ -939,16 +939,17 @@ async fn handle_remote_offer_as_host(
             // 剪貼簿同步 DataChannel
             let last_clipboard_text = Arc::new(tokio::sync::Mutex::new(String::new()));
             let last_seen_for_message = Arc::clone(&last_clipboard_text);
+            let dc_for_message = Arc::clone(&d);
             d.on_message(Box::new(move |msg| {
                 let data = msg.data.to_vec();
                 let last_seen = Arc::clone(&last_seen_for_message);
+                let dc = Arc::clone(&dc_for_message);
                 Box::pin(async move {
                     if let Ok(text_str) = std::str::from_utf8(&data) {
                         // 格式: JSON {"type":"clipboard_push","text":"..."}
                         if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(text_str) {
-                            if json_val.get("type").and_then(|v| v.as_str())
-                                == Some("clipboard_push")
-                            {
+                            let msg_type = json_val.get("type").and_then(|v| v.as_str());
+                            if msg_type == Some("clipboard_push") {
                                 if let Some(text) = json_val.get("text").and_then(|v| v.as_str()) {
                                     #[cfg(not(any(target_os = "ios", target_os = "android")))]
                                     {
@@ -960,6 +961,23 @@ async fn handle_remote_offer_as_host(
                                                 "[clipboard] 已同步剪貼簿內容 ({} 字元)",
                                                 text.len()
                                             );
+                                        }
+                                    }
+                                }
+                            } else if msg_type == Some("clipboard_request") {
+                                #[cfg(not(any(target_os = "ios", target_os = "android")))]
+                                {
+                                    if let Ok(mut cb) = arboard::Clipboard::new() {
+                                        if let Ok(text) = cb.get_text() {
+                                            let mut last = last_seen.lock().await;
+                                            *last = text.clone();
+                                            let msg = serde_json::json!({
+                                                "type": "clipboard_push",
+                                                "text": text
+                                            });
+                                            if let Err(e) = dc.send_text(msg.to_string()).await {
+                                                eprintln!("[clipboard] 回傳 host 剪貼簿至 client 失敗: {}", e);
+                                            }
                                         }
                                     }
                                 }
