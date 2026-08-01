@@ -60,9 +60,6 @@ type PendingSendFile = NativeSelectedFile | BrowserSelectedFile;
 
 const MIN_CHUNK_SIZE = 32 * 1024;
 const MAX_CHUNK_SIZE = 512 * 1024;
-const DESKTOP_CHUNK_SIZE = 256 * 1024;
-const BUFFER_HIGH_WATER = 16 * 1024 * 1024;
-const BUFFER_LOW_WATER = 4 * 1024 * 1024;
 const MOBILE_BUFFER_HIGH_WATER = 1024 * 1024;
 const MOBILE_BUFFER_LOW_WATER = 256 * 1024;
 const TRANSFER_UI_INTERVAL_MS = 120;
@@ -1208,7 +1205,7 @@ function waitForBufferedAmount(ch: RTCDataChannel, target: number, signal: Abort
 }
 
 function initialChunkSize() {
-  return isMobileRuntime() ? MIN_CHUNK_SIZE : DESKTOP_CHUNK_SIZE;
+  return MIN_CHUNK_SIZE;
 }
 
 function maximumChunkPayload(ch: RTCDataChannel) {
@@ -1216,18 +1213,16 @@ function maximumChunkPayload(ch: RTCDataChannel) {
   const negotiatedMax = Number.isFinite(reported) && reported > FRAME_HEADER_BYTES
     ? Math.min(reported, MAX_CHUNK_SIZE + FRAME_HEADER_BYTES)
     : FALLBACK_MAX_MESSAGE_SIZE;
-  const maxMessageSize = isMobileRuntime()
-    ? Math.min(negotiatedMax, FALLBACK_MAX_MESSAGE_SIZE)
-    : negotiatedMax;
-  return Math.max(MIN_CHUNK_SIZE, maxMessageSize - FRAME_HEADER_BYTES);
+  const maxMessageSize = Math.min(negotiatedMax, FALLBACK_MAX_MESSAGE_SIZE);
+  return Math.max(1024, maxMessageSize - FRAME_HEADER_BYTES);
 }
 
 function channelBufferHighWater() {
-  return isMobileRuntime() ? MOBILE_BUFFER_HIGH_WATER : BUFFER_HIGH_WATER;
+  return MOBILE_BUFFER_HIGH_WATER;
 }
 
 function channelBufferLowWater() {
-  return isMobileRuntime() ? MOBILE_BUFFER_LOW_WATER : BUFFER_LOW_WATER;
+  return MOBILE_BUFFER_LOW_WATER;
 }
 
 function updateTransferUi(state: TransferUiState | null) {
