@@ -451,6 +451,7 @@ let rustOfferProcessed: boolean = false; // 標記 Rust 是否已經處理完 Of
 let remoteLogsTimeout: ReturnType<typeof setTimeout> | null = null; // 遠端日誌索取逾時計時器
 let connectionTimeoutTimer: ReturnType<typeof setTimeout> | null = null; // 連線逾時計時器
 let deferredRtcFailedTimer: ReturnType<typeof setTimeout> | null = null;
+let deferredRtcDisconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let activeSyncStatefulLabels: (() => void) | null = null; // 動態語意狀態標籤同步回調
 let dataChannelControl: RTCDataChannel | null = null;
 let dataChannelUnreliable: RTCDataChannel | null = null;
@@ -465,6 +466,7 @@ let _lastRemoteClipboard = "";
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
 let currentRemotePin: string | null = null;  // 當前連線 PIN，用於媒體凍結時自癒重協商
 let renegotiationInFlight = false;
+let fileTransferRecoveryScheduled = false;
 let myId: string = "";                        // 本機 9 位數 ID
 let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
 let currentCursorPercentX = 0.5;               // 全域游標百分比 X（用於避讓對焦）
@@ -2117,6 +2119,9 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
     peerConnection = null;
     dataChannelControl = null;
     dataChannelUnreliable = null;
+    dataChannelClipboard = null;
+    dataChannelFileTransfer = null;
+    dataChannelSystemControl = null;
     iceCandidateQueue = [];
   }
 
@@ -2183,15 +2188,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
 
   // 被動端：接收遠端建立的 Data Channels
   pc.ondatachannel = (event) => {
-    const ch = event.channel;
-    if (ch.label === "input-control") {
-      dataChannelControl = ch;
-      bindControlChannel(ch);
-    }
-    // 被控端（Rust host）自建的 system-control 通道：接收 host_info / monitor_list
-    if (ch.label === "system-control") {
-      bindSystemControlChannel(ch);
-    }
+    bindIncomingDataChannel(event.channel);
   };
 
   // 接收遠端視訊軌道 (只會在 iPhone / Client 端發生，因為 Mac 是 Host)
@@ -2412,6 +2409,82 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
   };
 
   return pc;
+}
+
+function bindIncomingDataChannel(ch: RTCDataChannel) {
+  switch (ch.label) {
+    case "input-control":
+      dataChannelControl = ch;
+      bindControlChannel(ch);
+      break;
+    case "input-unreliable":
+      dataChannelUnreliable = ch;
+      bindUnreliableChannel(ch);
+      break;
+    case "system-control":
+      dataChannelSystemControl = ch;
+      bindSystemControlChannel(ch);
+      break;
+    case "file-transfer":
+      dataChannelFileTransfer = ch;
+      bindFileTransferChannel(ch);
+      break;
+    case "clipboard":
+      dataChannelClipboard = ch;
+      bindClipboardChannel(ch);
+      break;
+    default:
+      console.log(`[WebRTC] Received unhandled DataChannel: ${ch.label}`);
+  }
+}
+
+function getOrRecoverFileTransferChannel() {
+  if (dataChannelFileTransfer?.readyState === "open") {
+    return dataChannelFileTransfer;
+  }
+  if (dataChannelFileTransfer?.readyState === "connecting") {
+    scheduleFileTransferRenegotiation();
+    return dataChannelFileTransfer;
+  }
+
+  const pc = peerConnection;
+  const transportAlive = pc
+    && pc.signalingState !== "closed"
+    && (pc.connectionState === "connected"
+      || pc.connectionState === "connecting"
+      || pc.iceConnectionState === "connected"
+      || pc.iceConnectionState === "completed");
+  if (!transportAlive || !currentRemoteId || !currentRemotePin) return null;
+
+  const channel = pc.createDataChannel("file-transfer", { ordered: true });
+  dataChannelFileTransfer = channel;
+  bindFileTransferChannel(channel);
+  scheduleFileTransferRenegotiation();
+  return channel;
+}
+
+function scheduleFileTransferRenegotiation() {
+  if (fileTransferRecoveryScheduled) return;
+  fileTransferRecoveryScheduled = true;
+  const deadline = Date.now() + 12_000;
+  const attempt = () => {
+    if (dataChannelFileTransfer?.readyState !== "connecting") {
+      fileTransferRecoveryScheduled = false;
+      return;
+    }
+    if (Date.now() >= deadline) {
+      fileTransferRecoveryScheduled = false;
+      return;
+    }
+    if (renegotiationInFlight || peerConnection?.signalingState !== "stable") {
+      window.setTimeout(attempt, 300);
+      return;
+    }
+    fileTransferRecoveryScheduled = false;
+    awaitSafeRenegotiate("file-transfer channel recovery");
+  };
+  // Give a newly negotiated channel time to open before deciding it needs repair.
+  window.setTimeout(attempt, 1200);
 }
 
 async function renegotiateCurrentPeerConnection(reason: string) {
@@ -2731,6 +2804,11 @@ function resetConnectionUI() {
   currentRemoteId = null;
   currentRemotePin = null;
   renegotiationInFlight = false;
+  fileTransferRecoveryScheduled = false;
+  if (deferredRtcDisconnectTimer) {
+    clearTimeout(deferredRtcDisconnectTimer);
+    deferredRtcDisconnectTimer = null;
+  }
   activeSyncStatefulLabels = null; // 清除狀態標籤同步回調
   if (connectionTimeoutTimer) {
     clearTimeout(connectionTimeoutTimer);
@@ -2848,9 +2926,14 @@ function updateConnectionStatusUI(state: string) {
       clearTimeout(deferredRtcFailedTimer);
       deferredRtcFailedTimer = null;
     }
+    if (deferredRtcDisconnectTimer) {
+      clearTimeout(deferredRtcDisconnectTimer);
+      deferredRtcDisconnectTimer = null;
+    }
     if (videoContainer) {
       videoContainer.style.filter = "none";
     }
+    getOrRecoverFileTransferChannel();
   }
 
   if (state === "failed") {
@@ -2864,7 +2947,7 @@ function updateConnectionStatusUI(state: string) {
         if (currentState === "failed" || currentIceState === "failed") {
           updateConnectionStatusUI("failed");
         }
-      }, 5000);
+      }, 15000);
       return;
     }
     if (deferredRtcFailedTimer) {
@@ -2878,7 +2961,20 @@ function updateConnectionStatusUI(state: string) {
         setTimeout(() => fixBtn.classList.remove("pulse-highlight"), 5000);
     }
     resetConnectionUI();
-  } else if (state === "disconnected" || state === "closed") {
+  } else if (state === "disconnected") {
+    if (deferredRtcDisconnectTimer) clearTimeout(deferredRtcDisconnectTimer);
+    const pickerActive = Boolean((window as any).__fileTransferPickerActive);
+    deferredRtcDisconnectTimer = setTimeout(() => {
+      deferredRtcDisconnectTimer = null;
+      const currentState = peerConnection?.connectionState;
+      const currentIceState = peerConnection?.iceConnectionState;
+      if (currentState === "connected" || currentIceState === "connected" || currentIceState === "completed") {
+        updateConnectionStatusUI("connected");
+        return;
+      }
+      resetConnectionUI();
+    }, pickerActive ? 15000 : 8000);
+  } else if (state === "closed") {
     resetConnectionUI();
   }
 }
@@ -3398,10 +3494,7 @@ function initOfflineSdpMode() {
         };
 
         pc.onconnectionstatechange = () => updateConnectionStatusUI(pc.connectionState);
-        pc.ondatachannel = (event) => {
-          if (event.channel.label === "input-control") bindControlChannel(event.channel);
-          if (event.channel.label === "input-unreliable") bindUnreliableChannel(event.channel);
-        };
+        pc.ondatachannel = (event) => bindIncomingDataChannel(event.channel);
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -3438,10 +3531,7 @@ function initOfflineSdpMode() {
             }
           };
           pc.onconnectionstatechange = () => updateConnectionStatusUI(pc.connectionState);
-          pc.ondatachannel = (event) => {
-            if (event.channel.label === "input-control") bindControlChannel(event.channel);
-            if (event.channel.label === "input-unreliable") bindUnreliableChannel(event.channel);
-          };
+          pc.ondatachannel = (event) => bindIncomingDataChannel(event.channel);
 
           await pc.setRemoteDescription({ type: "offer", sdp: remoteSdpText });
           const answer = await pc.createAnswer();
@@ -6326,7 +6416,7 @@ async function initializeApp() {
   initPlatformClasses();
 
   applyBuildInfo(await resolveBuildInfo());
-  setupFileTransferDropZone(() => dataChannelFileTransfer);
+  setupFileTransferDropZone(getOrRecoverFileTransferChannel);
   initDeviceBook();
 
   await initI18n();
@@ -6462,6 +6552,9 @@ async function initializeApp() {
 
     document.addEventListener("visibilitychange", () => {
       const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
+      if (!document.hidden && videoContainer && videoContainer.style.display !== "none") {
+        getOrRecoverFileTransferChannel();
+      }
       if (!document.hidden && videoContainer && videoContainer.style.display === "none") {
         if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
           console.log(t("log_sig_visible_reconnect"));

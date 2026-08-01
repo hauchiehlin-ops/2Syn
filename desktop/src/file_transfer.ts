@@ -82,6 +82,7 @@ const transferStartedAt = new Map<string, number>();
 const cancelledTransferIds = new Set<string>();
 let transferHideTimer: number | null = null;
 let noticeHideTimer: number | null = null;
+let channelWaitAbort: AbortController | null = null;
 
 export function bindFileTransferChannel(ch: RTCDataChannel) {
   ch.binaryType = "arraybuffer";
@@ -149,9 +150,9 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
     document.body.classList.remove("file-transfer-dragging");
   };
 
-  const getOpenChannel = (showNotice = true) => {
+  const getUsableChannel = (showNotice = true) => {
     const ch = getChannel();
-    if (!ch || ch.readyState !== "open") {
+    if (!ch || ch.readyState === "closing" || ch.readyState === "closed") {
       if (showNotice) {
         showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
       }
@@ -165,19 +166,21 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
       showTransferNotice(transferText("file_transfer_already_running", "A file transfer is already running."));
       return;
     }
-    const hasOpenJsChannel = !!getOpenChannel(false);
-    const hasNativeChannel = await hasNativeHostFileChannel();
-    if (!hasOpenJsChannel && !hasNativeChannel) {
-      showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
+    const hasOpenJsChannel = !!getUsableChannel(false);
+    if (hasOpenJsChannel) {
+      // WKWebView/Safari requires the file input to open in the original click gesture.
+      setFilePickerActive(true);
+      fileInput.click();
       return;
     }
-    if (!hasOpenJsChannel && hasNativeChannel && isDesktopTauri()) {
+
+    if (isDesktopTauri() && await hasNativeHostFileChannel()) {
       const picked = await pickNativeTransferFiles();
       if (picked.length > 0) addPendingFiles(picked);
       return;
     }
-    setFilePickerActive(true);
-    fileInput.click();
+
+    showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
   };
 
   dropZone?.addEventListener("click", openPicker);
@@ -242,12 +245,40 @@ function bindQueueActions(getChannel: () => RTCDataChannel | null) {
     button.addEventListener("click", async () => {
       if (activeQueueSending || pendingSendFiles.length === 0) return;
       activeQueueSending = true;
+      const waitController = new AbortController();
+      channelWaitAbort = waitController;
       updateQueueUi();
       const files = [...pendingSendFiles];
+      const waitingId = `channel-${Date.now()}`;
+      updateTransferUi({
+        id: waitingId,
+        name: files[0].name,
+        direction: "send",
+        transferred: 0,
+        total: files[0].size,
+        status: "preparing",
+        detail: transferText("file_transfer_waiting_receiver", "Waiting for receiver..."),
+      });
       try {
-        const sent = await sendFiles(files, getChannel());
+        const channel = await waitForOpenTransferChannel(getChannel, waitController.signal);
+        if (waitController.signal.aborted) return;
+        if (!channel) {
+          updateTransferUi({
+            id: waitingId,
+            name: files[0].name,
+            direction: "send",
+            transferred: 0,
+            total: files[0].size,
+            status: "failed",
+            detail: transferText("file_transfer_not_connected", "Connect to a device first"),
+          });
+          return;
+        }
+        transferStartedAt.delete(waitingId);
+        const sent = await sendFiles(files, channel);
         if (sent) clearPendingFiles();
       } finally {
+        if (channelWaitAbort === waitController) channelWaitAbort = null;
         activeQueueSending = false;
         updateQueueUi();
       }
@@ -384,6 +415,8 @@ function setupNativeReceiveListener() {
 }
 
 export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
+  channelWaitAbort?.abort();
+  channelWaitAbort = null;
   activeSendAbort?.abort();
   activeSendAbort = null;
   if (latestTransfer?.id) {
@@ -403,6 +436,19 @@ export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
   emitTransferPriorityState(false);
   updateTransferUi(null);
   updateQueueUi();
+}
+
+async function waitForOpenTransferChannel(
+  getChannel: () => RTCDataChannel | null,
+  signal: AbortSignal,
+) {
+  const deadline = Date.now() + 15_000;
+  while (!signal.aborted && Date.now() < deadline) {
+    const channel = getChannel();
+    if (channel?.readyState === "open") return channel;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+  }
+  return null;
 }
 
 async function sendFiles(files: PendingSendFile[], ch: RTCDataChannel | null) {
@@ -1136,7 +1182,7 @@ function updateTransferUi(state: TransferUiState | null) {
       detailEl.textContent = detail;
       detailEl.style.display = detail ? "block" : "none";
     }
-    if (cancelBtn) cancelBtn.disabled = state.status === "complete" || state.status === "failed";
+    if (cancelBtn) cancelBtn.disabled = state.status === "complete";
   });
 
   if (state.status === "complete") {
