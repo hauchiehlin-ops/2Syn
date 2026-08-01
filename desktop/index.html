@@ -7,7 +7,7 @@
   <meta name="description" content="2syn_Duel — Secure WebRTC remote desktop with end-to-end encryption.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>2syn_Duel v5.0.0</title>
+  <title>2syn_Duel v5.1.0</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
@@ -20,6 +20,7 @@
     <!-- 連線工具列（可收合）：把 模式 / 顯示大小 / 登出 整併成單一面板，預設只露出把手 -->
     <div id="session-toolbar" style="display: none; position: absolute; top: max(env(safe-area-inset-top), 50px); right: 16px; z-index: 1100; flex-direction: column; align-items: flex-end; gap: 8px; touch-action: manipulation;">
       <button id="btn-toolbar-toggle" aria-label="Toolbar" style="width: 44px; height: 44px; border-radius: 22px; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.18); color: white; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.35); transition: all 0.2s;">⚙️</button>
+      <button id="btn-file-transfer-direct" class="session-file-direct" type="button" aria-label="Files" title="Files">📁</button>
       <div id="toolbar-actions" style="display: none; flex-direction: column; align-items: flex-end; gap: 8px;">
         <button id="btn-touch-mode-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">🖱️ Trackpad</button>
         <button id="btn-toggle-keyboard-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">⌨️ Keyboard</button>

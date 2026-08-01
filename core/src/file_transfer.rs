@@ -12,6 +12,12 @@ pub enum FileTransferMessage {
         id: Option<String>,
         name: String,
         size: u64,
+        fingerprint: Option<String>,
+    },
+    #[serde(rename = "resume")]
+    Resume {
+        id: Option<String>,
+        offset: u64,
     },
     #[serde(rename = "end")]
     End { id: Option<String> },
@@ -23,8 +29,18 @@ pub struct FileTransferState {
     current_id: Option<String>,
     current_file: Option<File>,
     current_path: Option<PathBuf>,
+    current_part_path: Option<PathBuf>,
     current_received: u64,
     current_expected_size: u64,
+    current_name: Option<String>,
+    last_completed: Option<CompletedFileTransfer>,
+    outgoing_messages: Vec<String>,
+}
+
+pub struct CompletedFileTransfer {
+    pub name: String,
+    pub path: PathBuf,
+    pub size: u64,
 }
 
 impl FileTransferState {
@@ -33,39 +49,72 @@ impl FileTransferState {
             current_id: None,
             current_file: None,
             current_path: None,
+            current_part_path: None,
             current_received: 0,
             current_expected_size: 0,
+            current_name: None,
+            last_completed: None,
+            outgoing_messages: Vec::new(),
         }
     }
 
     pub fn handle_message(&mut self, msg_str: &str) {
         if let Ok(msg) = serde_json::from_str::<FileTransferMessage>(msg_str) {
             match msg {
-                FileTransferMessage::Start { id, name, size } => {
+                FileTransferMessage::Start {
+                    id,
+                    name,
+                    size,
+                    fingerprint,
+                } => {
                     if let Some(mut dl_dir) = download_dir() {
-                        dl_dir.push("2syn_downloads");
+                        dl_dir.push("2syn-transfers");
                         let _ = std::fs::create_dir_all(&dl_dir);
-                        let path = unique_download_path(&dl_dir, &sanitize_file_name(&name));
+                        let safe_name = sanitize_file_name(&name);
+                        let path = unique_download_path(&dl_dir, &safe_name);
+                        let part_path = resume_part_path(&dl_dir, &safe_name, size, fingerprint.as_deref());
+                        let existing_len = match std::fs::metadata(&part_path).map(|meta| meta.len()) {
+                            Ok(len) if len <= size => len,
+                            Ok(_) => {
+                                let _ = std::fs::remove_file(&part_path);
+                                0
+                            }
+                            Err(_) => 0,
+                        };
                         self.current_id = id;
                         self.current_path = Some(path.clone());
-                        self.current_received = 0;
+                        self.current_part_path = Some(part_path.clone());
+                        self.current_received = existing_len;
                         self.current_expected_size = size;
+                        self.current_name = Some(safe_name);
                         self.current_file = OpenOptions::new()
                             .write(true)
-                            .create_new(true)
-                            .open(path)
+                            .create(true)
+                            .append(existing_len > 0)
+                            .truncate(existing_len == 0)
+                            .open(part_path)
                             .ok();
+                        self.outgoing_messages.push(
+                            serde_json::json!({
+                                "action": "resume",
+                                "id": self.current_id,
+                                "offset": existing_len
+                            })
+                            .to_string(),
+                        );
                         println!(
-                            "[file-transfer] Started receiving file: {:?} ({} bytes)",
-                            self.current_path, size
+                            "[file-transfer] Started receiving file: {:?} ({} / {} bytes)",
+                            self.current_path, existing_len, size
                         );
                     }
                 }
+                FileTransferMessage::Resume { .. } => {}
                 FileTransferMessage::End { id } => {
                     if !self.message_matches_current(id.as_deref()) {
                         return;
                     }
                     if let Some(path) = &self.current_path {
+                        self.current_file = None;
                         if self.current_expected_size > 0
                             && self.current_received != self.current_expected_size
                         {
@@ -76,7 +125,19 @@ impl FileTransferState {
                                 self.current_expected_size
                             );
                         } else {
+                            if let Some(part_path) = &self.current_part_path {
+                                let _ = std::fs::rename(part_path, path);
+                            }
                             println!("[file-transfer] Finished receiving file: {:?}", path);
+                            self.last_completed = Some(CompletedFileTransfer {
+                                name: path
+                                    .file_name()
+                                    .and_then(|value| value.to_str())
+                                    .unwrap_or("download.bin")
+                                    .to_string(),
+                                path: path.clone(),
+                                size: self.current_received,
+                            });
                         }
                     }
                     self.reset();
@@ -86,6 +147,9 @@ impl FileTransferState {
                         return;
                     }
                     if let Some(path) = self.current_path.clone() {
+                        let _ = std::fs::remove_file(path);
+                    }
+                    if let Some(path) = self.current_part_path.clone() {
                         let _ = std::fs::remove_file(path);
                     }
                     self.reset();
@@ -104,6 +168,14 @@ impl FileTransferState {
         }
     }
 
+    pub fn take_completed(&mut self) -> Option<CompletedFileTransfer> {
+        self.last_completed.take()
+    }
+
+    pub fn take_outgoing_messages(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.outgoing_messages)
+    }
+
     fn message_matches_current(&self, id: Option<&str>) -> bool {
         id.is_none() || self.current_id.as_deref().is_none() || id == self.current_id.as_deref()
     }
@@ -112,8 +184,10 @@ impl FileTransferState {
         self.current_id = None;
         self.current_file = None;
         self.current_path = None;
+        self.current_part_path = None;
         self.current_received = 0;
         self.current_expected_size = 0;
+        self.current_name = None;
     }
 }
 
@@ -163,4 +237,12 @@ fn unique_download_path(dir: &Path, file_name: &str) -> PathBuf {
     }
 
     dir.join(format!("{} ({})", file_name, uuid::Uuid::new_v4()))
+}
+
+fn resume_part_path(dir: &Path, file_name: &str, size: u64, fingerprint: Option<&str>) -> PathBuf {
+    let token = fingerprint
+        .map(sanitize_file_name)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("{}-{}", file_name, size));
+    dir.join(format!(".{}.part", token))
 }

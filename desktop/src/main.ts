@@ -751,6 +751,7 @@ const fallbackTranslations: Record<string, string> = {
   "file_transfer_saved_to": "Saved to: {0}",
   "file_transfer_browser_download": "Saved by this device's download flow",
   "file_transfer_drop_overlay": "Release to send files",
+  "file_transfer_failed": "Transfer failed",
   "log_title": "System Logs",
   "err_rtc_failed": "P2P connection failed. The local and remote devices might be behind a strict symmetric NAT or firewall and cannot punch through. Please click \"🚀 Enable Relay Mode\" to establish connection.",
   "err_target_offline": "The remote device is offline. Please make sure the device ID is correct.",
@@ -1201,6 +1202,11 @@ function updateDomTranslations() {
     if (btnDisplayModeFloat) btnDisplayModeFloat.textContent = "🔍 " + t("btn_original_size");
     const btnFileTransferFloat = document.getElementById("btn-file-transfer-float");
     if (btnFileTransferFloat) btnFileTransferFloat.textContent = "📁 " + t("file_transfer_float");
+    const btnFileTransferDirect = document.getElementById("btn-file-transfer-direct");
+    if (btnFileTransferDirect) {
+      btnFileTransferDirect.setAttribute("title", t("file_transfer_float"));
+      btnFileTransferDirect.setAttribute("aria-label", t("file_transfer_float"));
+    }
     
     const btnTouchMode = document.getElementById("btn-touch-mode");
     if (btnTouchMode) btnTouchMode.textContent = "🖱️ " + t("ui_trackpad_mode");
@@ -3889,6 +3895,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     const btnFileTransferFloat = document.getElementById("btn-file-transfer-float");
     if (btnFileTransferFloat) {
       btnFileTransferFloat.textContent = "📁 " + t("file_transfer_float");
+    }
+    const btnFileTransferDirect = document.getElementById("btn-file-transfer-direct");
+    if (btnFileTransferDirect) {
+      btnFileTransferDirect.setAttribute("title", t("file_transfer_float"));
+      btnFileTransferDirect.setAttribute("aria-label", t("file_transfer_float"));
     }
     const btnSendKeys = document.getElementById("btn-send-keys");
     if (btnSendKeys) {

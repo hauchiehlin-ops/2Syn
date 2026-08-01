@@ -21,6 +21,8 @@ struct AppState {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     active_file_channel: tokio::sync::Mutex<Option<Arc<webrtc::data_channel::RTCDataChannel>>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    file_resume_offsets: tokio::sync::Mutex<std::collections::HashMap<String, u64>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     signaling_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     current_pin: Arc<tokio::sync::RwLock<String>>,
@@ -1060,15 +1062,48 @@ async fn handle_remote_offer_as_host(
             let file_state = Arc::new(tokio::sync::Mutex::new(
                 syn_core::file_transfer::FileTransferState::new(),
             ));
+            let app_for_file_events = app.clone();
+            let dc_for_file_events = Arc::clone(&d);
             d.on_message(Box::new(move |msg| {
                 let data = msg.data.to_vec();
                 let file_state = Arc::clone(&file_state);
+                let app = app_for_file_events.clone();
+                let dc = Arc::clone(&dc_for_file_events);
                 Box::pin(async move {
                     let mut state = file_state.lock().await;
                     // 如果能解析為字串，可能是控制訊息 (JSON)
                     if let Ok(text_str) = std::str::from_utf8(&data) {
                         if text_str.starts_with("{") {
+                            if let Ok(value) = serde_json::from_str::<serde_json::Value>(text_str) {
+                                if value.get("action").and_then(|value| value.as_str()) == Some("resume") {
+                                    if let Some(id) = value.get("id").and_then(|value| value.as_str()) {
+                                        let offset = value
+                                            .get("offset")
+                                            .and_then(|value| value.as_u64())
+                                            .unwrap_or(0);
+                                        let app_state = app.state::<AppState>();
+                                        app_state
+                                            .file_resume_offsets
+                                            .lock()
+                                            .await
+                                            .insert(id.to_string(), offset);
+                                    }
+                                }
+                            }
                             state.handle_message(text_str);
+                            for outgoing in state.take_outgoing_messages() {
+                                let _ = dc.send_text(outgoing).await;
+                            }
+                            if let Some(completed) = state.take_completed() {
+                                let _ = app.emit(
+                                    "file-transfer-received",
+                                    serde_json::json!({
+                                        "name": completed.name,
+                                        "path": completed.path.to_string_lossy().to_string(),
+                                        "size": completed.size
+                                    }),
+                                );
+                            }
                             return;
                         }
                     }
@@ -1779,10 +1814,20 @@ fn build_monitor_list_message(app: &tauri::AppHandle) -> Option<serde_json::Valu
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
-async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    use bytes::Bytes;
-    use tokio::io::AsyncReadExt;
+async fn has_active_file_transfer_channel(state: State<'_, AppState>) -> Result<bool, String> {
     use webrtc::data_channel::data_channel_state::RTCDataChannelState;
+
+    let channel = state.active_file_channel.lock().await.clone();
+    Ok(channel
+        .as_ref()
+        .map(|dc| dc.ready_state() == RTCDataChannelState::Open)
+        .unwrap_or(false))
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[tauri::command]
+async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     let path_buf = std::path::PathBuf::from(path);
     let metadata = tokio::fs::metadata(&path_buf)
@@ -1798,6 +1843,68 @@ async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result
         .ok_or_else(|| "無法取得檔名".to_string())?
         .to_string();
 
+    let dc = active_file_channel(&state).await?;
+    let fingerprint = file_resume_fingerprint(
+        &file_name,
+        metadata.len(),
+        metadata.modified().ok(),
+    );
+    let id = send_file_start(&dc, &file_name, metadata.len(), &fingerprint).await?;
+    let offset = wait_for_resume_offset(&state, &id).await?.min(metadata.len());
+
+    let mut file = tokio::fs::File::open(&path_buf)
+        .await
+        .map_err(|e| format!("無法開啟檔案: {}", e))?;
+    if offset > 0 {
+        file.seek(std::io::SeekFrom::Start(offset))
+            .await
+            .map_err(|e| format!("無法續傳定位檔案: {}", e))?;
+    }
+    let mut buf = vec![0u8; 16 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .await
+            .map_err(|e| format!("讀取檔案失敗: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        send_file_chunk(&dc, &buf[..n]).await?;
+    }
+
+    send_file_end(&dc).await?;
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[tauri::command]
+async fn send_selected_file_to_client(
+    name: String,
+    bytes: Vec<u8>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let file_name = sanitize_received_file_name(&name);
+    let dc = active_file_channel(&state).await?;
+    let fingerprint = file_resume_fingerprint(&file_name, bytes.len() as u64, None);
+    let id = send_file_start(&dc, &file_name, bytes.len() as u64, &fingerprint).await?;
+    let offset = wait_for_resume_offset(&state, &id)
+        .await?
+        .min(bytes.len() as u64) as usize;
+
+    for chunk in bytes[offset..].chunks(16 * 1024) {
+        send_file_chunk(&dc, chunk).await?;
+    }
+
+    send_file_end(&dc).await?;
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn active_file_channel(
+    state: &State<'_, AppState>,
+) -> Result<Arc<webrtc::data_channel::RTCDataChannel>, String> {
+    use webrtc::data_channel::data_channel_state::RTCDataChannelState;
+
     let dc = state
         .active_file_channel
         .lock()
@@ -1809,46 +1916,83 @@ async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result
         return Err("檔案傳輸通道尚未開啟".to_string());
     }
 
+    Ok(dc)
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn send_file_start(
+    dc: &Arc<webrtc::data_channel::RTCDataChannel>,
+    file_name: &str,
+    size: u64,
+    fingerprint: &str,
+) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let start_msg = serde_json::json!({
         "action": "start",
         "id": id,
         "name": file_name,
-        "size": metadata.len()
+        "size": size,
+        "fingerprint": fingerprint
     });
     dc.send_text(start_msg.to_string())
         .await
-        .map_err(|e| format!("無法送出檔案開始訊息: {}", e))?;
+        .map(|_| id)
+        .map_err(|e| format!("無法送出檔案開始訊息: {}", e))
+}
 
-    let mut file = tokio::fs::File::open(&path_buf)
-        .await
-        .map_err(|e| format!("無法開啟檔案: {}", e))?;
-    let mut buf = vec![0u8; 16 * 1024];
-    loop {
-        let n = file
-            .read(&mut buf)
-            .await
-            .map_err(|e| format!("讀取檔案失敗: {}", e))?;
-        if n == 0 {
-            break;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn wait_for_resume_offset(state: &State<'_, AppState>, id: &str) -> Result<u64, String> {
+    for _ in 0..30 {
+        if let Some(offset) = state.file_resume_offsets.lock().await.remove(id) {
+            return Ok(offset);
         }
-        dc.send(&Bytes::copy_from_slice(&buf[..n]))
-            .await
-            .map_err(|e| format!("檔案區塊傳送失敗: {}", e))?;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Ok(0)
+}
 
-        while dc.buffered_amount().await > 10 * 1024 * 1024 {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            if dc.ready_state() != RTCDataChannelState::Open {
-                return Err("檔案傳輸通道已關閉".to_string());
-            }
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn file_resume_fingerprint(
+    file_name: &str,
+    size: u64,
+    modified: Option<std::time::SystemTime>,
+) -> String {
+    let modified_secs = modified
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    sanitize_received_file_name(&format!("{}-{}-{}", file_name, size, modified_secs))
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn send_file_chunk(
+    dc: &Arc<webrtc::data_channel::RTCDataChannel>,
+    chunk: &[u8],
+) -> Result<(), String> {
+    use bytes::Bytes;
+    use webrtc::data_channel::data_channel_state::RTCDataChannelState;
+
+    dc.send(&Bytes::copy_from_slice(chunk))
+        .await
+        .map_err(|e| format!("檔案區塊傳送失敗: {}", e))?;
+
+    while dc.buffered_amount().await > 10 * 1024 * 1024 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        if dc.ready_state() != RTCDataChannelState::Open {
+            return Err("檔案傳輸通道已關閉".to_string());
         }
     }
 
-    let end_msg = serde_json::json!({ "action": "end", "id": id });
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn send_file_end(dc: &Arc<webrtc::data_channel::RTCDataChannel>) -> Result<(), String> {
+    let end_msg = serde_json::json!({ "action": "end" });
     dc.send_text(end_msg.to_string())
         .await
-        .map_err(|e| format!("無法送出檔案結束訊息: {}", e))?;
-    Ok(())
+        .map(|_| ())
+        .map_err(|e| format!("無法送出檔案結束訊息: {}", e))
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -1946,6 +2090,8 @@ pub fn run() {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             active_file_channel: tokio::sync::Mutex::new(None),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            file_resume_offsets: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             signaling_tx: tokio::sync::Mutex::new(None),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             current_pin: Arc::new(tokio::sync::RwLock::new(String::new())),
@@ -2001,7 +2147,11 @@ pub fn run() {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             send_custom_signaling_message,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            has_active_file_transfer_channel,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             send_file_to_client,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            send_selected_file_to_client,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             save_received_file,
             read_clipboard,

@@ -94,9 +94,11 @@ Check「Privacy Mode」in the **host** 2syn interface to black out the host scre
 
 ## 8. File Transfer
 
-After connecting, send files by dropping them into the File Transfer box, choosing files from the button, or using the Files button in the in-session floating toolbar. Files are sent directly through the active WebRTC Data Channel with end-to-end encryption. They do not pass through a 2syn file server and are not written to a backend database.
+After connecting, a client can use the always-visible Files button in the remote screen or drop files directly onto the remote screen to send them to the host, without leaving the remote session. If a client is already connected to a desktop host, the host app's File Transfer area uses that active session to send files back to the client and does not require a new connection. Files are sent directly through the active WebRTC Data Channel with end-to-end encryption. They do not pass through a 2syn file server and are not written to a backend database.
 
 Desktop apps save received files to the system Downloads folder under `2syn-transfers` and show the full path in the transfer progress UI. If a file name already exists, 2syn adds suffixes such as `(1)` or `(2)`. Web, iOS, and Android hand the received file to the platform download/files flow.
+
+2syn does not restrict file formats and does not set a hard-coded file count limit; multiple files are sent sequentially. Practical file size limits depend on source-device memory, browser/system file APIs, WebRTC Data Channel stability, and available disk space on the receiver. If a transfer is interrupted and the same file is selected again, both sides negotiate the received offset and resume from that point. Desktop receivers persist progress in `.part` files; Web, iOS, and Android can resume while the same page or app session still retains its temporary transfer data.
 
 ### 8.1 Address Book and Saved Passwords
 

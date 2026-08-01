@@ -1283,6 +1283,32 @@ body.file-transfer-dragging #remote-video-container[style*="display: flex"] #fil
   display: flex;
 }
 
+.session-file-direct {
+  display: flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 22px;
+  background: rgba(15, 23, 42, 0.7);
+  color: #fff;
+  font-size: 18px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 0.15s ease, background 0.15s ease;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.session-file-direct:hover,
+.session-file-direct:focus-visible {
+  background: rgba(37, 99, 235, 0.78);
+  outline: none;
+  transform: translateY(-1px);
+}
+
 .transfer-progress-container {
   flex-direction: column;
   gap: 8px;

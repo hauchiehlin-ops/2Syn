@@ -714,8 +714,11 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>檔案傳輸與接收位置</h3>
         <ul>
-          <li>連線後可在側欄「檔案傳輸」區拖放檔案、點選「選擇檔案」，或在遠端畫面浮動工具列點「檔案」傳送。</li>
+          <li>client 連到遠端後，可直接在遠端畫面點常駐「檔案」按鈕選檔，或把檔案拖進遠端畫面送到 host，不需要離開遠端操作畫面。</li>
+          <li>host 端已有 client 連線時，主畫面的「檔案傳輸」區會使用目前活躍連線把檔案送到 client，不會要求重新連線。</li>
           <li>檔案會透過目前 WebRTC 連線直接傳到另一端，不經伺服器、不寫入後端資料庫。</li>
+          <li>不限制檔案格式，也沒有硬編碼的檔案數量上限；多檔依序傳送。檔案大小實際受裝置記憶體、瀏覽器/系統檔案 API、DataChannel 穩定度與接收端磁碟空間限制。</li>
+          <li>中斷後重新選擇同一檔案會協商已收到的 offset 並續傳；桌面原生接收端會以 .part 暫存檔保存進度，Web/iOS/Android 可在同一工作階段仍保留暫存資料時續傳。</li>
           <li>桌面原生版收到檔案後會固定存到系統下載資料夾的 <strong>2syn-transfers</strong> 子資料夾，完成時會顯示完整路徑；網頁版、iOS 與 Android 會交由該平台的下載/檔案流程保存。</li>
         </ul>
       </div>
@@ -745,8 +748,11 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>文件传输与接收位置</h3>
         <ul>
-          <li>连接后可在侧栏“文件传输”区域拖放文件、点击“选择文件”，或在远程画面浮动工具栏点击“文件”发送。</li>
+          <li>client 连接到远程后，可直接在远程画面点击常驻“文件”按钮选文件，或把文件拖进远程画面发送到 host，不需要离开远程操作画面。</li>
+          <li>host 端已有 client 连接时，主画面的“文件传输”区域会使用当前活动连接把文件发回 client，不会要求重新连接。</li>
           <li>文件会通过当前 WebRTC 连接直接传到另一端，不经过服务器，也不写入后端数据库。</li>
+          <li>不限制文件格式，也没有硬编码的文件数量上限；多文件依次传送。文件大小实际受设备内存、浏览器/系统文件 API、DataChannel 稳定度与接收端磁盘空间限制。</li>
+          <li>中断后重新选择同一文件会协商已收到的 offset 并续传；桌面原生接收端会以 .part 临时文件保存进度，Web/iOS/Android 可在同一工作阶段仍保留临时数据时续传。</li>
           <li>桌面原生版收到文件后会固定保存到系统下载文件夹的 <strong>2syn-transfers</strong> 子文件夹，完成时会显示完整路径；网页版、iOS 与 Android 会交由平台下载/文件流程保存。</li>
         </ul>
       </div>
@@ -776,8 +782,11 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>File Transfer &amp; Receive Location</h3>
         <ul>
-          <li>After connecting, send files by dropping them into the File Transfer box, choosing files from the button, or using the Files button in the in-session floating toolbar.</li>
+          <li>After a client connects, use the always-visible Files button in the remote screen or drop files onto the remote screen to send them to the host without leaving the session.</li>
+          <li>When a desktop host already has a connected client, the host app's File Transfer area uses the active session to send files back to the client and does not require a new connection.</li>
           <li>Files move directly through the active WebRTC session. They do not pass through a 2syn file server and are not written to a backend database.</li>
+          <li>File formats are not restricted, and there is no hard-coded file count limit; multiple files are sent sequentially. Practical size limits depend on device memory, browser/system file APIs, DataChannel stability, and receiver disk space.</li>
+          <li>If a transfer is interrupted, selecting the same file again negotiates the received offset and resumes from there. Desktop receivers persist progress in .part files; Web/iOS/Android can resume while the same app or page session still retains temporary transfer data.</li>
           <li>Desktop apps save received files to the system Downloads folder under <strong>2syn-transfers</strong> and show the full path when complete. Web, iOS, and Android hand the file to the platform download/files flow.</li>
         </ul>
       </div>
@@ -807,7 +816,8 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>ファイル転送と保存場所</h3>
         <ul>
-          <li>接続後、ファイル転送欄へドラッグ、ファイル選択ボタン、またはセッション中のフローティングツールバーの「Files」から送信できます。</li>
+          <li>クライアント接続後は、リモート画面の常時表示される「Files」ボタン、またはリモート画面へのドラッグで host に送信できます。セッション画面を離れる必要はありません。</li>
+          <li>デスクトップ host に client が接続済みの場合、host アプリのファイル転送欄はそのアクティブなセッションで client に送信し、新しい接続を要求しません。</li>
           <li>ファイルは現在の WebRTC セッションを通じて直接送信され、2syn のファイルサーバーやバックエンドデータベースには保存されません。</li>
           <li>デスクトップ版で受信したファイルは Downloads 内の <strong>2syn-transfers</strong> に保存され、完了時に完全なパスが表示されます。Web/iOS/Android では各プラットフォームのダウンロード/ファイル保存処理に渡されます。</li>
         </ul>
@@ -832,7 +842,8 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>파일 전송 및 저장 위치</h3>
         <ul>
-          <li>연결 후 파일 전송 영역에 드롭하거나 파일 선택 버튼, 또는 세션 중 플로팅 툴바의 Files 버튼으로 파일을 보낼 수 있습니다.</li>
+          <li>client가 연결된 뒤에는 원격 화면의 항상 보이는 Files 버튼을 누르거나 파일을 원격 화면에 드롭하여 host로 보낼 수 있으며, 세션 화면을 떠날 필요가 없습니다.</li>
+          <li>desktop host에 client가 이미 연결되어 있으면 host 앱의 파일 전송 영역은 현재 활성 세션으로 client에 파일을 보내며 새 연결을 요구하지 않습니다.</li>
           <li>파일은 현재 WebRTC 세션을 통해 직접 전송되며 2syn 파일 서버나 백엔드 데이터베이스에 저장되지 않습니다.</li>
           <li>데스크톱 앱은 받은 파일을 Downloads의 <strong>2syn-transfers</strong> 폴더에 저장하고 완료 시 전체 경로를 표시합니다. Web/iOS/Android는 플랫폼의 다운로드/파일 흐름에 맡깁니다.</li>
         </ul>
@@ -857,7 +868,8 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>Dateiübertragung &amp; Speicherort</h3>
         <ul>
-          <li>Nach dem Verbinden können Dateien per Drag-and-drop in das Dateiübertragungsfeld, über die Dateiauswahl oder über die Schaltfläche Files in der schwebenden Sitzungsleiste gesendet werden.</li>
+          <li>Nach dem Verbinden kann der Client die dauerhaft sichtbare Files-Schaltfläche im Remote-Bildschirm verwenden oder Dateien direkt auf den Remote-Bildschirm ziehen, um sie an den Host zu senden, ohne die Sitzung zu verlassen.</li>
+          <li>Wenn ein Client bereits mit einem Desktop-Host verbunden ist, nutzt der Dateiübertragungsbereich der Host-App diese aktive Sitzung, um Dateien an den Client zurückzusenden, und fordert keine neue Verbindung an.</li>
           <li>Dateien werden direkt über die aktive WebRTC-Sitzung übertragen, ohne 2syn-Dateiserver und ohne Backend-Datenbank.</li>
           <li>Desktop-Apps speichern empfangene Dateien im Downloads-Ordner unter <strong>2syn-transfers</strong> und zeigen nach Abschluss den vollständigen Pfad an. Web, iOS und Android verwenden den Download-/Dateifluss der Plattform.</li>
         </ul>
@@ -882,7 +894,8 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>การถ่ายโอนไฟล์และตำแหน่งรับไฟล์</h3>
         <ul>
-          <li>หลังเชื่อมต่อแล้ว สามารถลากไฟล์ลงในช่อง File Transfer เลือกไฟล์จากปุ่ม หรือใช้ปุ่ม Files บนแถบลอยระหว่างเซสชันได้</li>
+          <li>หลัง client เชื่อมต่อแล้ว ให้ใช้ปุ่ม Files ที่แสดงตลอดบนหน้าจอรีโมต หรือวางไฟล์ลงบนหน้าจอรีโมตเพื่อส่งไปยัง host โดยไม่ต้องออกจากเซสชัน</li>
+          <li>เมื่อ desktop host มี client เชื่อมต่ออยู่แล้ว พื้นที่ File Transfer ในแอป host จะใช้เซสชันที่ใช้งานอยู่ส่งไฟล์กลับไปยัง client และไม่ขอให้เชื่อมต่อใหม่</li>
           <li>ไฟล์ถูกส่งตรงผ่านเซสชัน WebRTC ปัจจุบัน ไม่ผ่านเซิร์ฟเวอร์ไฟล์ของ 2syn และไม่บันทึกลงฐานข้อมูล backend</li>
           <li>แอปเดสก์ท็อปจะบันทึกไฟล์ที่รับไว้ในโฟลเดอร์ Downloads/<strong>2syn-transfers</strong> และแสดงพาธเต็มเมื่อเสร็จสิ้น ส่วน Web/iOS/Android จะส่งต่อให้ระบบดาวน์โหลด/ไฟล์ของแพลตฟอร์มนั้น</li>
         </ul>
@@ -907,7 +920,8 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>Transfer File &amp; Lokasi Penerimaan</h3>
         <ul>
-          <li>Setelah terhubung, kirim file dengan menjatuhkannya ke kotak File Transfer, memilih file dari tombol, atau memakai tombol Files pada toolbar mengambang sesi.</li>
+          <li>Setelah client terhubung, gunakan tombol Files yang selalu terlihat di layar remote atau jatuhkan file langsung ke layar remote untuk mengirim ke host tanpa meninggalkan sesi.</li>
+          <li>Jika client sudah terhubung ke desktop host, area File Transfer di aplikasi host memakai sesi aktif tersebut untuk mengirim file kembali ke client dan tidak meminta koneksi baru.</li>
           <li>File dikirim langsung melalui sesi WebRTC aktif, tidak melalui server file 2syn dan tidak ditulis ke database backend.</li>
           <li>Aplikasi desktop menyimpan file yang diterima ke folder Downloads/<strong>2syn-transfers</strong> dan menampilkan path lengkap saat selesai. Web, iOS, dan Android memakai alur unduhan/file dari platform.</li>
         </ul>
@@ -932,7 +946,8 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>Pemindahan Fail &amp; Lokasi Terima</h3>
         <ul>
-          <li>Selepas bersambung, hantar fail dengan melepaskannya ke kotak File Transfer, memilih fail melalui butang, atau menggunakan butang Files pada toolbar terapung sesi.</li>
+          <li>Selepas client bersambung, gunakan butang Files yang sentiasa kelihatan pada skrin remote atau lepaskan fail terus ke skrin remote untuk menghantar ke host tanpa meninggalkan sesi.</li>
+          <li>Jika client sudah bersambung ke desktop host, ruang File Transfer dalam aplikasi host menggunakan sesi aktif itu untuk menghantar fail kembali ke client dan tidak meminta sambungan baharu.</li>
           <li>Fail dihantar terus melalui sesi WebRTC aktif, tanpa pelayan fail 2syn dan tanpa pangkalan data backend.</li>
           <li>Aplikasi desktop menyimpan fail diterima ke folder Downloads/<strong>2syn-transfers</strong> dan memaparkan path penuh apabila selesai. Web, iOS dan Android menggunakan aliran muat turun/fail platform.</li>
         </ul>
@@ -957,7 +972,8 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>Передача файлов и место сохранения</h3>
         <ul>
-          <li>После подключения отправляйте файлы, перетаскивая их в область File Transfer, выбирая через кнопку или используя кнопку Files на плавающей панели сеанса.</li>
+          <li>После подключения client используйте постоянно видимую кнопку Files на удаленном экране или перетащите файлы прямо на удаленный экран, чтобы отправить их на host без выхода из сеанса.</li>
+          <li>Если client уже подключен к desktop host, область File Transfer в приложении host использует активный сеанс для отправки файлов обратно на client и не требует нового подключения.</li>
           <li>Файлы передаются напрямую через активный сеанс WebRTC, без файлового сервера 2syn и без записи в backend-базу данных.</li>
           <li>Настольное приложение сохраняет полученные файлы в Downloads/<strong>2syn-transfers</strong> и показывает полный путь после завершения. Web, iOS и Android используют системный механизм загрузок/файлов.</li>
         </ul>
@@ -982,7 +998,8 @@ const TODAY_HELP_UPDATES: Record<string, Partial<HelpDoc>> = {
       <div>
         <h3>Transferencia de archivos y ubicación</h3>
         <ul>
-          <li>Después de conectarse, envíe archivos soltándolos en el cuadro File Transfer, eligiéndolos con el botón, o usando Files en la barra flotante de la sesión.</li>
+          <li>Después de que el client se conecte, use el botón Files siempre visible en la pantalla remota o suelte archivos directamente sobre la pantalla remota para enviarlos al host sin salir de la sesión.</li>
+          <li>Si un client ya está conectado a un desktop host, el área File Transfer de la app host usa esa sesión activa para enviar archivos de vuelta al client y no pide una conexión nueva.</li>
           <li>Los archivos se mueven directamente por la sesión WebRTC activa, sin servidor de archivos 2syn ni base de datos backend.</li>
           <li>Las apps de escritorio guardan archivos recibidos en Downloads/<strong>2syn-transfers</strong> y muestran la ruta completa al finalizar. Web, iOS y Android usan el flujo de descargas/archivos de la plataforma.</li>
         </ul>
