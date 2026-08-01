@@ -229,7 +229,7 @@
           <div class="separator"></div>
         </div>
 
-        <!-- 本機身分與授權 -->
+        <!-- 本機身分與連線設定 -->
         <div class="host-info" id="local-host-info-section">
           <!-- macOS Permission Warning Banner -->
           <div id="permission-warning-banner" class="alert-banner-mac" style="display: none;">
@@ -259,13 +259,6 @@
             <canvas id="id-qr-canvas" width="160" height="160"></canvas>
             <span id="txt-id-qr-hint" style="color:#333; font-size:11px; text-align:center;">用 iOS 相機掃描，免手動輸入 ID</span>
           </div>
-          <div class="info-row">
-            <span id="lbl-my-mac"><span id="txt-my-mac-label">My MAC:</span></span>
-            <div class="val-with-copy">
-              <span id="val-my-mac" class="code-text">Loading...</span>
-              <button class="btn-copy" id="btn-copy-mac" type="button" title="Copy">📋</button>
-            </div>
-          </div>
           <div class="host-only host-file-send-panel">
             <label for="host-file-path-input" id="txt-host-send-file-label">Send file to connected client</label>
             <div class="host-file-send-row">
@@ -275,13 +268,6 @@
               </button>
             </div>
             <div id="host-file-send-status"></div>
-          </div>
-          <div class="info-row">
-            <span id="lbl-hwid"><span id="txt-my-hwid-label">My HWID:</span></span>
-            <div class="val-with-copy">
-              <span id="val-hwid" class="code-text truncate">Loading...</span>
-              <button class="btn-copy" id="btn-copy-hwid" type="button" title="Copy">📋</button>
-            </div>
           </div>
           <div class="info-row" style="flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); width: 100%;">
             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">

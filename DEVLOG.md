@@ -20,6 +20,24 @@
 
 # 歷程
 
+## 2026-08-01 — 地址簿新增連線密碼保存
+
+- **問題/目標**：地址簿只能保存裝置 ID/名稱，使用者下次連線仍要重新輸入 access PIN；需要保存登入資訊，並確保 web、iOS、Android、desktop client 都可用。
+- **根因/做法**：
+  1. `desktop/src/main.ts` 的 `SavedDevice` 新增 `password` 欄位；連線成功後會把目前 `access-pin-input` 的值與遠端 ID 一起寫入地址簿。
+  2. 地址簿卡片新增密碼欄位（`type=password`），使用者可直接修改；點 Connect 時會填入遠端 ID 與保存的密碼，再沿用既有連線流程。
+  3. 保存位置沿用地址簿既有 `localStorage`，因此純網頁版、iOS/Android WebView、桌面版都走同一套資料路徑；這是便利性保存，不是系統 Keychain 級別的加密保存。
+- **驗證**：`npm run build`、`cargo check -p syn-desktop`、`cargo check -p syn-core`、`cargo check -p syn-desktop --target aarch64-apple-ios` 通過（僅既有 warning；本機 shell 仍會額外印出缺 Java Runtime 的環境訊息）。
+
+## 2026-08-01 — 免費版移除 MAC/WOL 與 HWID 授權設定
+
+- **問題/目標**：「我的 MAC」若只服務 Wake-on-LAN，跨網域不可用就不應放在主介面；「本機 HWID」若只服務買斷授權綁定，且專案已定位為免費版，也不應顯示或阻擋操作。
+- **根因/做法**：
+  1. `desktop/index.html` 移除 Host Information 內的 My MAC 與 My HWID 顯示列，只保留真正會用於連線的 My ID、靜態無人值守密碼與檔案傳輸入口。
+  2. `desktop/src/main.ts` 移除前端 `get_device_hwid`/`get_local_mac_address` 載入、MAC/HWID 複製、地址簿 MAC 欄位與 Wake 按鈕；地址簿回到純裝置 ID/名稱/最後連線時間。
+  3. 免費版 host 接收 offer 時不再呼叫 `check_license_status`，也不會因試用/授權狀態拒絕連線；診斷面板不再用 `license_active` 影響 NAT 狀態顏色。
+- **驗證**：`npm run build`、`cargo check -p syn-desktop`、`cargo check -p syn-core` 通過（僅既有 warning；本機 shell 仍會額外印出缺 Java Runtime 的環境訊息）。
+
 ## 2026-08-01 — 修正浮動快捷列複製/貼上與右鍵定位
 
 - **問題/目標**：浮動快捷列中的「複製」、「貼上」按鈕使用感像沒有作用；「右鍵」會在錯誤位置觸發，容易出現背景/系統右鍵選單，而不是點擊當下活躍應用程式的內容選單。

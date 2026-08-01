@@ -1741,6 +1741,26 @@ input:checked + .slider:before {
   color: var(--text-secondary);
   font-family: monospace;
 }
+.device-card-password {
+  display: grid;
+  grid-template-columns: auto minmax(72px, 1fr);
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+.device-card-password input {
+  min-width: 0;
+  height: 26px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.12));
+  background: rgba(0,0,0,0.18);
+  color: var(--text-main);
+  font-size: 12px;
+  box-sizing: border-box;
+}
 .device-card-meta {
   font-size: 10px;
   color: var(--text-secondary);

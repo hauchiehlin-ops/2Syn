@@ -910,7 +910,6 @@ function switchHelpTab(tab: "controls" | "privacy") {
 (window as any).switchHelpTab = switchHelpTab;
 
 let lastDiagnosticResult: {
-  license_active: boolean;
   stun_dns_resolved: boolean;
   nat_type: string;
   suggested_action: string;
@@ -931,7 +930,9 @@ function showDiagnosticResult() {
   
   if (natVal) {
     natVal.textContent = t(lastDiagnosticResult.nat_type);
-    natVal.style.color = lastDiagnosticResult.license_active ? "var(--color-success)" : "var(--color-danger)";
+    natVal.style.color = lastDiagnosticResult.nat_type === "nat_restricted"
+      ? "var(--color-danger)"
+      : "var(--color-success)";
   }
   
   if (suggestVal) {
@@ -991,8 +992,6 @@ function updateDomTranslations() {
   setTextContent("txt-advanced-dev-title", t("ui_advanced_dev"));
   setTextContent("txt-diag-title-main", t("ui_diagnostics"));
   setTextContent("txt-my-id-label", t("ui_my_id"));
-  setTextContent("txt-my-mac-label", t("ui_my_mac"));
-  setTextContent("txt-my-hwid-label", t("ui_my_hwid"));
   setTextContent("txt-signaling-status-label", t("ui_signaling_status"));
   setTextContent("txt-unattended-access-label", t("ui_static_password"));
   setTextContent("txt-stun-lookup-label", t("ui_stun_lookup"));
@@ -1039,13 +1038,11 @@ function updateDomTranslations() {
   setTextContent("lbl-my-pin", t("my_pin_label"));
   setTextContent("lbl-signaling-status", t("lbl_signaling_status"));
   setTextContent("lbl-my-id", t("my_id"));
-  setTextContent("lbl-hwid", t("hwid"));
   setTextContent("lbl-static-pwd", t("host.unattended_access"));
   setPlaceholder("input-static-pwd", t("host.pwd_placeholder"));
   setTextContent("btn-toggle-static-pwd", t("host.pwd_show"));
   setTextContent("btn-set-static-pwd", t("host.pwd_save"));
   setTextContent("btn-delete-static-pwd", t("device_book_delete"));
-  setTextContent("lbl-license", t("license"));
   setTextContent("txt-privacy-title", t("privacy_title"));
   setTextContent("lbl-privacy-mode", t("privacy_mode"));
   setTextContent("txt-monitor-title", t("monitor_title"));
@@ -1128,7 +1125,6 @@ function updateDomTranslations() {
   setTextContent("help-remote-id", t("help_remote_id"));
   setTextContent("help-access-pin", t("access_pin_help"));
   setTextContent("help-offline-sdp", t("help_offline_sdp"));
-  setTextContent("help-license", t("help_license"));
   setTextContent("help-privacy", t("help_privacy"));
   setTextContent("help-sim", t("help_sim"));
   setTextContent("help-sim-rtt", t("help_sim_rtt"));
@@ -1139,19 +1135,6 @@ function updateDomTranslations() {
   // 更新一鍵複製按鈕之 Tooltip 翻譯
   const btnCopyId = document.getElementById("btn-copy-id");
   if (btnCopyId) btnCopyId.setAttribute("title", t("copy_tooltip"));
-  const btnCopyHwid = document.getElementById("btn-copy-hwid");
-  if (btnCopyHwid) btnCopyHwid.setAttribute("title", t("copy_tooltip"));
-
-  // 更新授權狀態徽章文字
-  const badge = document.getElementById("license-status");
-  if (badge) {
-    if (badge.classList.contains("status-active")) {
-      badge.textContent = t("status_active");
-    } else {
-      badge.textContent = t("status_inactive");
-    }
-  }
-  
   // 新增：Pointer Lock Tooltip 與穿透模式按鈕
   setTextContent("pointer-lock-tooltip", t("pointer_lock_tooltip"));
   setTextContent("btn-fix-network", t("btn_fix_network"));
@@ -1312,25 +1295,6 @@ function setPlaceholder(id: string, text: string) {
 // 核心 Tauri 後端互動邏輯
 // =========================================================================
 
-// 獲取硬體特徵碼 (HWID)
-async function fetchHwid() {
-  if (!isDesktopTauri()) {
-    setTextContent("val-hwid", t("hwid_failed"));
-    return;
-  }
-  try {
-    const hwid = await invoke<string>("get_device_hwid");
-    const valHwid = document.getElementById("val-hwid");
-    if (valHwid) {
-      valHwid.textContent = hwid;
-      valHwid.title = hwid; // 懸停顯示完整 HWID
-    }
-  } catch (error) {
-    console.error("獲取 HWID 失敗:", error);
-    setTextContent("val-hwid", t("hwid_failed"));
-  }
-}
-
 // 產生模擬的 9 位數本機 ID (去中心化定址)
 // 使用 sessionStorage 確保同一次啟動 ID 固定不變
 function generateMockMyId(): string {
@@ -1348,22 +1312,6 @@ function generateMockMyId(): string {
     valMyId.textContent = `${storedId.slice(0,3)}-${storedId.slice(3,6)}-${storedId.slice(6)}`;
   }
   return storedId; // 回傳純數字字串（不含 dash），供信令登入使用
-}
-
-async function loadMyMac() {
-  const valMyMac = document.getElementById("val-my-mac");
-  if (!valMyMac) return;
-  if (!isDesktopTauri()) {
-    valMyMac.textContent = "N/A";
-    return;
-  }
-  try {
-    const mac = await invoke<string>("get_local_mac_address");
-    valMyMac.textContent = mac;
-  } catch (e) {
-    valMyMac.textContent = "N/A";
-    console.error("Failed to load MAC:", e);
-  }
 }
 
 // 初始化開機自動啟動邏輯
@@ -1720,11 +1668,21 @@ async function initFirstRunPrompt() {
 interface SavedDevice {
   id: string;       // 9-digit device ID
   name: string;     // user-defined nickname
+  password?: string; // optional access PIN/password for quick reconnect
   lastConnected: string; // ISO timestamp or empty
-  mac?: string;     // optional MAC address for Wake-on-LAN
 }
 
 const DEVICE_BOOK_KEY = "2syn_device_book";
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  }[ch] || ch));
+}
 
 function loadDeviceBook(): SavedDevice[] {
   try {
@@ -1737,13 +1695,15 @@ function saveDeviceBook(devices: SavedDevice[]) {
   localStorage.setItem(DEVICE_BOOK_KEY, JSON.stringify(devices));
 }
 
-function saveDeviceToBook(deviceId: string) {
+function saveDeviceToBook(deviceId: string, password?: string) {
   const devices = loadDeviceBook();
   const existing = devices.find(d => d.id === deviceId);
+  const cleanedPassword = password?.trim() || "";
   if (existing) {
     existing.lastConnected = new Date().toISOString();
+    if (cleanedPassword) existing.password = cleanedPassword;
   } else {
-    devices.unshift({ id: deviceId, name: deviceId, lastConnected: new Date().toISOString() });
+    devices.unshift({ id: deviceId, name: deviceId, password: cleanedPassword, lastConnected: new Date().toISOString() });
   }
   saveDeviceBook(devices);
   renderDeviceBook();
@@ -1767,23 +1727,27 @@ function renderDeviceBook() {
     const lastConnStr = device.lastConnected
       ? new Date(device.lastConnected).toLocaleString()
       : t("device_book_never");
-    
-    const macVal = device.mac || "";
+    const safeId = escapeHtml(device.id);
+    const safeName = escapeHtml(device.name || device.id);
+    const passwordVal = escapeHtml(device.password || "");
     
     const card = document.createElement("div");
     card.className = "device-card";
+    card.dataset.deviceId = device.id;
     card.innerHTML = `
       <div class="device-card-info">
-        <div class="device-card-name" contenteditable="true" data-id="${device.id}" 
-             title="${t('device_book_name_placeholder')}">${device.name}</div>
-        <div class="device-card-id">${device.id}</div>
-        <div class="device-card-meta">MAC: <input type="text" class="device-mac-input" placeholder="AA:BB:CC:DD:EE:FF" value="${macVal}" /></div>
-        <div class="device-card-meta">${t("device_book_last_connected")} ${lastConnStr}</div>
+        <div class="device-card-name" contenteditable="true" data-id="${safeId}" 
+             title="${escapeHtml(t('device_book_name_placeholder'))}">${safeName}</div>
+        <div class="device-card-id">${safeId}</div>
+        <label class="device-card-password">
+          <span>${escapeHtml(t("access_pin_label"))}</span>
+          <input type="password" class="device-password-input" autocomplete="off" value="${passwordVal}" placeholder="${escapeHtml(t("access_pin_placeholder"))}" />
+        </label>
+        <div class="device-card-meta">${escapeHtml(t("device_book_last_connected"))} ${escapeHtml(lastConnStr)}</div>
       </div>
       <div class="device-card-actions">
-        ${device.mac ? `<button class="device-card-btn" onclick="deviceBookWake('${device.mac}')">Wake</button>` : ''}
-        <button class="device-card-btn" onclick="deviceBookConnect('${device.id}')">${t("device_book_connect")}</button>
-        <button class="device-card-btn danger" onclick="deviceBookDelete('${device.id}')">${t("device_book_delete")}</button>
+        <button class="device-card-btn" onclick="deviceBookConnect('${safeId}')">${escapeHtml(t("device_book_connect"))}</button>
+        <button class="device-card-btn danger" onclick="deviceBookDelete('${safeId}')">${escapeHtml(t("device_book_delete"))}</button>
       </div>
     `;
     
@@ -1804,32 +1768,42 @@ function renderDeviceBook() {
       });
     }
 
-    // MAC address editing
-    const macEl = card.querySelector(".device-mac-input") as HTMLInputElement;
-    if (macEl) {
-      macEl.addEventListener("blur", () => {
-        const newMac = macEl.value.trim();
+    const passwordEl = card.querySelector(".device-password-input") as HTMLInputElement;
+    if (passwordEl) {
+      passwordEl.addEventListener("blur", () => {
+        const newPassword = passwordEl.value.trim();
         const devices = loadDeviceBook();
         const d = devices.find(x => x.id === device.id);
-        if (d && d.mac !== newMac) {
-          d.mac = newMac;
+        if (d && d.password !== newPassword) {
+          d.password = newPassword;
           saveDeviceBook(devices);
-          renderDeviceBook(); // Re-render to show/hide Wake button
         }
       });
-      macEl.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); macEl.blur(); }
+      passwordEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); passwordEl.blur(); }
       });
     }
-    
+
     list.appendChild(card);
   });
 }
 
 (window as any).deviceBookConnect = (deviceId: string) => {
   const remoteIdInput = document.getElementById("remote-id-input") as HTMLInputElement;
+  const accessPinInput = document.getElementById("access-pin-input") as HTMLInputElement;
+  const device = loadDeviceBook().find(d => d.id === deviceId);
+  const card = Array.from(document.querySelectorAll(".device-card"))
+    .find(el => (el as HTMLElement).dataset.deviceId === deviceId);
+  const cardPasswordInput = card?.querySelector(".device-password-input") as HTMLInputElement | null;
+  const password = cardPasswordInput?.value.trim() || device?.password || "";
   if (remoteIdInput) {
     remoteIdInput.value = deviceId;
+  }
+  if (accessPinInput && password) {
+    accessPinInput.value = password;
+    saveDeviceToBook(deviceId, password);
+  }
+  if (remoteIdInput) {
     const btnConnect = document.getElementById("btn-connect");
     if (btnConnect) btnConnect.click();
   }
@@ -1839,20 +1813,6 @@ function renderDeviceBook() {
   const devices = loadDeviceBook().filter(d => d.id !== deviceId);
   saveDeviceBook(devices);
   renderDeviceBook();
-};
-
-(window as any).deviceBookWake = async (mac: string) => {
-  if (!isDesktopTauri()) {
-    alert(t("wake_failed") || "Wake-on-LAN is only available in the desktop app.");
-    return;
-  }
-  try {
-    await invoke("wake_device", { mac });
-    alert(t("wake_success") || "Magic Packet 已送出！");
-  } catch (err) {
-    console.error("WoL failed:", err);
-    alert(`${t("wake_failed") || "喚醒失敗"}: ${err}`);
-  }
 };
 
 (window as any).toggleDeviceBook = () => {
@@ -2551,26 +2511,6 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
     return;
   }
 
-  // 1. 檢查本機授權狀態（作為被控端，必須有有效授權或在試用期內）
-  try {
-    const licenseState = await invoke<{status: string, trial_days_left: number | null}>("check_license_status");
-    if (licenseState.status === "expired" || licenseState.status === "unauthorized") {
-      console.warn(t("log_webrtc_trial_expired"), licenseState.status);
-      alert(t("err_host_expired") || "Host trial period has expired. Please enter a valid license key.");
-      if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
-        signalingWs.send(JSON.stringify({
-          type: "error",
-          target: sourceId,
-          message: "Connection rejected: Host trial expired"
-        }));
-      }
-      return;
-    }
-  } catch (e) {
-    console.warn("授權狀態檢查失敗，為安全起見拒絕連線:", e);
-    return;
-  }
-
   rustOfferProcessed = false;
   rustIceCandidateQueue = [];
   currentRemoteId = sourceId;
@@ -2848,7 +2788,8 @@ function updateConnectionStatusUI(state: string) {
       
       // 連線成功後自動儲存到地址簿
       if (currentRemoteId && currentRemoteId !== "manual") {
-        saveDeviceToBook(currentRemoteId);
+        const accessPinInput = document.getElementById("access-pin-input") as HTMLInputElement | null;
+        saveDeviceToBook(currentRemoteId, accessPinInput?.value);
       }
     }
   }
@@ -3518,14 +3459,10 @@ function initHelpButtons() {
   });
 }
 
-// 初始化一鍵複製功能 (本機 ID / HWID / MAC) 並加上微交互回饋
+// 初始化一鍵複製功能 (本機 ID) 並加上微交互回饋
 function initClipboardCopy() {
   const btnCopyId = document.getElementById("btn-copy-id");
-  const btnCopyHwid = document.getElementById("btn-copy-hwid");
-  const btnCopyMac = document.getElementById("btn-copy-mac");
   const valMyId = document.getElementById("val-my-id");
-  const valHwid = document.getElementById("val-hwid");
-  const valMyMac = document.getElementById("val-my-mac");
 
   if (btnCopyId && valMyId) {
     btnCopyId.addEventListener("click", () => {
@@ -3563,30 +3500,6 @@ function initClipboardCopy() {
         idQrPopup.style.display = "none";
       }
     }, { capture: true });
-  }
-  
-  if (btnCopyMac && valMyMac) {
-    btnCopyMac.addEventListener("click", () => {
-      const macText = valMyMac.textContent || "";
-      writeLocalClipboard(macText).then(() => {
-        btnCopyMac.textContent = "✓";
-        setTimeout(() => {
-          btnCopyMac.textContent = "📋";
-        }, 1500);
-      }).catch((err) => console.error("複製 MAC 失敗:", err));
-    });
-  }
-
-  if (btnCopyHwid && valHwid) {
-    btnCopyHwid.addEventListener("click", () => {
-      const hwidText = valHwid.textContent || "";
-      writeLocalClipboard(hwidText).then(() => {
-        btnCopyHwid.textContent = "✓";
-        setTimeout(() => {
-          btnCopyHwid.textContent = "📋";
-        }, 1500);
-      }).catch((err) => console.error("複製 HWID 失敗:", err));
-    });
   }
 }
 
@@ -6535,13 +6448,9 @@ async function initializeApp() {
 
   const generatedId = generateMockMyId();
   if (generatedId) myId = generatedId;
-
-  await fetchHwid();
-  await loadMyMac();
   
   initConnectButton();
   initQuickMenu();
-  // initLicenseVerification();
   initPrivacyMode();
   initAutostart();
   initNetworkSimulator();
@@ -6568,7 +6477,7 @@ async function initializeApp() {
     // macOS / Windows Desktop: 雙向一體化 (Host + Client)，兩者皆保留，無需隱藏
     console.log("[UI] Desktop mode: Host and Client UI both enabled.");
   } else {
-    // Client 主控端 (iOS / Android / 純網頁)：不需要「本機資訊」、「固定密碼」與「買斷金鑰」
+    // Client 主控端 (iOS / Android / 純網頁)：不需要「本機資訊」與「固定密碼」
     const localHostInfo = document.getElementById("local-host-info-section");
     if (localHostInfo) {
       localHostInfo.style.display = "none";
