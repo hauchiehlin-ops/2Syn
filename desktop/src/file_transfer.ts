@@ -73,6 +73,8 @@ const TRANSFER_ACK_INTERVAL_MS = 250;
 const TRANSFER_MIN_IN_FLIGHT_BYTES = 256 * 1024;
 const TRANSFER_MOBILE_MAX_IN_FLIGHT_BYTES = 768 * 1024;
 const TRANSFER_DESKTOP_MAX_IN_FLIGHT_BYTES = 2 * 1024 * 1024;
+const TRANSFER_BUFFER_STALL_TIMEOUT_MS = 10_000;
+const TRANSFER_PROGRESS_STALL_TIMEOUT_MS = 12_000;
 const TRANSFER_UI_INTERVAL_MS = 120;
 const CHUNK_GROW_AFTER = 16;
 const FRAME_HEADER_BYTES = 16;
@@ -155,6 +157,7 @@ export function bindFileTransferDataChannel(ch: RTCDataChannel) {
     splitTransferDataChannels.delete(ch);
     if (activeTransferRunning && activeSendDataChannels.includes(ch)) {
       activeSendAbort?.abort();
+      signalFileTransferTransportStall();
       window.dispatchEvent(new CustomEvent("file-transfer-channel-reset-needed"));
     }
   };
@@ -725,6 +728,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
     const chunk = await file.slice(chunkOffset, chunkOffset + chunkSize).arrayBuffer();
     const dataChannel = dataChannels[laneIndex++ % dataChannels.length];
     if (ch.readyState !== "open" || dataChannel.readyState !== "open") {
+      signalFileTransferTransportStall();
       clearActiveSend(ch);
       updateTransferUi({
         id,
@@ -741,6 +745,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
       dataChannel.send(createChunkFrame(chunkOffset, chunk));
     } catch (error) {
       console.warn("[file-transfer] Failed to send file chunk:", error);
+      signalFileTransferTransportStall();
       clearActiveSend(ch);
       updateTransferUi({
         id,
@@ -797,6 +802,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
         if (cancelledTransferIds.has(id)) {
           sendControlMessage(ch, { action: "cancel", id });
         }
+        signalFileTransferTransportStall();
         resetCongestedFileChannel(ch, true);
         clearActiveSend(ch);
         if (abort.signal.aborted || cancelledTransferIds.has(id)) return false;
@@ -832,6 +838,7 @@ async function sendFile(file: File, ch: RTCDataChannel) {
         });
       });
       if (!progressed) {
+        signalFileTransferTransportStall();
         resetCongestedFileChannel(ch, true);
         clearActiveSend(ch);
         if (abort.signal.aborted || cancelledTransferIds.has(id)) return false;
@@ -961,6 +968,10 @@ function resetCongestedFileChannel(ch: RTCDataChannel | null, force = false) {
     }
     window.dispatchEvent(new CustomEvent("file-transfer-channel-reset-needed"));
   }
+}
+
+function signalFileTransferTransportStall() {
+  window.dispatchEvent(new CustomEvent("file-transfer-transport-stalled"));
 }
 
 async function sendFileViaNativeHostChannel(file: File) {
@@ -1344,7 +1355,7 @@ function waitForRemoteProgress(
         finish(false);
       } else if (received >= target || received >= total) {
         finish(true);
-      } else if (Date.now() - startedAt > 30_000) {
+      } else if (Date.now() - startedAt > TRANSFER_PROGRESS_STALL_TIMEOUT_MS) {
         console.warn(`[file-transfer] Remote progress timeout: ${received}/${target} bytes confirmed`);
         finish(false);
       } else {
@@ -1466,7 +1477,7 @@ function waitForBufferedAmount(ch: RTCDataChannel, target: number, signal: Abort
     const check = () => {
       if (signal.aborted || ch.readyState !== "open" || ch.bufferedAmount < target) {
         finish(!signal.aborted && ch.readyState === "open");
-      } else if (Date.now() - startedAt > 45_000) {
+      } else if (Date.now() - startedAt > TRANSFER_BUFFER_STALL_TIMEOUT_MS) {
         console.warn(`[file-transfer] DataChannel backpressure timeout: ${ch.bufferedAmount} bytes buffered`);
         finish(false);
       } else {

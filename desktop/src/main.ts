@@ -478,6 +478,9 @@ let currentRemotePin: string | null = null;  // 當前連線 PIN，用於媒體�
 let renegotiationInFlight = false;
 let fileTransferRecoveryScheduled = false;
 const FILE_TRANSFER_DATA_LANES = 3;
+let interactiveTransportRecoveryInFlight = false;
+let lastInputPongAt = 0;
+let lastInputPingAt = 0;
 let myId: string = "";                        // 本機 9 位數 ID
 let myPin: string = "";                       // 本機 Access PIN（被呼叫端驗證用）
 let currentCursorPercentX = 0.5;               // 全域游標百分比 X（用於避讓對焦）
@@ -2143,6 +2146,8 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
   // 斷線重連後，reliable 通道的點擊/鍵盤封包不會被舊 session 殘留序號誤判為重放而丟棄。
   controlSeqNumber = 0;
   unreliableSeqNumber = 0;
+  lastInputPongAt = 0;
+  lastInputPingAt = 0;
 
   currentRemoteId = remoteId;
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
@@ -2613,6 +2618,23 @@ function awaitSafeRenegotiate(reason: string) {
   });
 }
 
+async function recoverInteractiveTransport(reason: string) {
+  if (interactiveTransportRecoveryInFlight || !currentRemoteId || !currentRemotePin) return;
+  if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) return;
+
+  interactiveTransportRecoveryInFlight = true;
+  console.warn(`[WebRTC] Rebuilding stalled interactive transport: ${reason}`);
+  try {
+    // A stuck SCTP association cannot be repaired reliably by closing one
+    // stream or restarting ICE. Rebuild it without logging the user out.
+    await startCall(currentRemoteId, currentRemotePin);
+  } finally {
+    window.setTimeout(() => {
+      interactiveTransportRecoveryInFlight = false;
+    }, 10_000);
+  }
+}
+
 // 主動端：建立 Data Channels 並發起 Offer
 async function startCall(remoteId: string, pin: string) {
   if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
@@ -2823,30 +2845,42 @@ function startInputHealthWatchdog() {
     }
 
     const controlState = dataChannelControl?.readyState ?? "null";
-    const unreliableState = dataChannelUnreliable?.readyState ?? "null";
     const controlBuffered = dataChannelControl?.bufferedAmount ?? 0;
-    const unreliableBuffered = dataChannelUnreliable?.bufferedAmount ?? 0;
-    console.log(`[Input][Health] pc=${pcState}/${iceState} control=${controlState}(${controlBuffered}) unreliable=${unreliableState}(${unreliableBuffered})`);
+    if (dataChannelSystemControl?.readyState === "open" && Date.now() - lastInputPingAt > 1500) {
+      lastInputPingAt = Date.now();
+      try {
+        dataChannelSystemControl.send(JSON.stringify({ type: "input_ping", sentAt: lastInputPingAt }));
+      } catch (error) {
+        console.warn("[Input][Health] heartbeat send failed:", error);
+      }
+    }
+
+    if (lastInputPongAt > 0 && Date.now() - lastInputPongAt > 7000) {
+      void recoverInteractiveTransport("input heartbeat timed out while the WebRTC connection looked connected");
+      return;
+    }
 
     if (controlState !== "open") {
-      awaitSafeRenegotiate(`input-control channel is ${controlState} while ICE is connected`);
+      void recoverInteractiveTransport(`input-control channel is ${controlState} while ICE is connected`);
       return;
     }
 
     if (controlBuffered > INPUT_CONTROL_BUFFER_LIMIT) {
       if (!inputControlBacklogSince) inputControlBacklogSince = Date.now();
-      if (Date.now() - inputControlBacklogSince > 5000) {
-        awaitSafeRenegotiate(`input-control backlog stuck at ${controlBuffered} bytes`);
+      if (Date.now() - inputControlBacklogSince > 2500) {
+        void recoverInteractiveTransport(`input-control backlog stuck at ${controlBuffered} bytes`);
         inputControlBacklogSince = Date.now();
       }
     } else {
       inputControlBacklogSince = 0;
     }
-  }, 3000);
+  }, 1000);
 }
 
 function bindSystemControlChannel(ch: RTCDataChannel) {
-  ch.onopen = () => console.log("[DataChannel] system-control 已開啟");
+  ch.onopen = () => {
+    console.log("[DataChannel] system-control 已開啟");
+  };
   ch.onclose = () => console.log("[DataChannel] system-control 已關閉");
   ch.onmessage = (event) => {
     try {
@@ -2854,6 +2888,9 @@ function bindSystemControlChannel(ch: RTCDataChannel) {
       if (msg.type === "host_info") {
         remoteHostOs = msg.os || "";
         console.log("[system-control] 被控端 OS:", remoteHostOs);
+      }
+      if (msg.type === "input_pong" && dataChannelSystemControl === ch) {
+        lastInputPongAt = Date.now();
       }
       if (msg.type === "monitor_list") {
         availableMonitors = msg.monitors;
@@ -2893,6 +2930,10 @@ window.addEventListener("file-transfer-channel-reset-needed", () => {
   window.setTimeout(() => {
     getOrRecoverFileTransferChannel();
   }, 500);
+});
+
+window.addEventListener("file-transfer-transport-stalled", () => {
+  void recoverInteractiveTransport("file transfer stalled and may have congested SCTP");
 });
 
 
@@ -3893,7 +3934,9 @@ function sendInputPacket(packet: Uint8Array) {
       return;
     }
     if (buffered > INPUT_CONTROL_BUFFER_LIMIT) {
-      logInputBackpressure(`[Input] reliable backlog ${buffered} bytes; sending control event despite queue pressure`);
+      logInputBackpressure(`[Input] reliable backlog ${buffered} bytes; rebuilding the transport before control becomes unresponsive`);
+      void recoverInteractiveTransport(`input-control queue exceeded ${INPUT_CONTROL_BUFFER_LIMIT} bytes`);
+      return;
     }
     dataChannelControl.send(packet as any);
   } else if (!isTransientInputEvent(eventType)) {

@@ -968,9 +968,11 @@ async fn handle_remote_offer_as_host(
             }));
         } else if label == "system-control" {
             let app_for_system = app.clone();
+            let dc_for_system = Arc::clone(&d);
             d.on_message(Box::new(move |msg| {
                 let data = msg.data.to_vec();
                 let app = app_for_system.clone();
+                let dc = Arc::clone(&dc_for_system);
                 Box::pin(async move {
                     if let Ok(text) = String::from_utf8(data) {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
@@ -982,6 +984,14 @@ async fn handle_remote_offer_as_host(
                                     "[file-transfer] Transfer priority mode {}",
                                     if active { "enabled" } else { "disabled" }
                                 );
+                            } else if json["type"] == "input_ping" {
+                                let pong = serde_json::json!({
+                                    "type": "input_pong",
+                                    "sentAt": json["sentAt"],
+                                });
+                                if let Err(error) = dc.send_text(pong.to_string()).await {
+                                    eprintln!("[input-health] Failed to send input pong: {}", error);
+                                }
                             }
                         }
                     }
