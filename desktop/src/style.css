@@ -1266,11 +1266,12 @@ input:checked + .slider:before {
 }
 
 .session-file-transfer-queue {
-  position: absolute;
+  position: fixed;
   left: 50%;
-  bottom: max(env(safe-area-inset-bottom), 16px);
-  z-index: 1130;
+  bottom: calc(max(env(safe-area-inset-bottom, 0px), var(--transfer-viewport-bottom, 0px)) + 16px);
+  z-index: 2130;
   width: min(380px, calc(100vw - 32px));
+  max-height: min(240px, calc(100dvh - max(env(safe-area-inset-bottom, 0px), var(--transfer-viewport-bottom, 0px)) - 96px));
   border-color: rgba(255, 255, 255, 0.18);
   background: rgba(15, 23, 42, 0.84);
   color: #fff;
@@ -1300,7 +1301,7 @@ input:checked + .slider:before {
 
 .file-transfer-queue-list {
   display: flex;
-  max-height: 120px;
+  max-height: 96px;
   flex-direction: column;
   gap: 4px;
   margin: 0;
@@ -1402,10 +1403,10 @@ body.file-transfer-dragging #remote-video-container[style*="display: flex"] #fil
 }
 
 .session-transfer-progress {
-  position: absolute;
+  position: fixed;
   left: 50%;
-  bottom: max(env(safe-area-inset-bottom), 16px);
-  z-index: 1120;
+  bottom: calc(max(env(safe-area-inset-bottom, 0px), var(--transfer-viewport-bottom, 0px)) + 16px);
+  z-index: 2120;
   width: min(360px, calc(100vw - 32px));
   padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -1419,7 +1420,7 @@ body.file-transfer-dragging #remote-video-container[style*="display: flex"] #fil
 }
 
 body.file-transfer-active-queue .session-transfer-progress {
-  bottom: calc(max(env(safe-area-inset-bottom), 16px) + 188px);
+  bottom: calc(max(env(safe-area-inset-bottom, 0px), var(--transfer-viewport-bottom, 0px)) + 196px);
 }
 
 .session-transfer-progress .transfer-progress-header {

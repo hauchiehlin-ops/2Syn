@@ -81,6 +81,7 @@ let nativeReceiveListenerInstalled = false;
 let activeQueueSending = false;
 let activeTransferRunning = false;
 let lastPriorityEventActive = false;
+let transferViewportInsetInstalled = false;
 const pendingSendFiles: PendingSendFile[] = [];
 const partialReceives = new Map<string, ReceiveState>();
 const pendingResumeResolvers = new Map<string, (offset: number) => void>();
@@ -136,6 +137,7 @@ export function bindFileTransferChannel(ch: RTCDataChannel) {
 // 處理拖曳上傳至 WebRTC DataChannel
 export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | null) {
   setupNativeReceiveListener();
+  setupTransferViewportInset();
 
   const dropZone = document.getElementById("file-drop-zone");
   const pickButtons = [
@@ -257,6 +259,23 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
     if (!files || files.length === 0) return;
     addPendingFiles(Array.from(files).map(toBrowserSelectedFile));
   });
+}
+
+function setupTransferViewportInset() {
+  if (transferViewportInsetInstalled) return;
+  transferViewportInsetInstalled = true;
+  const win = window as Window & { visualViewport?: VisualViewport };
+  const update = () => {
+    const vv = win.visualViewport;
+    const bottomInset = vv
+      ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+      : 0;
+    document.documentElement.style.setProperty("--transfer-viewport-bottom", `${Math.ceil(bottomInset)}px`);
+  };
+  update();
+  win.visualViewport?.addEventListener("resize", update);
+  win.visualViewport?.addEventListener("scroll", update);
+  window.addEventListener("orientationchange", () => window.setTimeout(update, 250));
 }
 
 function bindQueueActions(getChannel: () => RTCDataChannel | null) {
