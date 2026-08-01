@@ -99,7 +99,6 @@
   "drop_zone": "여기에 파일을 놓거나 파일을 선택하세요",
   "btn_pick_transfer_files": "파일 선택",
   "btn_cancel_transfer": "전송 취소",
-  "file_transfer_float": "파일",
   "file_transfer_not_connected": "먼저 장치에 연결하세요",
   "file_transfer_sending": "전송 중",
   "file_transfer_receiving": "수신 중",
@@ -132,8 +131,6 @@
   "desc_nat_warning": "Your network lacks IPv6 and is behind multiple NAT layers. The probability of building a direct P2P connection is very low, which may lead to high latency. We highly recommend installing Tailscale.",
   "alert_answer_generated": "Answer SDP has been generated and copied to your clipboard. Please send it to the remote party.",
   "alert_web_diag_unsupported": "Connectivity diagnostics are not supported in Web Client mode.",
-  "btn_scale_to_fit": "Scale to Fit",
-  "btn_original_size": "Original Size",
   "desc_web_client_info": "Web Client controller. The connection pipeline will be automatically evaluated. If P2P fails due to symmetric NAT or strict firewalls, please click \"🚀 Enable Relay Mode\".",
   "err_macos_permissions_missing": "⚠️ macOS permissions (Screen Recording / Accessibility) are missing!",
   "btn_how_to_fix": "How to Fix",
@@ -395,5 +392,10 @@
   "file_transfer_waiting_receiver": "수신 장치 대기 중...",
   "file_transfer_resuming": "전송 재개 중",
   "file_transfer_remote_received": "원격에서 {0} 수신",
-  "file_transfer_stalled": "전송이 멈췄습니다. 다시 시도하세요."
+  "file_transfer_stalled": "전송이 멈췄습니다. 다시 시도하세요.",
+  "file_transfer_waiting_remote_save": "원격 저장 대기 중...",
+  "file_transfer_remote_saved": "원격에서 파일을 저장했습니다",
+  "file_transfer_remote_save_timeout": "원격 저장을 확인하지 못했습니다. 수신 장치를 확인하세요.",
+  "file_transfer_browser_required": "이 연결은 브라우저에서 선택한 파일이 필요합니다.",
+  "file_transfer_native_streaming": "디스크에서 스트리밍 중..."
 }

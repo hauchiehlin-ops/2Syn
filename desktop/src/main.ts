@@ -747,7 +747,6 @@ const fallbackTranslations: Record<string, string> = {
   "file_transfer_pick_local": "Local Files",
   "file_transfer_pick_local_title": "Choose files from this device to send to the remote host",
   "btn_cancel_transfer": "Cancel Transfer",
-  "file_transfer_float": "Files",
   "file_transfer_not_connected": "Connect to a device first",
   "file_transfer_sending": "Sending",
   "file_transfer_receiving": "Receiving",
@@ -765,6 +764,11 @@ const fallbackTranslations: Record<string, string> = {
   "file_transfer_resuming": "Resuming transfer",
   "file_transfer_remote_received": "Remote received {0}",
   "file_transfer_stalled": "Transfer stalled. Please retry.",
+  "file_transfer_waiting_remote_save": "Waiting for remote save...",
+  "file_transfer_remote_saved": "Remote saved the file",
+  "file_transfer_remote_save_timeout": "Remote save was not confirmed. Please check the receiver.",
+  "file_transfer_browser_required": "This connection requires browser-selected files.",
+  "file_transfer_native_streaming": "Streaming from disk...",
   "log_title": "System Logs",
   "err_rtc_failed": "P2P connection failed. The local and remote devices might be behind a strict symmetric NAT or firewall and cannot punch through. Please click \"🚀 Enable Relay Mode\" to establish connection.",
   "err_target_offline": "The remote device is offline. Please make sure the device ID is correct.",
@@ -790,9 +794,6 @@ const fallbackTranslations: Record<string, string> = {
   "desc_nat_warning": "Your network lacks IPv6 and is behind multiple NAT layers. The probability of building a direct P2P connection is very low, which may lead to high latency. We highly recommend installing Tailscale.",
   "alert_answer_generated": "Answer SDP has been generated and copied to your clipboard. Please send it to the remote party.",
   "alert_web_diag_unsupported": "Connectivity diagnostics are not supported in Web Client mode.",
-  "btn_scale_to_fit": "Scale to Fit",
-  "btn_original_size": "Original Size",
-  "btn_aspect_fill": "Aspect Fill",
   "desc_web_client_info": "Web Client controller. The connection pipeline will be automatically evaluated. If P2P fails due to symmetric NAT or strict firewalls, please click \"🚀 Enable Relay Mode\".",
   "log_title_system_logs": "System Logs",
   "log_status_connecting": "Connecting",
@@ -1211,10 +1212,6 @@ function updateDomTranslations() {
     if (btnTouchModeFloat) btnTouchModeFloat.textContent = "🖱️ " + t("ui_trackpad");
     const btnToggleKeyboardFloat = document.getElementById("btn-toggle-keyboard-float");
     if (btnToggleKeyboardFloat) btnToggleKeyboardFloat.textContent = "⌨️ " + t("ui_keyboard");
-    const btnDisplayModeFloat = document.getElementById("btn-display-mode-float");
-    if (btnDisplayModeFloat) btnDisplayModeFloat.textContent = "🔍 " + t("btn_original_size");
-    const btnFileTransferFloat = document.getElementById("btn-file-transfer-float");
-    if (btnFileTransferFloat) btnFileTransferFloat.textContent = "📁 " + t("file_transfer_float");
     const btnFileTransferDirect = document.getElementById("btn-file-transfer-direct");
     if (btnFileTransferDirect) {
       btnFileTransferDirect.setAttribute("title", t("file_transfer_pick_local_title"));
@@ -2212,7 +2209,6 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
         // --- UI Setup ---
         const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
         const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
-        const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
         const btnAudioToggle = document.getElementById("btn-audio-toggle") as HTMLButtonElement;
         const mainContent = document.querySelector(".glass-container") as HTMLElement;
         if (videoEl) videoEl.style.cursor = "default"; // 讓原生硬體游標保持顯示，達成零延遲操控體驗
@@ -2220,7 +2216,6 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
           videoContainer.style.display = "block";
           videoContainer.focus();
         }
-        if (btnDisplayMode) btnDisplayMode.style.display = "block";
         if (btnAudioToggle) btnAudioToggle.style.display = "block";
         if (mainContent) mainContent.style.display = "none";
 
@@ -2287,9 +2282,9 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
           videoEl.playsInline = true;
           videoEl.muted = true; // 雙重保障：iOS 自動播放安全策略必須為靜音
           videoEl.disablePictureInPicture = true;
-          
+
           let hasPlayed = false;
-          
+
           videoEl.onplaying = () => {
             hasPlayed = true;
             // 連線後立即在畫面中央顯示游標，讓使用者知道游標位置
@@ -2731,7 +2726,6 @@ function resetConnectionUI() {
   const videoEl = document.getElementById("remote-video") as HTMLVideoElement;
   const mainContent = document.querySelector(".glass-container") as HTMLElement;
   const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
-  const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
 
   if (videoContainer) {
     videoContainer.style.display = "none";
@@ -2741,10 +2735,6 @@ function resetConnectionUI() {
     videoEl.style.objectFit = "contain";
     videoEl.style.width = "100%";
     videoEl.style.height = "100%";
-  }
-  if (btnDisplayMode) {
-    btnDisplayMode.style.display = "none";
-    btnDisplayMode.textContent = "🔍 Original Size";
   }
   if (mainContent) {
     mainContent.style.display = "flex";
@@ -3491,7 +3481,7 @@ function initHelpButtons() {
           document.querySelectorAll(".help-block").forEach((el) => {
             el.classList.remove("show");
           });
-          
+
           if (!isShown) {
             helpBlock.classList.add("show");
           }
@@ -3572,7 +3562,7 @@ function initSmartAutoMode() {
       accordion.classList.remove("accordion-expanded");
       accordion.classList.add("accordion-collapsed");
       indicator.style.display = "flex";
-      
+
       // 智慧最佳化開啟時：重設模擬器參數為優質網路條件 (10ms, 0% 丟包, P2P 直連)
       if (rttInput) {
         rttInput.value = "10";
@@ -3763,8 +3753,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   // --- 畫質與自適應調適狀態 ---
 
 
-  // --- 邊緣平移與顯示模式狀態 ---
-  let displayMode: "fit" | "original" | "fill" = "fit";
+  // --- 邊緣平移狀態 ---
   let panRafId: number | null = null;
   currentCursorPercentX = 0.5;
   currentCursorPercentY = 0.5;
@@ -3796,7 +3785,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let isMouseInsideVideo = false;
 
   const videoContainer = document.getElementById("remote-video-container") as HTMLElement;
-  const btnDisplayMode = document.getElementById("btn-display-mode") as HTMLButtonElement;
   const keyboardBar = document.getElementById("mobile-keyboard-bar") as HTMLDivElement;
   const mobileKeyboardInput = document.getElementById("mobile-keyboard-input") as HTMLInputElement;
 
@@ -3840,72 +3828,18 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     return { x: snappedX, y: snappedY };
   }
 
-  // 顯示模式切換處理
-  function applyDisplayMode() {
+  function applyFitDisplayMode() {
     if (!videoEl || !videoContainer) return;
-    
-    if (displayMode === "fit") {
-      if (btnDisplayMode) btnDisplayMode.textContent = "🔍 " + t("btn_original_size");
-      videoEl.style.objectFit = "contain";
-      videoEl.style.width = "100%";
-      videoEl.style.height = "100%";
-      // 重置 Pinch 放大相關的 transform 狀態，回歸適應視窗
-      videoScale = 1.0;
-      videoTranslateX = 0;
-      videoTranslateY = 0;
-      keyboardOffsetUpdateY = 0;
-      applyVideoTransform();
-    } else if (displayMode === "original") {
-      if (btnDisplayMode) btnDisplayMode.textContent = "🔍 " + t("btn_aspect_fill");
-      videoEl.style.objectFit = "none";
-      videoEl.style.width = videoEl.videoWidth + "px";
-      videoEl.style.height = videoEl.videoHeight + "px";
-      videoContainer.style.overflow = "hidden";
-      videoScale = 1.0;
-      videoTranslateX = 0;
-      videoTranslateY = 0;
-      keyboardOffsetUpdateY = 0;
-      applyVideoTransform();
-    } else if (displayMode === "fill") {
-      if (btnDisplayMode) btnDisplayMode.textContent = "🔍 " + t("btn_scale_to_fit");
-      videoEl.style.objectFit = "contain";
-      videoEl.style.width = "100%";
-      videoEl.style.height = "100%";
-      videoContainer.style.overflow = "hidden";
-      
-      const containerWidth = videoContainer.clientWidth || window.innerWidth;
-      const containerHeight = videoContainer.clientHeight || window.innerHeight;
-      const videoWidth = videoEl.videoWidth || 1920;
-      const videoHeight = videoEl.videoHeight || 1080;
-      
-      const containerRatio = containerWidth / containerHeight;
-      const videoRatio = videoWidth / videoHeight;
-      
-      let baseFillScale = 1.0;
-      if (containerRatio > videoRatio) {
-        baseFillScale = containerRatio / videoRatio;
-      } else {
-        baseFillScale = videoRatio / containerRatio;
-      }
-      
-      videoScale = baseFillScale;
-      videoTranslateX = 0;
-      videoTranslateY = 0;
-      keyboardOffsetUpdateY = 0;
-      applyVideoTransform();
-    }
+    videoEl.style.objectFit = "contain";
+    videoEl.style.width = "100%";
+    videoEl.style.height = "100%";
+    videoContainer.style.overflow = "hidden";
+    videoScale = 1.0;
+    videoTranslateX = 0;
+    videoTranslateY = 0;
+    keyboardOffsetUpdateY = 0;
+    applyVideoTransform();
   }
-
-  const cycleDisplayMode = () => {
-    if (displayMode === "fit") {
-      displayMode = "original";
-    } else if (displayMode === "original") {
-      displayMode = "fill";
-    } else {
-      displayMode = "fit";
-    }
-    applyDisplayMode();
-  };
 
   // 定義並註冊動態狀態標籤同步函式
   const syncStatefulLabels = () => {
@@ -3927,10 +3861,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (btnToggleKeyboard) {
       btnToggleKeyboard.textContent = "⌨️ " + t("ui_keyboard");
     }
-    const btnFileTransferFloat = document.getElementById("btn-file-transfer-float");
-    if (btnFileTransferFloat) {
-      btnFileTransferFloat.textContent = "📁 " + t("file_transfer_float");
-    }
     const btnFileTransferDirect = document.getElementById("btn-file-transfer-direct");
     if (btnFileTransferDirect) {
       btnFileTransferDirect.setAttribute("title", t("file_transfer_pick_local_title"));
@@ -3950,15 +3880,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       btnAudioToggle.textContent = isMuted ? "🔇 " + t("ui_unmute") : "🔊 " + t("ui_mute");
     }
 
-    // 4. Display Mode (re-apply to get the translated label)
-    applyDisplayMode();
-    const btnDisplayModeFloat = document.getElementById("btn-display-mode-float");
-    const btnDisplayMode = document.getElementById("btn-display-mode");
-    if (btnDisplayModeFloat && btnDisplayMode) {
-      btnDisplayModeFloat.textContent = btnDisplayMode.textContent;
-    }
-
-    // 5. Logout Button
+    // 4. Logout Button
     const btnSessionDisconnect = document.getElementById("btn-session-disconnect");
     if (btnSessionDisconnect) {
       btnSessionDisconnect.textContent = "🚪 " + t("ui_btn_logout");
@@ -3966,19 +3888,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   };
   activeSyncStatefulLabels = syncStatefulLabels;
 
-  if (btnDisplayMode) {
-    btnDisplayMode.onclick = cycleDisplayMode;
-  }
-
   // --- 取代 Quick Menu 的獨立浮動控制鈕 ---
-  const btnDisplayModeFloat = document.getElementById("btn-display-mode-float") as HTMLButtonElement;
-  if (btnDisplayModeFloat) {
-    btnDisplayModeFloat.onclick = () => {
-      cycleDisplayMode();
-      syncStatefulLabels();
-    };
-  }
-
   const btnToggleKeyboardFloat = document.getElementById("btn-toggle-keyboard-float") as HTMLButtonElement;
   if (btnToggleKeyboardFloat) {
     btnToggleKeyboardFloat.onclick = () => {
@@ -4016,6 +3926,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   }
 
   // 初始執行一次同步
+  applyFitDisplayMode();
   syncStatefulLabels();
 
   const btnSwitchMonitor = document.getElementById("btn-switch-monitor") as HTMLButtonElement;
@@ -4106,17 +4017,12 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       }
       
       if (dx !== 0 || dy !== 0) {
-        if (displayMode === "original") {
-          // 模式一：物理大小模式，平移 container 滾動條
-          videoContainer.scrollLeft += dx;
-          videoContainer.scrollTop += dy;
-        } else if (videoScale > 1.0) {
-          // 模式二：Scale 放大模式，平移 CSS transform
+        if (videoScale > 1.0) {
           const containerWidth = videoContainer.clientWidth;
           const containerHeight = videoContainer.clientHeight;
           const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
           const containerRatio = containerWidth / containerHeight;
-          
+
           let renderedWidth = containerWidth;
           let renderedHeight = containerHeight;
           if (containerRatio > videoRatio) {
@@ -4126,7 +4032,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
             renderedWidth = containerWidth;
             renderedHeight = renderedWidth / videoRatio;
           }
-          
+
           const maxTx = (renderedWidth * videoScale >= containerWidth) ? (renderedWidth * videoScale - containerWidth) / 2 : 0;
           const maxTy = (renderedHeight * videoScale >= containerHeight) ? (renderedHeight * videoScale - containerHeight) / 2 : 0;
           
@@ -4149,29 +4055,23 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         } else {
           // 直控/實體滑鼠：手指(滑鼠)位置 == 游標位置，重算遠端絕對百分比並發送
           let updatedX = 0, updatedY = 0;
-          if (displayMode === "original" && videoContainer) {
-            const rectContainer = videoContainer.getBoundingClientRect();
-            updatedX = (lastMouseClientX - rectContainer.left + videoContainer.scrollLeft) / videoEl.videoWidth;
-            updatedY = (lastMouseClientY - rectContainer.top + videoContainer.scrollTop) / videoEl.videoHeight;
+          const rectNew = videoEl.getBoundingClientRect();
+          const videoRatioNew = videoEl.videoWidth / videoEl.videoHeight;
+          const containerRatioNew = rectNew.width / rectNew.height;
+
+          let renderedWidthNew, renderedHeightNew, offsetXNew = 0, offsetYNew = 0;
+          if (containerRatioNew > videoRatioNew) {
+            renderedHeightNew = rectNew.height;
+            renderedWidthNew = renderedHeightNew * videoRatioNew;
+            offsetXNew = (rectNew.width - renderedWidthNew) / 2;
           } else {
-            const rectNew = videoEl.getBoundingClientRect();
-            const videoRatioNew = videoEl.videoWidth / videoEl.videoHeight;
-            const containerRatioNew = rectNew.width / rectNew.height;
-            
-            let renderedWidthNew, renderedHeightNew, offsetXNew = 0, offsetYNew = 0;
-            if (containerRatioNew > videoRatioNew) {
-              renderedHeightNew = rectNew.height;
-              renderedWidthNew = renderedHeightNew * videoRatioNew;
-              offsetXNew = (rectNew.width - renderedWidthNew) / 2;
-            } else {
-              renderedWidthNew = rectNew.width;
-              renderedHeightNew = renderedWidthNew / videoRatioNew;
-              offsetYNew = (rectNew.height - renderedHeightNew) / 2;
-            }
-            
-            updatedX = (lastMouseClientX - rectNew.left - offsetXNew) / renderedWidthNew;
-            updatedY = (lastMouseClientY - rectNew.top - offsetYNew) / renderedHeightNew;
+            renderedWidthNew = rectNew.width;
+            renderedHeightNew = renderedWidthNew / videoRatioNew;
+            offsetYNew = (rectNew.height - renderedHeightNew) / 2;
           }
+
+          updatedX = (lastMouseClientX - rectNew.left - offsetXNew) / renderedWidthNew;
+          updatedY = (lastMouseClientY - rectNew.top - offsetYNew) / renderedHeightNew;
           
           updatedX = Math.max(0, Math.min(1, updatedX));
           updatedY = Math.max(0, Math.min(1, updatedY));
@@ -4184,7 +4084,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
           currentCursorPercentY = updatedY;
         }
       }
-      
+
       scheduleVideoFrame(loop);
     };
     scheduleVideoFrame(loop);
@@ -4621,28 +4521,23 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       updateCursorOverlay(syntheticCursorPercentX, syntheticCursorPercentY);
     } else {
       let x = 0, y = 0;
-      if (displayMode === "original" && videoContainer) {
-        x = (e.clientX + videoContainer.scrollLeft) / videoEl.videoWidth;
-        y = (e.clientY + videoContainer.scrollTop) / videoEl.videoHeight;
+      const rect = videoEl.getBoundingClientRect();
+      const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+      const containerRatio = rect.width / rect.height;
+
+      let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
+      if (containerRatio > videoRatio) {
+        renderedHeight = rect.height;
+        renderedWidth = renderedHeight * videoRatio;
+        offsetX = (rect.width - renderedWidth) / 2;
       } else {
-        const rect = videoEl.getBoundingClientRect();
-        const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
-        const containerRatio = rect.width / rect.height;
-        
-        let renderedWidth, renderedHeight, offsetX = 0, offsetY = 0;
-        if (containerRatio > videoRatio) {
-          renderedHeight = rect.height;
-          renderedWidth = renderedHeight * videoRatio;
-          offsetX = (rect.width - renderedWidth) / 2;
-        } else {
-          renderedWidth = rect.width;
-          renderedHeight = renderedWidth / videoRatio;
-          offsetY = (rect.height - renderedHeight) / 2;
-        }
- 
-        x = (e.clientX - rect.left - offsetX) / renderedWidth;
-        y = (e.clientY - rect.top - offsetY) / renderedHeight;
+        renderedWidth = rect.width;
+        renderedHeight = renderedWidth / videoRatio;
+        offsetY = (rect.height - renderedHeight) / 2;
       }
+
+      x = (e.clientX - rect.left - offsetX) / renderedWidth;
+      y = (e.clientY - rect.top - offsetY) / renderedHeight;
 
       x = Math.max(0, Math.min(1, x));
       y = Math.max(0, Math.min(1, y));

@@ -16,6 +16,16 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessa
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 const FILE_TRANSFER_CHUNK_SIZE: usize = 64 * 1024;
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectedTransferFile {
+    name: String,
+    path: String,
+    size: u64,
+    last_modified: u64,
+}
+
 struct AppState {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     connection_manager: Arc<ConnectionManager>,
@@ -25,6 +35,8 @@ struct AppState {
     active_file_channel: tokio::sync::Mutex<Option<Arc<webrtc::data_channel::RTCDataChannel>>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     file_resume_offsets: tokio::sync::Mutex<std::collections::HashMap<String, u64>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    file_complete_confirmations: tokio::sync::Mutex<std::collections::HashSet<String>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     signaling_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -1091,6 +1103,15 @@ async fn handle_remote_offer_as_host(
                                             .await
                                             .insert(id.to_string(), offset);
                                     }
+                                } else if value.get("action").and_then(|value| value.as_str()) == Some("complete") {
+                                    if let Some(id) = value.get("id").and_then(|value| value.as_str()) {
+                                        let app_state = app.state::<AppState>();
+                                        app_state
+                                            .file_complete_confirmations
+                                            .lock()
+                                            .await
+                                            .insert(id.to_string());
+                                    }
                                 }
                             }
                             state.handle_message(text_str);
@@ -1832,7 +1853,44 @@ async fn has_active_file_transfer_channel(state: State<'_, AppState>) -> Result<
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
-async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result<(), String> {
+async fn pick_transfer_files() -> Result<Vec<SelectedTransferFile>, String> {
+    let files = rfd::AsyncFileDialog::new()
+        .pick_files()
+        .await
+        .unwrap_or_default();
+    let mut selected = Vec::new();
+    for file in files {
+        let path = file.path().to_path_buf();
+        let metadata = match tokio::fs::metadata(&path).await {
+            Ok(metadata) if metadata.is_file() => metadata,
+            _ => continue,
+        };
+        let Some(name) = path.file_name().and_then(|name| name.to_str()).map(|name| name.to_string()) else {
+            continue;
+        };
+        let last_modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
+        selected.push(SelectedTransferFile {
+            name,
+            path: path.to_string_lossy().to_string(),
+            size: metadata.len(),
+            last_modified,
+        });
+    }
+    Ok(selected)
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[tauri::command]
+async fn send_file_to_client(
+    path: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     let path_buf = std::path::PathBuf::from(path);
@@ -1857,6 +1915,15 @@ async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result
     );
     let id = send_file_start(&dc, &file_name, metadata.len(), &fingerprint).await?;
     let offset = wait_for_resume_offset(&state, &id).await?.min(metadata.len());
+    let _ = app.emit(
+        "file-transfer-send-progress",
+        serde_json::json!({
+            "id": id,
+            "name": &file_name,
+            "transferred": offset,
+            "total": metadata.len()
+        }),
+    );
 
     let mut file = tokio::fs::File::open(&path_buf)
         .await
@@ -1867,6 +1934,8 @@ async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result
             .map_err(|e| format!("無法續傳定位檔案: {}", e))?;
     }
     let mut buf = vec![0u8; FILE_TRANSFER_CHUNK_SIZE];
+    let mut transferred = offset;
+    let mut last_reported = offset;
     loop {
         let n = file
             .read(&mut buf)
@@ -1876,9 +1945,23 @@ async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result
             break;
         }
         send_file_chunk(&dc, &buf[..n]).await?;
+        transferred += n as u64;
+        if transferred == metadata.len() || transferred.saturating_sub(last_reported) >= 1024 * 1024 {
+            last_reported = transferred;
+            let _ = app.emit(
+                "file-transfer-send-progress",
+                serde_json::json!({
+                    "id": id,
+                    "name": &file_name,
+                    "transferred": transferred,
+                    "total": metadata.len()
+                }),
+            );
+        }
     }
 
     send_file_end(&dc).await?;
+    wait_for_remote_file_complete(&state, &id).await?;
     Ok(())
 }
 
@@ -1902,6 +1985,7 @@ async fn send_selected_file_to_client(
     }
 
     send_file_end(&dc).await?;
+    wait_for_remote_file_complete(&state, &id).await?;
     Ok(())
 }
 
@@ -1955,6 +2039,17 @@ async fn wait_for_resume_offset(state: &State<'_, AppState>, id: &str) -> Result
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     Ok(0)
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn wait_for_remote_file_complete(state: &State<'_, AppState>, id: &str) -> Result<(), String> {
+    for _ in 0..600 {
+        if state.file_complete_confirmations.lock().await.remove(id) {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err("遠端尚未確認檔案保存完成".to_string())
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -2098,6 +2193,8 @@ pub fn run() {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             file_resume_offsets: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            file_complete_confirmations: tokio::sync::Mutex::new(std::collections::HashSet::new()),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             signaling_tx: tokio::sync::Mutex::new(None),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             current_pin: Arc::new(tokio::sync::RwLock::new(String::new())),
@@ -2154,6 +2251,8 @@ pub fn run() {
             send_custom_signaling_message,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             has_active_file_transfer_channel,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            pick_transfer_files,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             send_file_to_client,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]

@@ -99,7 +99,6 @@
   "drop_zone": "拖放文件到这里，或直接选择文件",
   "btn_pick_transfer_files": "选择文件",
   "btn_cancel_transfer": "取消传输",
-  "file_transfer_float": "文件",
   "file_transfer_not_connected": "请先连接到设备",
   "file_transfer_sending": "传送中",
   "file_transfer_receiving": "接收中",
@@ -132,9 +131,6 @@
   "desc_nat_warning": "您的网络环境缺乏 IPv6，且位于多重 NAT 之后。极高概率无法建立 P2P 直连，将导致画面严重延迟。强烈建议立即安装穿透工具！",
   "alert_answer_generated": "Answer SDP 已产生并复制到剪贴板，请传送给对方。",
   "alert_web_diag_unsupported": "Web 模式下不支持连接诊断功能",
-  "btn_scale_to_fit": "适应窗口 (Scale to Fit)",
-  "btn_original_size": "原始大小 (Original Size)",
-  "btn_aspect_fill": "满屏幕满版 (Aspect Fill)",
   "desc_web_client_info": "纯网页控制端。连接建立时将会自动评估最佳传输管线。若因双方处于严格 NAT 或防火墙后导致连接失败，请点击【🚀 启用穿透模式】。",
   "err_macos_permissions_missing": "⚠️ macOS 系统权限不足，将导致远端控制黑屏！",
   "btn_how_to_fix": "如何解决",
@@ -397,5 +393,10 @@
   "file_transfer_waiting_receiver": "等待接收端...",
   "file_transfer_resuming": "正在续传",
   "file_transfer_remote_received": "远端已收到 {0}",
-  "file_transfer_stalled": "传输停滞，请重试。"
+  "file_transfer_stalled": "传输停滞，请重试。",
+  "file_transfer_waiting_remote_save": "等待远端保存...",
+  "file_transfer_remote_saved": "远端已保存文件",
+  "file_transfer_remote_save_timeout": "尚未收到远端保存确认，请检查接收端。",
+  "file_transfer_browser_required": "此连接需要使用浏览器选档。",
+  "file_transfer_native_streaming": "正在从磁盘流式传送..."
 }

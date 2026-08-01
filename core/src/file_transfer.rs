@@ -21,6 +21,13 @@ pub enum FileTransferMessage {
     },
     #[serde(rename = "end")]
     End { id: Option<String> },
+    #[serde(rename = "complete")]
+    Complete {
+        id: Option<String>,
+        name: Option<String>,
+        path: Option<String>,
+        size: Option<u64>,
+    },
     #[serde(rename = "cancel")]
     Cancel { id: Option<String> },
 }
@@ -112,6 +119,7 @@ impl FileTransferState {
                     }
                 }
                 FileTransferMessage::Resume { .. } => {}
+                FileTransferMessage::Complete { .. } => {}
                 FileTransferMessage::End { id } => {
                     if !self.message_matches_current(id.as_deref()) {
                         return;
@@ -141,6 +149,16 @@ impl FileTransferState {
                                 path: path.clone(),
                                 size: self.current_received,
                             });
+                            self.outgoing_messages.push(
+                                serde_json::json!({
+                                    "action": "complete",
+                                    "id": self.current_id,
+                                    "name": self.current_name,
+                                    "path": format!("Downloads/2syn-transfers/{}", path.file_name().and_then(|value| value.to_str()).unwrap_or("download.bin")),
+                                    "size": self.current_received
+                                })
+                                .to_string(),
+                            );
                         }
                     }
                     self.reset();

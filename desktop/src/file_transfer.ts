@@ -8,6 +8,7 @@ type TransferMessage =
   | { action: "resume"; id?: string; offset: number }
   | { action: "progress"; id?: string; name?: string; received: number; size: number }
   | { action: "end"; id?: string }
+  | { action: "complete"; id?: string; name?: string; path?: string; size?: number }
   | { action: "cancel"; id?: string };
 
 type TransferStatus = "preparing" | "transferring" | "complete" | "cancelled" | "failed";
@@ -31,6 +32,24 @@ type ReceiveState = {
   chunks: BlobPart[];
 };
 
+type NativeSelectedFile = {
+  kind: "native";
+  name: string;
+  path: string;
+  size: number;
+  lastModified?: number;
+};
+
+type BrowserSelectedFile = {
+  kind: "browser";
+  file: File;
+  name: string;
+  size: number;
+  lastModified?: number;
+};
+
+type PendingSendFile = NativeSelectedFile | BrowserSelectedFile;
+
 const CHUNK_SIZE = 64 * 1024;
 const BUFFER_HIGH_WATER = 10 * 1024 * 1024;
 const BUFFER_LOW_WATER = 2 * 1024 * 1024;
@@ -41,9 +60,12 @@ let activeReceive: ReceiveState | null = null;
 let latestTransfer: TransferUiState | null = null;
 let nativeReceiveListenerInstalled = false;
 let activeQueueSending = false;
-const pendingSendFiles: File[] = [];
+const pendingSendFiles: PendingSendFile[] = [];
 const partialReceives = new Map<string, ReceiveState>();
 const pendingResumeResolvers = new Map<string, (offset: number) => void>();
+const pendingCompleteResolvers = new Map<string, (message: TransferMessage | null) => void>();
+const transferStartedAt = new Map<string, number>();
+let transferHideTimer: number | null = null;
 
 export function bindFileTransferChannel(ch: RTCDataChannel) {
   ch.binaryType = "arraybuffer";
@@ -78,7 +100,6 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
   const pickButtons = [
     document.getElementById("btn-pick-transfer-files"),
     document.getElementById("btn-file-transfer-direct"),
-    document.getElementById("btn-file-transfer-float"),
   ].filter((el): el is HTMLElement => !!el);
   if (!dropZone && pickButtons.length === 0) return;
 
@@ -111,8 +132,15 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
   };
 
   const openPicker = async () => {
-    if (!getOpenChannel(false) && !(await hasNativeHostFileChannel())) {
+    const hasOpenJsChannel = !!getOpenChannel(false);
+    const hasNativeChannel = await hasNativeHostFileChannel();
+    if (!hasOpenJsChannel && !hasNativeChannel) {
       showTransferNotice(transferText("file_transfer_not_connected", "Connect to a device first"));
+      return;
+    }
+    if (!hasOpenJsChannel && hasNativeChannel && isDesktopTauri()) {
+      const picked = await pickNativeTransferFiles();
+      if (picked.length > 0) addPendingFiles(picked);
       return;
     }
     setFilePickerActive(true);
@@ -134,7 +162,7 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
 
   fileInput.addEventListener("change", async () => {
     if (fileInput.files) {
-      addPendingFiles(Array.from(fileInput.files));
+      addPendingFiles(Array.from(fileInput.files).map(toBrowserSelectedFile));
     }
     fileInput.value = "";
     window.setTimeout(() => setFilePickerActive(false), 1200);
@@ -170,7 +198,7 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
 
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
-    addPendingFiles(Array.from(files));
+    addPendingFiles(Array.from(files).map(toBrowserSelectedFile));
   });
 }
 
@@ -206,7 +234,7 @@ function bindQueueActions(getChannel: () => RTCDataChannel | null) {
   });
 }
 
-function addPendingFiles(files: File[]) {
+function addPendingFiles(files: PendingSendFile[]) {
   const existing = new Set(pendingSendFiles.map(fileQueueKey));
   files.forEach((file) => {
     const key = fileQueueKey(file);
@@ -223,7 +251,7 @@ function clearPendingFiles() {
   updateQueueUi();
 }
 
-function removePendingFile(file: File) {
+function removePendingFile(file: PendingSendFile) {
   const key = fileQueueKey(file);
   const index = pendingSendFiles.findIndex((pendingFile) => fileQueueKey(pendingFile) === key);
   if (index >= 0) {
@@ -287,6 +315,20 @@ function setupNativeReceiveListener() {
   if (!isDesktopTauri() || nativeReceiveListenerInstalled) return;
   nativeReceiveListenerInstalled = true;
 
+  void listen<{ id?: string; name: string; transferred: number; total: number }>("file-transfer-send-progress", (event) => {
+    const payload = event.payload;
+    updateTransferUi({
+      id: payload.id || `native-send-${payload.name}`,
+      name: payload.name,
+      direction: "send",
+      transferred: payload.transferred || 0,
+      total: payload.total || 0,
+      status: "transferring",
+    });
+  }).catch((error) => {
+    console.warn("[file-transfer] Native send progress listener failed:", error);
+  });
+
   void listen<{ name: string; path: string; size: number }>("file-transfer-received", (event) => {
     const payload = event.payload;
     updateTransferUi({
@@ -307,19 +349,27 @@ function setupNativeReceiveListener() {
 export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
   activeSendAbort?.abort();
   activeSendAbort = null;
+  if (latestTransfer?.id) {
+    pendingCompleteResolvers.get(latestTransfer.id)?.(null);
+    pendingCompleteResolvers.delete(latestTransfer.id);
+  }
   if (activeReceive) {
-    ch?.send(JSON.stringify({ action: "cancel", id: activeReceive.id }));
+    if (ch) sendControlMessage(ch, { action: "cancel", id: activeReceive.id });
     activeReceive = null;
   }
   updateTransferUi(latestTransfer ? { ...latestTransfer, status: "cancelled" } : null);
 }
 
-async function sendFiles(files: File[], ch: RTCDataChannel | null) {
+async function sendFiles(files: PendingSendFile[], ch: RTCDataChannel | null) {
   if (ch?.readyState === "open") {
-    for (const file of files) {
-      const sent = await sendFile(file, ch);
+    for (const pending of files) {
+      if (pending.kind !== "browser") {
+        showTransferNotice(transferText("file_transfer_browser_required", "This connection requires browser-selected files."));
+        return false;
+      }
+      const sent = await sendFile(pending.file, ch);
       if (!sent) return false;
-      removePendingFile(file);
+      removePendingFile(pending);
     }
     return true;
   }
@@ -330,10 +380,12 @@ async function sendFiles(files: File[], ch: RTCDataChannel | null) {
       return false;
     }
 
-    for (const file of files) {
-      const sent = await sendFileViaNativeHostChannel(file);
+    for (const pending of files) {
+      const sent = pending.kind === "native"
+        ? await sendNativePathViaNativeHostChannel(pending)
+        : await sendFileViaNativeHostChannel(pending.file);
       if (!sent) return false;
-      removePendingFile(file);
+      removePendingFile(pending);
     }
     return true;
   }
@@ -346,8 +398,30 @@ function setFilePickerActive(active: boolean) {
   (window as any).__fileTransferPickerActive = active;
 }
 
-function fileQueueKey(file: File) {
-  return `${file.name}:${file.size}:${file.lastModified || 0}`;
+function toBrowserSelectedFile(file: File): BrowserSelectedFile {
+  return {
+    kind: "browser",
+    file,
+    name: file.name,
+    size: file.size,
+    lastModified: file.lastModified || 0,
+  };
+}
+
+async function pickNativeTransferFiles() {
+  try {
+    const files = await invoke<Array<Omit<NativeSelectedFile, "kind">>>("pick_transfer_files");
+    return files.map((file) => ({ ...file, kind: "native" as const }));
+  } catch (error) {
+    console.warn("[file-transfer] Native file picker failed:", error);
+    showTransferNotice(`${transferText("file_transfer_failed", "Transfer failed")}: ${String(error)}`);
+    return [];
+  }
+}
+
+function fileQueueKey(file: PendingSendFile) {
+  if (file.kind === "native") return `native:${file.path}:${file.size}:${file.lastModified || 0}`;
+  return `browser:${file.name}:${file.size}:${file.lastModified || 0}`;
 }
 
 async function sendFile(file: File, ch: RTCDataChannel) {
@@ -482,14 +556,50 @@ async function sendFile(file: File, ch: RTCDataChannel) {
     });
     return false;
   }
-  activeSendAbort = null;
   updateTransferUi({
     id,
     name: file.name,
     direction: "send",
     transferred: file.size,
     total: file.size,
+    status: "transferring",
+    detail: transferText("file_transfer_waiting_remote_save", "Waiting for remote save..."),
+  });
+  const complete = await waitForRemoteComplete(id, abort.signal);
+  activeSendAbort = null;
+  if (!complete) {
+    if (abort.signal.aborted) {
+      updateTransferUi({
+        id,
+        name: file.name,
+        direction: "send",
+        transferred: file.size,
+        total: file.size,
+        status: "cancelled",
+      });
+      return false;
+    }
+    updateTransferUi({
+      id,
+      name: file.name,
+      direction: "send",
+      transferred: file.size,
+      total: file.size,
+      status: "failed",
+      detail: transferText("file_transfer_remote_save_timeout", "Remote save was not confirmed. Please check the receiver."),
+    });
+    return false;
+  }
+  const completeName = complete.action === "complete" ? complete.name : undefined;
+  const completePath = complete.action === "complete" ? complete.path : undefined;
+  updateTransferUi({
+    id,
+    name: sanitizeFileName(completeName || file.name),
+    direction: "send",
+    transferred: file.size,
+    total: file.size,
     status: "complete",
+    detail: completePath || transferText("file_transfer_remote_saved", "Remote saved the file"),
   });
   console.log(`[file-transfer] Finished sending file: ${file.name}`);
   return true;
@@ -528,6 +638,45 @@ async function sendFileViaNativeHostChannel(file: File) {
     return true;
   } catch (error) {
     console.warn("[file-transfer] Native host send failed:", error);
+    updateTransferUi({
+      id,
+      name: file.name,
+      direction: "send",
+      transferred: 0,
+      total: file.size,
+      status: "failed",
+      detail: `${transferText("file_transfer_failed", "Transfer failed")}: ${String(error)}`,
+    });
+    return false;
+  }
+}
+
+async function sendNativePathViaNativeHostChannel(file: NativeSelectedFile) {
+  const id = `native-path-${Date.now()}-${Math.random()}`;
+  updateTransferUi({
+    id,
+    name: file.name,
+    direction: "send",
+    transferred: 0,
+    total: file.size,
+    status: "preparing",
+    detail: transferText("file_transfer_native_streaming", "Streaming from disk..."),
+  });
+
+  try {
+    await invoke("send_file_to_client", { path: file.path });
+    updateTransferUi({
+      id,
+      name: file.name,
+      direction: "send",
+      transferred: file.size,
+      total: file.size,
+      status: "complete",
+      detail: transferText("file_transfer_remote_saved", "Remote saved the file"),
+    });
+    return true;
+  } catch (error) {
+    console.warn("[file-transfer] Native path send failed:", error);
     updateTransferUi({
       id,
       name: file.name,
@@ -590,6 +739,23 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
     return;
   }
 
+  if (msg.action === "complete") {
+    if (msg.id) {
+      pendingCompleteResolvers.get(msg.id)?.(msg);
+      pendingCompleteResolvers.delete(msg.id);
+    }
+    updateTransferUi({
+      id: msg.id || latestTransfer?.id || `remote-complete-${Date.now()}`,
+      name: sanitizeFileName(msg.name || latestTransfer?.name || "transfer"),
+      direction: "send",
+      transferred: msg.size || latestTransfer?.total || latestTransfer?.transferred || 0,
+      total: msg.size || latestTransfer?.total || latestTransfer?.transferred || 0,
+      status: "complete",
+      detail: msg.path || transferText("file_transfer_remote_saved", "Remote saved the file"),
+    });
+    return;
+  }
+
   if (msg.action === "start") {
     const fingerprint = msg.fingerprint || `${sanitizeFileName(msg.name)}-${msg.size}`;
     const partial = partialReceives.get(fingerprint);
@@ -633,6 +799,13 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
       console.warn(`[file-transfer] Size mismatch for ${receive.name}: ${blob.size}/${receive.size}`);
     }
     const savedDetail = await saveReceivedBlob(blob, receive.name);
+    sendControlMessage(ch, {
+      action: "complete",
+      id: receive.id,
+      name: receive.name,
+      path: savedDetail,
+      size: blob.size,
+    });
     updateTransferUi({
       id: receive.id,
       name: receive.name,
@@ -661,6 +834,26 @@ function waitForResumeOffset(id: string, signal: AbortSignal) {
       window.clearTimeout(timer);
       pendingResumeResolvers.delete(id);
       resolve(0);
+    }
+  });
+}
+
+function waitForRemoteComplete(id: string, signal: AbortSignal) {
+  return new Promise<TransferMessage | null>((resolve) => {
+    const timer = window.setTimeout(() => {
+      pendingCompleteResolvers.delete(id);
+      resolve(null);
+    }, 120_000);
+
+    pendingCompleteResolvers.set(id, (message) => {
+      window.clearTimeout(timer);
+      resolve(message);
+    });
+
+    if (signal.aborted) {
+      window.clearTimeout(timer);
+      pendingCompleteResolvers.delete(id);
+      resolve(null);
     }
   });
 }
@@ -707,6 +900,10 @@ function waitForBufferedAmount(ch: RTCDataChannel, target: number, signal: Abort
 }
 
 function updateTransferUi(state: TransferUiState | null) {
+  if (transferHideTimer !== null) {
+    window.clearTimeout(transferHideTimer);
+    transferHideTimer = null;
+  }
   latestTransfer = state;
   const progressContainers = Array.from(document.querySelectorAll<HTMLElement>("[data-transfer-progress]"));
 
@@ -718,7 +915,11 @@ function updateTransferUi(state: TransferUiState | null) {
     return;
   }
 
+  if (!transferStartedAt.has(state.id)) {
+    transferStartedAt.set(state.id, Date.now());
+  }
   const pct = state.total > 0 ? Math.min(100, Math.round((state.transferred / state.total) * 100)) : 0;
+  const detail = state.detail || transferProgressDetail(state);
   progressContainers.forEach((container) => {
     const filenameEl = container.querySelector<HTMLElement>("[data-transfer-filename]");
     const pctEl = container.querySelector<HTMLElement>("[data-transfer-pct]");
@@ -736,21 +937,33 @@ function updateTransferUi(state: TransferUiState | null) {
     if (pctEl) pctEl.textContent = `${pct}%`;
     if (barEl) barEl.style.width = `${pct}%`;
     if (detailEl) {
-      detailEl.textContent = state.detail || "";
-      detailEl.style.display = state.detail ? "block" : "none";
+      detailEl.textContent = detail;
+      detailEl.style.display = detail ? "block" : "none";
     }
     if (cancelBtn) cancelBtn.disabled = state.status === "complete" || state.status === "failed";
   });
 
   if (state.status === "complete" || state.status === "cancelled" || state.status === "failed") {
-    setTimeout(() => {
+    transferHideTimer = window.setTimeout(() => {
       if (latestTransfer?.id === state.id) {
         progressContainers.forEach((container) => {
           container.style.display = "none";
         });
+        transferStartedAt.delete(state.id);
+        latestTransfer = null;
       }
-    }, state.detail ? 7000 : 2500);
+      transferHideTimer = null;
+    }, state.status === "complete" ? 10_000 : state.detail ? 7000 : 2500);
   }
+}
+
+function transferProgressDetail(state: TransferUiState) {
+  if (state.status !== "transferring" && state.status !== "preparing") return "";
+  const startedAt = transferStartedAt.get(state.id) || Date.now();
+  const elapsedSeconds = Math.max((Date.now() - startedAt) / 1000, 0.1);
+  const speed = state.transferred / elapsedSeconds;
+  const base = `${formatBytes(state.transferred)} / ${formatBytes(state.total)}`;
+  return speed > 0 ? `${base} · ${formatBytes(speed)}/s` : base;
 }
 
 function downloadBlob(blob: Blob, name: string) {
