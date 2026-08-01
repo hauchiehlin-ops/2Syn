@@ -1191,6 +1191,115 @@ input:checked + .slider:before {
   border-color: rgba(239, 68, 68, 0.6);
 }
 
+.file-transfer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.file-transfer-panel h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.inline-drop-zone {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--panel-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.inline-drop-zone:hover,
+.inline-drop-zone.file-drop-zone-active {
+  border-color: var(--accent-color, #3b82f6);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text-main);
+}
+
+.transfer-progress-container {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transfer-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+#transfer-filename {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-progress-track {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.transfer-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-color, #3b82f6);
+  transition: width 0.12s linear;
+}
+
+.host-file-send-panel {
+  width: 100%;
+  margin: 10px 0 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.host-file-send-panel label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.host-file-send-row {
+  display: flex;
+  gap: 6px;
+}
+
+#host-file-path-input {
+  flex: 1;
+  min-width: 0;
+}
+
+#host-file-send-status {
+  min-height: 16px;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 /* =========================================================================
    仿 iOS AssistiveTouch 智能圓形懸浮控制轉盤樣式
    ========================================================================= */

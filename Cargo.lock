@@ -6256,9 +6256,12 @@ name = "syn-desktop"
 version = "4.1.10"
 dependencies = [
  "arboard",
+ "bytes",
  "core-foundation 0.9.4",
  "futures-util",
  "if-addrs",
+ "jni",
+ "ndk-context",
  "objc",
  "reqwest 0.11.27",
  "serde",

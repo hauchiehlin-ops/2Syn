@@ -474,6 +474,7 @@ impl WebRtcSession {
     pub async fn setup_system_control_channel(
         &self,
         monitor_tx: tokio::sync::watch::Sender<usize>,
+        monitor_list_msg: Option<serde_json::Value>,
     ) -> Result<Arc<RTCDataChannel>, CoreError> {
         let init = RTCDataChannelInit {
             ordered: Some(true),
@@ -489,29 +490,13 @@ impl WebRtcSession {
         
         data_channel.on_open(Box::new(move || {
             let dc = Arc::clone(&dc_clone_for_open);
+            let monitor_list_msg = monitor_list_msg.clone();
             Box::pin(async move {
-                // [FIX] xcap::Monitor::all() 呼叫了底層 macOS API (NSScreen/CGDisplay)
-                // 若在 WebRTC 的背景執行緒中呼叫，會直接導致 WindowServer 瞬間死鎖 (Mac 死機)
-                /*
-                let monitors = xcap::Monitor::all().unwrap_or_default();
-                let mut monitor_list = Vec::new();
-                for (i, m) in monitors.iter().enumerate() {
-                    monitor_list.push(serde_json::json!({
-                        "id": m.id().unwrap_or(0),
-                        "name": m.name().unwrap_or_else(|_| format!("Display {}", i)),
-                        "is_primary": m.is_primary().unwrap_or(false),
-                    }));
-                }
-                let msg = serde_json::json!({
-                    "type": "monitor_list",
-                    "monitors": monitor_list,
-                    "current": 0
-                });
-                if let Ok(json_str) = serde_json::to_string(&msg) {
+                if let Some(msg) = monitor_list_msg {
+                    let json_str = msg.to_string();
                     let _ = dc.send_text(json_str).await;
                 }
-                */
-                println!("[SystemControl] DataChannel opened (Monitor detection temporarily disabled to prevent crash)");
+                println!("[SystemControl] DataChannel opened");
 
                 // 告知主控端被控端作業系統，讓主控端送出正確的快捷鍵組合
                 // （例如貼上：macOS 用 Cmd+V、Windows 用 Ctrl+V，避免雙組合鍵重複觸發）

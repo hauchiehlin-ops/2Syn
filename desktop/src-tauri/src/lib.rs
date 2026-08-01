@@ -19,6 +19,8 @@ struct AppState {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     active_pc: tokio::sync::Mutex<Option<Arc<webrtc::peer_connection::RTCPeerConnection>>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    active_file_channel: tokio::sync::Mutex<Option<Arc<webrtc::data_channel::RTCDataChannel>>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     signaling_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     current_pin: Arc<tokio::sync::RwLock<String>>,
@@ -134,7 +136,7 @@ async fn read_clipboard() -> Result<String, String> {
 
     #[cfg(target_os = "android")]
     {
-        Err("Android native clipboard not implemented".to_string())
+        android_read_clipboard()
     }
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -171,7 +173,7 @@ async fn write_clipboard(text: String) -> Result<(), String> {
 
     #[cfg(target_os = "android")]
     {
-        Err("Android native clipboard not implemented".to_string())
+        android_write_clipboard(text)
     }
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -180,6 +182,159 @@ async fn write_clipboard(text: String) -> Result<(), String> {
         let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
         clipboard.set_text(text).map_err(|e| e.to_string())
     }
+}
+
+#[cfg(target_os = "android")]
+fn with_android_env<R>(
+    f: impl FnOnce(&mut jni::JNIEnv<'_>) -> Result<R, String>,
+) -> Result<R, String> {
+    let ctx = ndk_context::android_context();
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }
+        .map_err(|e| format!("JavaVM unavailable: {e}"))?;
+    let vm = std::mem::ManuallyDrop::new(vm);
+    let mut env = vm
+        .attach_current_thread()
+        .map_err(|e| format!("JNI attach failed: {e}"))?;
+    f(&mut env)
+}
+
+#[cfg(target_os = "android")]
+fn android_clipboard_manager<'a>(
+    env: &mut jni::JNIEnv<'a>,
+) -> Result<jni::objects::JObject<'a>, String> {
+    use jni::objects::{JObject, JValue};
+    use std::mem::ManuallyDrop;
+
+    let ctx = ndk_context::android_context();
+    let context = ManuallyDrop::new(unsafe { JObject::from_raw(ctx.context() as jni::sys::jobject) });
+    let context_class = env
+        .find_class("android/content/Context")
+        .map_err(|e| format!("Context class unavailable: {e}"))?;
+    let clipboard_service = env
+        .get_static_field(
+            context_class,
+            "CLIPBOARD_SERVICE",
+            "Ljava/lang/String;",
+        )
+        .map_err(|e| format!("CLIPBOARD_SERVICE unavailable: {e}"))?;
+    let clipboard_service = clipboard_service.l().map_err(|e| e.to_string())?;
+    let clipboard = env
+        .call_method(
+            &*context,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[JValue::from(&clipboard_service)],
+        )
+        .map_err(|e| format!("getSystemService(CLIPBOARD_SERVICE) failed: {e}"))?
+        .l()
+        .map_err(|e| format!("Clipboard service object invalid: {e}"))?;
+    Ok(clipboard)
+}
+
+#[cfg(target_os = "android")]
+fn android_read_clipboard() -> Result<String, String> {
+    use jni::objects::{JObject, JString};
+    use std::mem::ManuallyDrop;
+
+    with_android_env(|env| {
+        let clipboard = android_clipboard_manager(env)?;
+        let clip = env
+            .call_method(&clipboard, "getPrimaryClip", "()Landroid/content/ClipData;", &[])
+            .map_err(|e| format!("getPrimaryClip failed: {e}"))?
+            .l()
+            .map_err(|e| format!("Primary clip invalid: {e}"))?;
+        if clip.is_null() {
+            return Ok(String::new());
+        }
+
+        let count = env
+            .call_method(&clip, "getItemCount", "()I", &[])
+            .map_err(|e| format!("getItemCount failed: {e}"))?
+            .i()
+            .map_err(|e| format!("Clip item count invalid: {e}"))?;
+        if count <= 0 {
+            return Ok(String::new());
+        }
+
+        let item = env
+            .call_method(
+                &clip,
+                "getItemAt",
+                "(I)Landroid/content/ClipData$Item;",
+                &[jni::objects::JValue::Int(0)],
+            )
+            .map_err(|e| format!("getItemAt(0) failed: {e}"))?
+            .l()
+            .map_err(|e| format!("Clip item invalid: {e}"))?;
+        if item.is_null() {
+            return Ok(String::new());
+        }
+
+        let ctx = ndk_context::android_context();
+        let context = ManuallyDrop::new(unsafe { JObject::from_raw(ctx.context() as jni::sys::jobject) });
+        let text_obj = env
+            .call_method(
+                &item,
+                "coerceToText",
+                "(Landroid/content/Context;)Ljava/lang/CharSequence;",
+                &[jni::objects::JValue::from(&*context)],
+            )
+            .map_err(|e| format!("coerceToText failed: {e}"))?
+            .l()
+            .map_err(|e| format!("Clip text invalid: {e}"))?;
+        if text_obj.is_null() {
+            return Ok(String::new());
+        }
+
+        let string_obj = env
+            .call_method(&text_obj, "toString", "()Ljava/lang/String;", &[])
+            .map_err(|e| format!("Clip text toString failed: {e}"))?
+            .l()
+            .map_err(|e| format!("Clip string invalid: {e}"))?;
+        let jstr = JString::from(string_obj);
+        env.get_string(&jstr)
+            .map(|s| s.into())
+            .map_err(|e| format!("Reading Android clipboard string failed: {e}"))
+    })
+}
+
+#[cfg(target_os = "android")]
+fn android_write_clipboard(text: String) -> Result<(), String> {
+    use jni::objects::{JObject, JString, JValue};
+
+    with_android_env(|env| {
+        let clipboard = android_clipboard_manager(env)?;
+        let label = env
+            .new_string("2syn")
+            .map_err(|e| format!("Clipboard label allocation failed: {e}"))?;
+        let value = env
+            .new_string(text)
+            .map_err(|e| format!("Clipboard text allocation failed: {e}"))?;
+        let label_obj = JObject::from(JString::from(label));
+        let value_obj = JObject::from(JString::from(value));
+        let clip_data_class = env
+            .find_class("android/content/ClipData")
+            .map_err(|e| format!("ClipData class unavailable: {e}"))?;
+        let clip = env
+            .call_static_method(
+                clip_data_class,
+                "newPlainText",
+                "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/content/ClipData;",
+                &[JValue::from(&label_obj), JValue::from(&value_obj)],
+            )
+            .map_err(|e| format!("ClipData.newPlainText failed: {e}"))?
+            .l()
+            .map_err(|e| format!("ClipData object invalid: {e}"))?;
+
+        env.call_method(
+            &clipboard,
+            "setPrimaryClip",
+            "(Landroid/content/ClipData;)V",
+            &[JValue::from(&clip)],
+        )
+        .map_err(|e| format!("setPrimaryClip failed: {e}"))?;
+        Ok(())
+    })
 }
 
 #[derive(serde::Deserialize)]
@@ -531,8 +686,10 @@ async fn handle_remote_offer_as_host(
     // 建立監聽螢幕切換的 watch channel
     let (monitor_tx, monitor_rx) = tokio::sync::watch::channel(0usize);
 
-    // 建立系統控制通道
-    if let Err(e) = session.setup_system_control_channel(monitor_tx).await {
+    // 建立系統控制通道。螢幕列表先透過 Tauri runtime API 取得，再交給 core 在
+    // DataChannel 開啟時送出；避免在 WebRTC callback 背景執行緒直接碰 xcap/NSScreen。
+    let monitor_list_msg = build_monitor_list_message(&app_handle);
+    if let Err(e) = session.setup_system_control_channel(monitor_tx, monitor_list_msg).await {
         eprintln!(
             "[SystemControl] Failed to setup system control channel: {}",
             e
@@ -709,9 +866,13 @@ async fn handle_remote_offer_as_host(
     // 處理 DataChannel 接收事件，將序列號追蹤分為可靠與不可靠通道
     let control_last_seq = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let unreliable_last_seq = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let app_for_data_channel = app_handle.clone();
+    let session_alive_data_channel = Arc::clone(&session_alive);
 
     pc.on_data_channel(Box::new(move |d| {
         let label = d.label().to_owned();
+        let app = app_for_data_channel.clone();
+        let session_alive = Arc::clone(&session_alive_data_channel);
         println!("Rust 接收到 DataChannel: {}", label);
 
         if label == "input-control" {
@@ -776,8 +937,11 @@ async fn handle_remote_offer_as_host(
             }));
         } else if label == "clipboard" {
             // 剪貼簿同步 DataChannel
+            let last_clipboard_text = Arc::new(tokio::sync::Mutex::new(String::new()));
+            let last_seen_for_message = Arc::clone(&last_clipboard_text);
             d.on_message(Box::new(move |msg| {
                 let data = msg.data.to_vec();
+                let last_seen = Arc::clone(&last_seen_for_message);
                 Box::pin(async move {
                     if let Ok(text_str) = std::str::from_utf8(&data) {
                         // 格式: JSON {"type":"clipboard_push","text":"..."}
@@ -789,6 +953,7 @@ async fn handle_remote_offer_as_host(
                                     #[cfg(not(any(target_os = "ios", target_os = "android")))]
                                     {
                                         use arboard::Clipboard;
+                                        *last_seen.lock().await = text.to_string();
                                         if let Ok(mut cb) = Clipboard::new() {
                                             let _ = cb.set_text(text.to_string());
                                             eprintln!(
@@ -803,8 +968,77 @@ async fn handle_remote_offer_as_host(
                     }
                 })
             }));
+
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            {
+                let dc_for_open = Arc::clone(&d);
+                let last_seen_for_open = Arc::clone(&last_clipboard_text);
+                let session_alive_for_open = Arc::clone(&session_alive);
+                d.on_open(Box::new(move || {
+                    let dc = Arc::clone(&dc_for_open);
+                    let last_seen = Arc::clone(&last_seen_for_open);
+                    let session_alive = Arc::clone(&session_alive_for_open);
+                    Box::pin(async move {
+                        use webrtc::data_channel::data_channel_state::RTCDataChannelState;
+                        while session_alive.load(std::sync::atomic::Ordering::SeqCst)
+                            && dc.ready_state() == RTCDataChannelState::Open
+                        {
+                            if let Ok(mut cb) = arboard::Clipboard::new() {
+                                if let Ok(text) = cb.get_text() {
+                                    if !text.is_empty() {
+                                        let mut last = last_seen.lock().await;
+                                        if *last != text {
+                                            *last = text.clone();
+                                            let msg = serde_json::json!({
+                                                "type": "clipboard_push",
+                                                "text": text
+                                            });
+                                            if let Err(e) = dc.send_text(msg.to_string()).await {
+                                                eprintln!("[clipboard] 推送 host 剪貼簿至 client 失敗: {}", e);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        }
+                    })
+                }));
+            }
         } else if label == "file-transfer" {
             // 檔案傳輸 DataChannel
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            {
+                let app_for_initial_state = app.clone();
+                let dc_for_initial_state = Arc::clone(&d);
+                tokio::spawn(async move {
+                    let state = app_for_initial_state.state::<AppState>();
+                    *state.active_file_channel.lock().await = Some(dc_for_initial_state);
+                });
+
+                let dc_for_state = Arc::clone(&d);
+                let app_for_state = app.clone();
+                d.on_open(Box::new(move || {
+                    let dc = Arc::clone(&dc_for_state);
+                    let app = app_for_state.clone();
+                    Box::pin(async move {
+                        let state = app.state::<AppState>();
+                        *state.active_file_channel.lock().await = Some(dc);
+                        println!("[file-transfer] Active file channel is ready");
+                    })
+                }));
+
+                let app_for_close = app.clone();
+                d.on_close(Box::new(move || {
+                    let app = app_for_close.clone();
+                    Box::pin(async move {
+                        let state = app.state::<AppState>();
+                        *state.active_file_channel.lock().await = None;
+                        println!("[file-transfer] Active file channel cleared");
+                    })
+                }));
+            }
             let file_state = Arc::new(tokio::sync::Mutex::new(
                 syn_core::file_transfer::FileTransferState::new(),
             ));
@@ -1487,6 +1721,118 @@ fn get_app_product_name(app: tauri::AppHandle) -> String {
     app.config().product_name.clone().unwrap_or_else(|| "2syn Host".to_string())
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn build_monitor_list_message(app: &tauri::AppHandle) -> Option<serde_json::Value> {
+    let monitors = app.available_monitors().ok()?;
+    if monitors.is_empty() {
+        return None;
+    }
+    let primary = app.primary_monitor().ok().flatten();
+
+    let monitors_json: Vec<serde_json::Value> = monitors
+        .iter()
+        .enumerate()
+        .map(|(index, monitor)| {
+            let size = monitor.size();
+            let position = monitor.position();
+            let is_primary = primary.as_ref().map(|p| {
+                p.position() == position && p.size() == size
+            }).unwrap_or(index == 0);
+
+            serde_json::json!({
+                "id": index,
+                "name": monitor.name().cloned().unwrap_or_else(|| format!("Display {}", index + 1)),
+                "is_primary": is_primary,
+                "x": position.x,
+                "y": position.y,
+                "width": size.width,
+                "height": size.height,
+                "scale_factor": monitor.scale_factor(),
+            })
+        })
+        .collect();
+
+    Some(serde_json::json!({
+        "type": "monitor_list",
+        "monitors": monitors_json,
+        "current": 0
+    }))
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[tauri::command]
+async fn send_file_to_client(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    use bytes::Bytes;
+    use tokio::io::AsyncReadExt;
+    use webrtc::data_channel::data_channel_state::RTCDataChannelState;
+
+    let path_buf = std::path::PathBuf::from(path);
+    let metadata = tokio::fs::metadata(&path_buf)
+        .await
+        .map_err(|e| format!("無法讀取檔案資訊: {}", e))?;
+    if !metadata.is_file() {
+        return Err("指定路徑不是檔案".to_string());
+    }
+
+    let file_name = path_buf
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "無法取得檔名".to_string())?
+        .to_string();
+
+    let dc = state
+        .active_file_channel
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "檔案傳輸通道尚未開啟".to_string())?;
+
+    if dc.ready_state() != RTCDataChannelState::Open {
+        return Err("檔案傳輸通道尚未開啟".to_string());
+    }
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let start_msg = serde_json::json!({
+        "action": "start",
+        "id": id,
+        "name": file_name,
+        "size": metadata.len()
+    });
+    dc.send_text(start_msg.to_string())
+        .await
+        .map_err(|e| format!("無法送出檔案開始訊息: {}", e))?;
+
+    let mut file = tokio::fs::File::open(&path_buf)
+        .await
+        .map_err(|e| format!("無法開啟檔案: {}", e))?;
+    let mut buf = vec![0u8; 16 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .await
+            .map_err(|e| format!("讀取檔案失敗: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        dc.send(&Bytes::copy_from_slice(&buf[..n]))
+            .await
+            .map_err(|e| format!("檔案區塊傳送失敗: {}", e))?;
+
+        while dc.buffered_amount().await > 10 * 1024 * 1024 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            if dc.ready_state() != RTCDataChannelState::Open {
+                return Err("檔案傳輸通道已關閉".to_string());
+            }
+        }
+    }
+
+    let end_msg = serde_json::json!({ "action": "end", "id": id });
+    dc.send_text(end_msg.to_string())
+        .await
+        .map_err(|e| format!("無法送出檔案結束訊息: {}", e))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -1508,6 +1854,8 @@ pub fn run() {
 
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             active_pc: tokio::sync::Mutex::new(None),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            active_file_channel: tokio::sync::Mutex::new(None),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             signaling_tx: tokio::sync::Mutex::new(None),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -1563,6 +1911,8 @@ pub fn run() {
             check_macos_permissions,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             send_custom_signaling_message,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            send_file_to_client,
             read_clipboard,
             write_clipboard,
             wake_device,

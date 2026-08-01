@@ -20,6 +20,26 @@
 
 # 歷程
 
+## 2026-08-01 — 補齊 Android 剪貼簿、螢幕列表與 Windows 擷取 stub
+
+- **問題/目標**：修掉上一輪盤點後仍存在的三個半成品：Android 原生剪貼簿依賴 WebView fallback、host 螢幕列表偵測暫停、Windows DXGI codec/capturer stub。
+- **根因/做法**：
+  1. `desktop/src-tauri/src/lib.rs` 的 Android `read_clipboard`/`write_clipboard` 原本直接回傳未實作，導致行動端只能靠 WebView `navigator.clipboard` fallback。現在改用 JNI 呼叫 Android `ClipboardManager`/`ClipData`，讀取時以 `coerceToText(activityContext)` 取得文字，寫入時建立 `ClipData.newPlainText("2syn", text)`，並新增 Android target dependency `jni`/`ndk-context`。
+  2. `core/src/connection.rs` 的 `system-control` channel 原本註解掉 `xcap::Monitor::all()`，螢幕列表不會送到 client。改為由 Tauri host runtime 在建立 WebRTC session 時透過 `AppHandle::available_monitors()`/`primary_monitor()` 產生 `monitor_list` JSON，再交給 `setup_system_control_channel()` 在 channel open 後送出，避免在 WebRTC callback 內碰平台 UI/display API。
+  3. `core/src/codec.rs` 的 Windows `WindowsDxgiCapturer` 原本只是回傳空 D3D11 texture stub。現在至少以 `xcap::Monitor` 初始化並擷取真實畫面，回傳 `FrameBuffer::CpuMemory(image.into_raw())`，移除假影格；這是可工作的 CPU 擷取路徑，不是最終的 DXGI 零拷貝實作。
+- **驗證**：`cargo check -p syn-core`、`cargo check -p syn-desktop` 通過（僅既有 warning）；`desktop/node_modules/.bin/tsc --noEmit` 回傳成功碼，但本機 shell 會額外印出缺 Java Runtime 的環境訊息。Android target check 卡在本機缺 `aarch64-linux-android-clang`；Windows MSVC target check 卡在本機缺 Visual Studio/MSVC 交叉編譯環境與相關 C/C++ toolchain。
+
+## 2026-08-01 — 補齊剪貼簿雙向同步與檔案傳輸半成品
+
+- **問題/目標**：檢查專案是否已具備本機與 client 應用程式間的文字複製/貼上與檔案傳輸能力，並把已存在但未完整接上的功能補齊；要求不新增後端資料庫，只使用當前 WebRTC session 與設備環境。
+- **根因/做法**：
+  1. 剪貼簿原本已有 `clipboard` DataChannel，但 host 端只接收 client 的 `clipboard_push` 並寫入本機剪貼簿；client 端雖有接收 handler，host 端卻沒有主動送回剪貼簿變更。現在 host 在 `clipboard` channel 開啟後會每 1.5 秒輪詢本機文字剪貼簿，內容變更時以同一個 `clipboard_push` 訊息推送回 client；收到 client 推送時同步更新去重狀態，避免 echo loop。
+  2. 檔案傳輸原本有 `desktop/src/file_transfer.ts` 與 `core/src/file_transfer.rs`，但 HTML 沒有 `#file-drop-zone`，`main.ts` 又殘留一段會呼叫不存在 `get_active_transfers` 的舊 PoC 輪詢，導致功能表面存在、實際入口斷裂。現在新增可見的 client 檔案拖放/點選入口、進度列與取消按鈕，並由 `bindFileTransferChannel()` 統一處理送出與接收。
+  3. 檔案協定維持 session-only：`start/chunk/end/cancel` 直接走 `file-transfer` DataChannel，不經信令伺服器、不寫資料庫。client → host 仍落在 host 的 `Downloads/2syn_downloads`；host → client 新增 `send_file_to_client` Tauri command，使用目前 active file channel 將指定本機路徑切塊送到 client，client 端收到後以瀏覽器下載方式保存。
+  4. host 檔案接收器新增檔名清理、同名避免覆蓋、取消時刪除未完成檔、結束時大小核對，避免遠端檔名路徑穿越與靜默覆寫。
+- **保留限制**：host → client 檔案傳輸目前以輸入本機檔案路徑為入口，尚未接 Tauri 原生檔案選擇器。Android 原生剪貼簿限制已由同日後續修正解除。
+- **驗證**：`cd desktop && npx tsc --noEmit` 通過；`cargo check -p syn-desktop` 通過（僅既有 unused/unreachable warning）。
+
 ## 2026-07-31 — 修正網頁版黑屏真正根因：host 端 TURN 設定 2 個月前被誤刪
 
 - **問題/目標**：延續前一筆「排查網頁版連線成功後黑屏」的診斷——使用者提供了瀏覽器主控台截圖，取得決定性線索。

@@ -74,38 +74,41 @@ pub trait VideoHardwareEncoder: Send + Sync {
 
 #[cfg(target_os = "windows")]
 pub struct WindowsDxgiCapturer {
-    device: *mut std::ffi::c_void,
-    output_duplication: *mut std::ffi::c_void,
+    monitor: Option<xcap::Monitor>,
 }
 
 #[cfg(target_os = "windows")]
 impl WindowsDxgiCapturer {
     pub fn new() -> Self {
-        Self {
-            device: std::ptr::null_mut(),
-            output_duplication: std::ptr::null_mut(),
-        }
+        Self { monitor: None }
     }
 }
 
 #[cfg(target_os = "windows")]
 impl ScreenCapturer for WindowsDxgiCapturer {
     fn init(&mut self) -> Result<(), CoreError> {
-        // TODO: 真實 DXGI Desktop Duplication 整合需要 windows crate 或 DirectX SDK binding。
-        // 目前以 stub 形式佔位，展示完整管線架構。
-        // 實際整合步驟：
-        //   1. D3D11CreateDevice → 建立 ID3D11Device
-        //   2. QueryInterface → 取得 IDXGIDevice → IDXGIAdapter → IDXGIOutput
-        //   3. IDXGIOutput1::DuplicateOutput → 建立 IDXGIOutputDuplication
-        //   4. IDXGIOutputDuplication::AcquireNextFrame → 逐幀取得 ID3D11Texture2D
-        self.device = std::ptr::null_mut();
-        self.output_duplication = std::ptr::null_mut();
+        let monitors = xcap::Monitor::all()
+            .map_err(|e| CoreError::SystemError(format!("Windows 螢幕枚舉失敗: {:?}", e)))?;
+        let monitor = monitors
+            .into_iter()
+            .next()
+            .ok_or_else(|| CoreError::SystemError("找不到可擷取的 Windows 螢幕".to_string()))?;
+        self.monitor = Some(monitor);
         Ok(())
     }
 
     fn acquire_next_frame(&mut self) -> Result<FrameBuffer, CoreError> {
-        // Stub：回傳空指標佔位，真實實作從 AcquireNextFrame 取得 D3D11 Texture2D 指標
-        Ok(FrameBuffer::D3D11Texture(self.device))
+        if self.monitor.is_none() {
+            self.init()?;
+        }
+        let monitor = self
+            .monitor
+            .as_ref()
+            .ok_or_else(|| CoreError::SystemError("Windows 擷取器尚未初始化".to_string()))?;
+        let image = monitor
+            .capture_image()
+            .map_err(|e| CoreError::SystemError(format!("Windows 螢幕擷取失敗: {:?}", e)))?;
+        Ok(FrameBuffer::CpuMemory(image.into_raw()))
     }
 }
 

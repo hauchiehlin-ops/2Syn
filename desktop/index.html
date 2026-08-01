@@ -206,6 +206,27 @@
           </div>
 
           <div class="separator"></div>
+
+          <div class="file-transfer-panel">
+            <h3 id="txt-file-transfer-title">File Transfer</h3>
+            <div id="file-drop-zone" class="inline-drop-zone" role="button" tabindex="0">
+              <span id="txt-drop-zone">Drag & Drop files here or Click to upload</span>
+            </div>
+            <div id="transfer-progress-container" class="transfer-progress-container" style="display: none;">
+              <div class="transfer-progress-header">
+                <span id="transfer-filename">--</span>
+                <span id="transfer-pct">0%</span>
+              </div>
+              <div class="transfer-progress-track">
+                <div id="transfer-progress-bar" class="transfer-progress-bar"></div>
+              </div>
+              <button id="btn-cancel-transfer" class="btn-secondary" type="button">
+                <span id="txt-btn-cancel-transfer">Cancel Transfer</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="separator"></div>
         </div>
 
         <!-- 本機身分與授權 -->
@@ -244,6 +265,16 @@
               <span id="val-my-mac" class="code-text">Loading...</span>
               <button class="btn-copy" id="btn-copy-mac" type="button" title="Copy">📋</button>
             </div>
+          </div>
+          <div class="host-only host-file-send-panel">
+            <label for="host-file-path-input" id="txt-host-send-file-label">Send file to connected client</label>
+            <div class="host-file-send-row">
+              <input type="text" id="host-file-path-input" placeholder="/path/to/file" autocomplete="off">
+              <button id="btn-host-send-file" class="btn-secondary" type="button">
+                <span id="txt-btn-host-send-file">Send</span>
+              </button>
+            </div>
+            <div id="host-file-send-status"></div>
           </div>
           <div class="info-row">
             <span id="lbl-hwid"><span id="txt-my-hwid-label">My HWID:</span></span>

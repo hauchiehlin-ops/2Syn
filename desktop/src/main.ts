@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { setupFileTransferDropZone } from "./file_transfer";
+import { bindFileTransferChannel, cancelActiveFileTransfer, setupFileTransferDropZone } from "./file_transfer";
 import { I18N_HELP_DOCS } from "./help_i18n";
 import { open } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
@@ -742,6 +742,13 @@ const fallbackTranslations: Record<string, string> = {
   "file_transfer_title": "File Transfer",
   "drop_zone": "Drag & Drop files here or Click to upload",
   "btn_cancel_transfer": "Cancel Transfer",
+  "host_send_file_label": "Send file to connected client",
+  "host_send_file_button": "Send",
+  "host_send_file_ready": "Paste a local file path while a client is connected.",
+  "host_send_file_sending": "Sending file...",
+  "host_send_file_done": "File sent to client.",
+  "host_send_file_empty": "Please enter a local file path.",
+  "host_send_file_failed": "Failed to send file: {0}",
   "log_title": "System Logs",
   "err_rtc_failed": "P2P connection failed. The local and remote devices might be behind a strict symmetric NAT or firewall and cannot punch through. Please click \"🚀 Enable Relay Mode\" to establish connection.",
   "err_target_offline": "The remote device is offline. Please make sure the device ID is correct.",
@@ -1042,6 +1049,11 @@ function updateDomTranslations() {
   setTextContent("txt-privacy-title", t("privacy_title"));
   setTextContent("lbl-privacy-mode", t("privacy_mode"));
   setTextContent("txt-monitor-title", t("monitor_title"));
+  setTextContent("txt-file-transfer-title", t("file_transfer_title"));
+  setTextContent("txt-drop-zone", t("drop_zone"));
+  setTextContent("txt-btn-cancel-transfer", t("btn_cancel_transfer"));
+  setTextContent("txt-host-send-file-label", t("host_send_file_label"));
+  setTextContent("txt-btn-host-send-file", t("host_send_file_button"));
   
   setTextContent("lbl-metric-fps", t("metric_fps"));
   setTextContent("lbl-metric-color", t("metric_color"));
@@ -1609,6 +1621,34 @@ function initClipboardSync() {
     document.removeEventListener("copy", onCopy);
     if (_clipboardPollInterval) { clearInterval(_clipboardPollInterval); _clipboardPollInterval = null; }
     if (originalCleanup) originalCleanup();
+  };
+}
+
+function bindClipboardChannel(ch: RTCDataChannel) {
+  ch.onopen = () => {
+    dataChannelClipboard = ch;
+    console.log("[clipboard] DataChannel opened");
+    if ((window as any)._clipboardCleanup) (window as any)._clipboardCleanup();
+    initClipboardSync();
+  };
+  ch.onclose = () => {
+    if (dataChannelClipboard === ch) dataChannelClipboard = null;
+    if ((window as any)._clipboardCleanup) (window as any)._clipboardCleanup();
+    console.log("[clipboard] DataChannel closed");
+  };
+  ch.onmessage = (ev) => {
+    // 被控端推送剪貼簿至主控端（被控→主控方向）
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === "clipboard_push" && msg.text) {
+        console.log(`[clipboard] 收到被控端剪貼簿: ${msg.text.substring(0, 40)}`);
+        _lastRemoteClipboard = msg.text;
+        // 桌面端直接寫入，iOS 需用戶手勢 → 顯示 toast 讓用戶點擊確認
+        writeLocalClipboard(msg.text).catch(() => {
+          showClipboardToast(msg.text);
+        });
+      }
+    } catch {}
   };
 }
 
@@ -2444,27 +2484,11 @@ async function startCall(remoteId: string, pin: string) {
 
     // 檔案傳輸 DataChannel
     dataChannelFileTransfer = pc.createDataChannel("file-transfer", { ordered: true });
+    bindFileTransferChannel(dataChannelFileTransfer);
     
     // 剪貼簿同步 DataChannel
     dataChannelClipboard = pc.createDataChannel("clipboard", { ordered: true });
-    dataChannelClipboard.onopen = () => {
-      console.log("[clipboard] DataChannel opened");
-      initClipboardSync();
-    };
-    dataChannelClipboard.onmessage = (ev) => {
-      // 被控端推送剪貼簿至主控端（被控→主控方向）
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === "clipboard_push" && msg.text) {
-          console.log(`[clipboard] 收到被控端剪貼簿: ${msg.text.substring(0, 40)}`);
-          _lastRemoteClipboard = msg.text;
-          // 桌面端直接寫入，iOS 需用戶手勢 → 顯示 toast 讓用戶點擊確認
-          writeLocalClipboard(msg.text).catch(() => {
-            showClipboardToast(msg.text);
-          });
-        }
-      } catch {}
-    };
+    bindClipboardChannel(dataChannelClipboard);
 
     // 要求接收視訊軌道 (加入 m=video 至 SDP Offer)
     pc.addTransceiver("video", { direction: "recvonly" });
@@ -3323,6 +3347,10 @@ function initOfflineSdpMode() {
 
         // 檔案傳輸 DataChannel
         dataChannelFileTransfer = pc.createDataChannel("file-transfer", { ordered: true });
+        bindFileTransferChannel(dataChannelFileTransfer);
+
+        dataChannelClipboard = pc.createDataChannel("clipboard", { ordered: true });
+        bindClipboardChannel(dataChannelClipboard);
 
         pc.onicecandidate = (event) => {
           if (!event.candidate) {
@@ -3600,96 +3628,44 @@ function initSmartAutoMode() {
   updateVisibility();
 }
 
-// =========================================================================
-// 檔案傳輸邏輯
-// =========================================================================
-let currentTransferTaskId: string | null = null;
-let transferPollingInterval: number | null = null;
-
 function initFileTransfer() {
-  const dropZone = document.getElementById("file-drop-zone");
-  const progressContainer = document.getElementById("transfer-progress-container");
-  const filenameEl = document.getElementById("transfer-filename");
   const btnCancel = document.getElementById("btn-cancel-transfer");
 
-  if (!dropZone) return;
-
-  // 處理拖曳外觀
-  dropZone.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    dropZone.style.borderColor = "var(--color-primary)";
-    dropZone.style.background = "var(--color-primary-glow)";
-  });
-  
-  dropZone.addEventListener("dragleave", (e) => {
-    e.preventDefault();
-    dropZone.style.borderColor = "var(--panel-border)";
-    dropZone.style.background = "rgba(0,0,0,0.02)";
-  });
-
-  dropZone.addEventListener("drop", async (e) => {
-    e.preventDefault();
-    dropZone.style.borderColor = "var(--panel-border)";
-    dropZone.style.background = "rgba(0,0,0,0.02)";
-
-    const files = e.dataTransfer?.files;
-    if (!files || files.length === 0) return;
-
-    // PoC：目前只取第一個檔案
-    const file = files[0];
-    // Tauri 需要絕對路徑才能讀取，這邊為了 PoC 我們先假設可以從某些管道取得路徑
-    // 實務上在 Tauri，如果開啟拖曳支援，event 中會有檔案路徑，或者可以使用 Tauri 的對話框
-    // 這裡我們示範呼叫，實際路徑處理要看 Tauri plugin-fs 設定
-    
-    // 目前檔案傳輸功能尚未實裝，此區塊 UI 已隱藏
-    console.warn("File transfer is not yet fully implemented.");
-  });
-
   if (btnCancel) {
-    btnCancel.addEventListener("click", async () => {
-      // 檔案傳輸尚未實作，此按鈕已隨面板隱藏
-      console.warn("Cancel transfer clicked, but feature is disabled.");
-    });
+    btnCancel.addEventListener("click", () => cancelActiveFileTransfer(dataChannelFileTransfer));
   }
 }
 
-function startTransferPolling(taskId: string) {
-  if (transferPollingInterval) clearInterval(transferPollingInterval);
-  
-  const pctEl = document.getElementById("transfer-pct");
-  const barEl = document.getElementById("transfer-progress-bar");
-  const progressContainer = document.getElementById("transfer-progress-container");
+function initHostFileSender() {
+  const input = document.getElementById("host-file-path-input") as HTMLInputElement | null;
+  const button = document.getElementById("btn-host-send-file") as HTMLButtonElement | null;
+  const status = document.getElementById("host-file-send-status");
+  if (!input || !button || !status) return;
 
-  transferPollingInterval = window.setInterval(async () => {
-    if (!isDesktopTauri()) return;
-    try {
-      const tasks = await invoke<any[]>("get_active_transfers");
-      const myTask = tasks.find(t => t.task_id === taskId);
-      if (myTask) {
-        const pct = Math.round(myTask.progress_pct);
-        if (pctEl) pctEl.textContent = `${pct}%`;
-        if (barEl) barEl.style.width = `${pct}%`;
-        
-        if (myTask.status === "Completed") {
-          clearInterval(transferPollingInterval!);
-          setTimeout(() => {
-            if (progressContainer) progressContainer.style.display = "none";
-            alert(t("alert_transfer_complete"));
-          }, 1000);
-        } else if (myTask.status === "Cancelled" || myTask.status === "Failed") {
-          clearInterval(transferPollingInterval!);
-          if (progressContainer) progressContainer.style.display = "none";
-        }
-      } else {
-        // 任務不見了（可能是被清理掉）
-        clearInterval(transferPollingInterval!);
-        if (progressContainer) progressContainer.style.display = "none";
-      }
-    } catch (e: any) {
-      if (typeof e === 'string' && e.includes("not found")) return;
-      console.error(e);
+  status.textContent = t("host_send_file_ready");
+  button.addEventListener("click", async () => {
+    const path = input.value.trim();
+    if (!path) {
+      status.textContent = t("host_send_file_empty");
+      return;
     }
-  }, 1000);
+    if (!isDesktopTauri()) {
+      status.textContent = t("host_send_file_failed").replace("{0}", "Tauri backend unavailable");
+      return;
+    }
+
+    button.disabled = true;
+    status.textContent = t("host_send_file_sending");
+    try {
+      await invoke("send_file_to_client", { path });
+      status.textContent = t("host_send_file_done");
+      input.value = "";
+    } catch (e) {
+      status.textContent = t("host_send_file_failed").replace("{0}", String(e));
+    } finally {
+      button.disabled = false;
+    }
+  });
 }
 
 // =========================================================================
@@ -6543,6 +6519,7 @@ async function initializeApp() {
   initClipboardCopy();
   initSmartAutoMode();
   initFileTransfer();
+  initHostFileSender();
   initRemoteLogsDiagnostics();
   initTailscaleGuide();
   initPinToggle();
