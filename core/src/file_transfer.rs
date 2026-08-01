@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 const FRAME_HEADER_BYTES: usize = 16;
 const FRAME_MAGIC: u32 = 0x3253_594e; // "2SYN"
+const PROGRESS_INTERVAL_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "action")]
@@ -192,7 +193,7 @@ impl FileTransferState {
                 || self
                     .current_received
                     .saturating_sub(self.last_progress_reported)
-                    >= 1024 * 1024
+                    >= PROGRESS_INTERVAL_BYTES
             {
                 self.last_progress_reported = self.current_received;
                 self.outgoing_messages.push(

@@ -29,6 +29,8 @@ type ReceiveState = {
   size: number;
   fingerprint: string;
   received: number;
+  lastProgressSent: number;
+  lastProgressAt: number;
   chunks: BlobPart[];
   channel: RTCDataChannel;
   sink?: BrowserReceiveSink;
@@ -60,8 +62,11 @@ type PendingSendFile = NativeSelectedFile | BrowserSelectedFile;
 
 const MIN_CHUNK_SIZE = 32 * 1024;
 const MAX_CHUNK_SIZE = 512 * 1024;
-const MOBILE_BUFFER_HIGH_WATER = 1024 * 1024;
-const MOBILE_BUFFER_LOW_WATER = 256 * 1024;
+const MOBILE_BUFFER_HIGH_WATER = 256 * 1024;
+const MOBILE_BUFFER_LOW_WATER = 64 * 1024;
+const TRANSFER_ACK_INTERVAL_BYTES = 64 * 1024;
+const TRANSFER_ACK_INTERVAL_MS = 250;
+const TRANSFER_MAX_IN_FLIGHT_BYTES = 256 * 1024;
 const TRANSFER_UI_INTERVAL_MS = 120;
 const CHUNK_GROW_AFTER = 16;
 const FRAME_HEADER_BYTES = 16;
@@ -732,6 +737,36 @@ async function sendFile(file: File, ch: RTCDataChannel) {
       chunkSize = Math.min(maxChunkSize, chunkSize * 2);
       smoothChunks = 0;
     }
+
+    const confirmed = confirmedTransferOffset(id, file.size);
+    if (offset - confirmed >= TRANSFER_MAX_IN_FLIGHT_BYTES) {
+      const target = Math.max(confirmed + TRANSFER_ACK_INTERVAL_BYTES, offset - Math.floor(TRANSFER_MAX_IN_FLIGHT_BYTES / 2));
+      const progressed = await waitForRemoteProgress(id, target, abort.signal, file.size, (received) => {
+        updateTransferUi({
+          id,
+          name: file.name,
+          direction: "send",
+          transferred: received,
+          total: file.size,
+          status: "transferring",
+          detail: transferText("file_transfer_remote_received", "Remote received {0}").replace("{0}", formatBytes(received)),
+        });
+      });
+      if (!progressed) {
+        clearActiveSend(ch);
+        if (abort.signal.aborted || cancelledTransferIds.has(id)) return false;
+        updateTransferUi({
+          id,
+          name: file.name,
+          direction: "send",
+          transferred: confirmedTransferOffset(id, file.size),
+          total: file.size,
+          status: "failed",
+          detail: transferText("file_transfer_stalled", "Transfer stalled. Please retry."),
+        });
+        return false;
+      }
+    }
   }
 
   if (!sendControlMessage(ch, { action: "end", id })) {
@@ -925,6 +960,7 @@ async function handleIncomingMessage(data: unknown, ch: RTCDataChannel) {
     total: activeReceive.size,
     status: "transferring",
   });
+  sendReceiveProgressIfNeeded(activeReceive, ch);
 }
 
 async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
@@ -980,6 +1016,8 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
       size: msg.size,
       fingerprint,
       received: partial?.size === msg.size ? partial.received : 0,
+      lastProgressSent: partial?.size === msg.size ? partial.received : 0,
+      lastProgressAt: 0,
       chunks: partial?.size === msg.size ? partial.chunks : [],
       channel: ch,
       sink,
@@ -1026,6 +1064,7 @@ async function handleControlMessage(msg: TransferMessage, ch: RTCDataChannel) {
     const receive = activeReceive;
     activeReceive = null;
     partialReceives.delete(receive.fingerprint);
+    sendReceiveProgress(ch, receive);
     if (receive.sink) {
       const savedDetail = await receive.sink.close();
       sendControlMessage(ch, {
@@ -1122,6 +1161,78 @@ function waitForRemoteComplete(id: string, signal: AbortSignal) {
       signal.addEventListener("abort", abort, { once: true });
     }
   });
+}
+
+function waitForRemoteProgress(
+  id: string,
+  target: number,
+  signal: AbortSignal,
+  total: number,
+  onWait?: (received: number) => void,
+) {
+  return new Promise<boolean>((resolve) => {
+    const startedAt = Date.now();
+    let timer: number | null = null;
+    let done = false;
+    let lastNoticeAt = 0;
+    const finish = (result: boolean) => {
+      if (done) return;
+      done = true;
+      if (timer !== null) window.clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      resolve(result);
+    };
+    const abort = () => finish(false);
+    const check = () => {
+      const received = confirmedTransferOffset(id, total);
+      if (signal.aborted || cancelledTransferIds.has(id)) {
+        finish(false);
+      } else if (received >= target || received >= total) {
+        finish(true);
+      } else if (Date.now() - startedAt > 30_000) {
+        console.warn(`[file-transfer] Remote progress timeout: ${received}/${target} bytes confirmed`);
+        finish(false);
+      } else {
+        const now = Date.now();
+        if (onWait && now - lastNoticeAt >= 1000) {
+          lastNoticeAt = now;
+          onWait(received);
+        }
+        timer = window.setTimeout(check, 100);
+      }
+    };
+    if (signal.aborted) {
+      abort();
+    } else {
+      signal.addEventListener("abort", abort, { once: true });
+      check();
+    }
+  });
+}
+
+function sendReceiveProgressIfNeeded(receive: ReceiveState, ch: RTCDataChannel) {
+  const now = Date.now();
+  if (
+    receive.received >= receive.size
+    || receive.received - receive.lastProgressSent >= TRANSFER_ACK_INTERVAL_BYTES
+    || now - receive.lastProgressAt >= TRANSFER_ACK_INTERVAL_MS
+  ) {
+    sendReceiveProgress(ch, receive);
+  }
+}
+
+function sendReceiveProgress(ch: RTCDataChannel, receive: ReceiveState) {
+  if (!sendControlMessage(ch, {
+    action: "progress",
+    id: receive.id,
+    name: receive.name,
+    received: receive.received,
+    size: receive.size,
+  })) {
+    return;
+  }
+  receive.lastProgressSent = receive.received;
+  receive.lastProgressAt = Date.now();
 }
 
 function rememberPartialReceive(receive: ReceiveState) {

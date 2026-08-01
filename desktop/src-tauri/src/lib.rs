@@ -16,7 +16,9 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessa
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 const FILE_TRANSFER_CHUNK_SIZE: usize = 60 * 1024 - FILE_TRANSFER_FRAME_HEADER_BYTES;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-const FILE_TRANSFER_BUFFER_HIGH_WATER: usize = 1024 * 1024;
+const FILE_TRANSFER_BUFFER_HIGH_WATER: usize = 256 * 1024;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+const FILE_TRANSFER_BUFFER_DRAIN_TIMEOUT_MS: u128 = 30_000;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 const FILE_TRANSFER_FRAME_HEADER_BYTES: usize = 16;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -2120,10 +2122,17 @@ async fn send_file_chunk(
         .await
         .map_err(|e| format!("檔案區塊傳送失敗: {}", e))?;
 
+    let drain_started_at = std::time::Instant::now();
     while dc.buffered_amount().await > FILE_TRANSFER_BUFFER_HIGH_WATER {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         if dc.ready_state() != RTCDataChannelState::Open {
             return Err("檔案傳輸通道已關閉".to_string());
+        }
+        if drain_started_at.elapsed().as_millis() > FILE_TRANSFER_BUFFER_DRAIN_TIMEOUT_MS {
+            return Err(format!(
+                "檔案傳輸通道佇列停滯: {} bytes",
+                dc.buffered_amount().await
+            ));
         }
     }
 
