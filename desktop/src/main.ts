@@ -610,6 +610,7 @@ const fallbackTranslations: Record<string, string> = {
   "video_error_desc": "If the remote device is macOS, please ensure \"Screen Recording\" and \"Accessibility\" permissions are granted in System Settings. If blocked by browser autoplay policies, click Force Play below.",
   "btn_force_play": "Force Play",
   "btn_dismiss": "Dismiss",
+  "btn_close": "Close",
 
   // 系統日誌與連線狀態 Fallback 翻譯
   "status_connecting": "Connecting...",
@@ -766,6 +767,10 @@ const fallbackTranslations: Record<string, string> = {
   "file_transfer_not_connected": "Connect to a device first",
   "file_transfer_sending": "Sending",
   "file_transfer_receiving": "Receiving",
+  "file_transfer_sent": "Sent",
+  "file_transfer_received": "Received",
+  "file_transfer_completed": "Transfer complete",
+  "file_transfer_cancelled": "Transfer cancelled",
   "file_transfer_saved_to": "Saved to: {0}",
   "file_transfer_browser_download": "Saved by this device's download flow",
   "file_transfer_drop_overlay": "Release to send files",
@@ -1092,8 +1097,7 @@ function updateDomTranslations() {
   setTextContent("txt-file-drop-overlay", t("file_transfer_drop_overlay"));
   document.querySelectorAll<HTMLElement>("[data-transfer-cancel-label]").forEach((el) => {
     const status = el.closest<HTMLElement>("[data-transfer-progress]")?.dataset.transferStatus;
-    const terminal = status === "complete" || status === "cancelled" || status === "failed";
-    el.textContent = t(terminal ? "btn_dismiss" : "btn_cancel_transfer");
+    el.textContent = t(status === "complete" ? "btn_close" : status === "cancelled" || status === "failed" ? "btn_dismiss" : "btn_cancel_transfer");
   });
   
   setTextContent("lbl-metric-fps", t("metric_fps"));
@@ -4398,6 +4402,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let wasLongPressDrag = false;
   let lastTouchX = 0;
   let lastTouchY = 0;
+  let lastTwoFingerCenterX = 0;
+  let lastTwoFingerCenterY = 0;
   let touchStartPos = { x: 0, y: 0 };
 
   // 取得目前「點擊焦點」的螢幕 Y 座標（client px、未平移座標系），供鍵盤彈出時上移畫面用：
@@ -4424,6 +4430,50 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       offsetY = (rect.height - renderedHeight) / 2;
     }
     return rect.top + offsetY + trackpadCursorY * renderedHeight - keyboardOffsetUpdateY;
+  };
+
+  const videoPointToPercent = (clientX: number, clientY: number) => {
+    const rect = videoEl.getBoundingClientRect();
+    const videoRatio = videoEl.videoWidth && videoEl.videoHeight
+      ? videoEl.videoWidth / videoEl.videoHeight
+      : 0;
+    const containerRatio = rect.height ? rect.width / rect.height : 1;
+    let renderedWidth = rect.width || 1;
+    let renderedHeight = rect.height || 1;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (videoRatio > 0 && Number.isFinite(videoRatio)) {
+      if (containerRatio > videoRatio) {
+        renderedHeight = rect.height;
+        renderedWidth = renderedHeight * videoRatio;
+        offsetX = (rect.width - renderedWidth) / 2;
+      } else {
+        renderedWidth = rect.width;
+        renderedHeight = renderedWidth / videoRatio;
+        offsetY = (rect.height - renderedHeight) / 2;
+      }
+    }
+
+    renderedWidth = renderedWidth || 1;
+    renderedHeight = renderedHeight || 1;
+    return {
+      x: Math.max(0, Math.min(1, (clientX - rect.left - offsetX) / renderedWidth)),
+      y: Math.max(0, Math.min(1, (clientY - rect.top - offsetY) / renderedHeight)),
+    };
+  };
+
+  const reanchorTrackpadCursorAt = (clientX: number, clientY: number) => {
+    if (isDirectTouchMode || clientX <= 0 || clientY <= 0) return;
+    const point = videoPointToPercent(clientX, clientY);
+    trackpadCursorX = point.x;
+    trackpadCursorY = point.y;
+    currentCursorPercentX = point.x;
+    currentCursorPercentY = point.y;
+    pendingMouseMoveX = point.x;
+    pendingMouseMoveY = point.y;
+    triggerMoveRaf();
+    updateCursorOverlay(point.x, point.y);
   };
 
   const sendDoubleClickSequence = () => {
@@ -4914,6 +4964,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       initialPinchDistance = getPinchDistance(e.touches);
       lastTouchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       lastTouchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      lastTwoFingerCenterX = lastTouchX;
+      lastTwoFingerCenterY = lastTouchY;
       touchStartTime = Date.now();
       touchStartPos = { x: lastTouchX, y: lastTouchY };
       isLocalPinching = false;
@@ -5000,6 +5052,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       const currentDistance = getPinchDistance(e.touches);
       const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      lastTwoFingerCenterX = centerX;
+      lastTwoFingerCenterY = centerY;
       
       // 雙指位移或捏合距離追蹤，用於過濾右鍵點擊
       const moveDist = Math.sqrt(Math.pow(centerX - touchStartPos.x, 2) + Math.pow(centerY - touchStartPos.y, 2));
@@ -5258,10 +5312,16 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         startScrollMomentum();
       }
 
+      if (twoFingerHasMoved || isLocalPinching) {
+        reanchorTrackpadCursorAt(lastTwoFingerCenterX, lastTwoFingerCenterY);
+      }
+
       maxTouches = 0;
       touchStartTime = 0;
       initialPinchDistance = -1;
       twoFingerHasMoved = false;
+      lastTwoFingerCenterX = 0;
+      lastTwoFingerCenterY = 0;
       return;
     }
     
@@ -5454,6 +5514,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     touchStartTime = 0;
     lastTouchX = 0;
     lastTouchY = 0;
+    lastTwoFingerCenterX = 0;
+    lastTwoFingerCenterY = 0;
     maxTouches = 0;
   }, { passive: false });
 

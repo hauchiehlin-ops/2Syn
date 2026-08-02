@@ -1549,14 +1549,11 @@ function updateTransferUi(state: TransferUiState | null) {
     const detailEl = container.querySelector<HTMLElement>("[data-transfer-detail]");
     const cancelBtn = container.querySelector<HTMLButtonElement>("[data-transfer-cancel]");
     const cancelLabel = container.querySelector<HTMLElement>("[data-transfer-cancel-label]");
-    const terminal = !isActiveTransferStatus(state.status);
 
     container.style.display = "flex";
     container.dataset.transferStatus = state.status;
     if (filenameEl) {
-      const verb = state.direction === "send"
-        ? transferText("file_transfer_sending", "Sending")
-        : transferText("file_transfer_receiving", "Receiving");
+      const verb = transferStatusVerb(state);
       filenameEl.textContent = `${verb}: ${state.name}`;
     }
     if (pctEl) pctEl.textContent = `${pct}%`;
@@ -1567,9 +1564,7 @@ function updateTransferUi(state: TransferUiState | null) {
     }
     if (cancelBtn) cancelBtn.disabled = false;
     if (cancelLabel) {
-      cancelLabel.textContent = terminal
-        ? transferText("btn_dismiss", "Dismiss")
-        : transferText("btn_cancel_transfer", "Cancel Transfer");
+      cancelLabel.textContent = transferActionLabel(state.status);
     }
   });
 
@@ -1609,6 +1604,25 @@ function isActiveTransferStatus(status: TransferStatus) {
   return status === "preparing" || status === "transferring";
 }
 
+function transferStatusVerb(state: TransferUiState) {
+  if (state.status === "complete") {
+    return state.direction === "send"
+      ? transferText("file_transfer_sent", "Sent")
+      : transferText("file_transfer_received", "Received");
+  }
+  if (state.status === "cancelled") return transferText("file_transfer_cancelled", "Transfer cancelled");
+  if (state.status === "failed") return transferText("file_transfer_failed", "Transfer failed");
+  return state.direction === "send"
+    ? transferText("file_transfer_sending", "Sending")
+    : transferText("file_transfer_receiving", "Receiving");
+}
+
+function transferActionLabel(status: TransferStatus) {
+  if (status === "complete") return transferText("btn_close", "Close");
+  if (status === "cancelled" || status === "failed") return transferText("btn_dismiss", "Dismiss");
+  return transferText("btn_cancel_transfer", "Cancel Transfer");
+}
+
 function resetStaleTransferUi() {
   if (activeTransferRunning) return;
   if (transferHideTimer !== null) {
@@ -1620,7 +1634,9 @@ function resetStaleTransferUi() {
 }
 
 function transferProgressDetail(state: TransferUiState) {
-  if (state.status !== "transferring" && state.status !== "preparing") return "";
+  if (state.status === "complete") return transferText("file_transfer_completed", "Transfer complete");
+  if (state.status === "cancelled") return transferText("file_transfer_cancelled", "Transfer cancelled");
+  if (state.status === "failed") return transferText("file_transfer_failed", "Transfer failed");
   const startedAt = transferStartedAt.get(state.id) || Date.now();
   const elapsedSeconds = Math.max((Date.now() - startedAt) / 1000, 0.1);
   const speed = state.transferred / elapsedSeconds;
