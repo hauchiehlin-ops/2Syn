@@ -1,6 +1,6 @@
 {
   "productName": "2syn_Client",
-  "version": "5.3.1",
+  "version": "6.0.0",
   "identifier": "com.twosyn.app",
   "build": {
     "frontendDist": "../dist",
