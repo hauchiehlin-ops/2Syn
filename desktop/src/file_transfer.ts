@@ -89,6 +89,7 @@ let latestTransfer: TransferUiState | null = null;
 let nativeReceiveListenerInstalled = false;
 let activeQueueSending = false;
 let activeTransferRunning = false;
+let userCancelInProgress = false;
 let lastPriorityEventActive = false;
 let transferViewportInsetInstalled = false;
 const pendingSendFiles: PendingSendFile[] = [];
@@ -155,7 +156,7 @@ export function bindFileTransferDataChannel(ch: RTCDataChannel) {
   splitTransferDataChannels.add(ch);
   ch.onclose = () => {
     splitTransferDataChannels.delete(ch);
-    if (activeTransferRunning && activeSendDataChannels.includes(ch)) {
+    if (!userCancelInProgress && activeTransferRunning && activeSendDataChannels.includes(ch)) {
       activeSendAbort?.abort();
       signalFileTransferTransportStall();
       window.dispatchEvent(new CustomEvent("file-transfer-channel-reset-needed"));
@@ -488,7 +489,10 @@ function setupNativeReceiveListener() {
 }
 
 export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
-  const shouldResetChannel = !!ch && (activeSendChannel === ch || ch.bufferedAmount > 0);
+  userCancelInProgress = true;
+  window.setTimeout(() => {
+    userCancelInProgress = false;
+  }, 1500);
   if (isDesktopTauri()) {
     void invoke("cancel_active_file_transfer").catch((error) => {
       console.warn("[file-transfer] Native transfer cancel failed:", error);
@@ -496,23 +500,26 @@ export function cancelActiveFileTransfer(ch: RTCDataChannel | null) {
   }
   channelWaitAbort?.abort();
   channelWaitAbort = null;
+  const cancelledId = latestTransfer?.id;
+  if (cancelledId && ch?.readyState === "open") {
+    sendControlMessage(ch, { action: "cancel", id: cancelledId });
+  }
   activeSendAbort?.abort();
   activeSendAbort = null;
   activeSendChannel = null;
   activeSendDataChannels = [];
-  if (latestTransfer?.id) {
-    cancelledTransferIds.add(latestTransfer.id);
-    pendingCompleteResolvers.get(latestTransfer.id)?.(null);
-    pendingCompleteResolvers.delete(latestTransfer.id);
-    pendingResumeResolvers.get(latestTransfer.id)?.(0);
-    pendingResumeResolvers.delete(latestTransfer.id);
+  if (cancelledId) {
+    cancelledTransferIds.add(cancelledId);
+    pendingCompleteResolvers.get(cancelledId)?.(null);
+    pendingCompleteResolvers.delete(cancelledId);
+    pendingResumeResolvers.get(cancelledId)?.(0);
+    pendingResumeResolvers.delete(cancelledId);
   }
   if (activeReceive) {
     if (ch) sendControlMessage(ch, { action: "cancel", id: activeReceive.id });
     if (activeReceive.sink) void activeReceive.sink.abort().catch(() => {});
     activeReceive = null;
   }
-  resetCongestedFileChannel(ch, shouldResetChannel);
   activeQueueSending = false;
   activeTransferRunning = false;
   emitTransferPriorityState(false);
@@ -802,10 +809,10 @@ async function sendFile(file: File, ch: RTCDataChannel) {
         if (cancelledTransferIds.has(id)) {
           sendControlMessage(ch, { action: "cancel", id });
         }
-        signalFileTransferTransportStall();
-        resetCongestedFileChannel(ch, true);
         clearActiveSend(ch);
         if (abort.signal.aborted || cancelledTransferIds.has(id)) return false;
+        signalFileTransferTransportStall();
+        resetCongestedFileChannel(ch, true);
         updateTransferUi({
           id,
           name: file.name,
@@ -838,10 +845,10 @@ async function sendFile(file: File, ch: RTCDataChannel) {
         });
       });
       if (!progressed) {
-        signalFileTransferTransportStall();
-        resetCongestedFileChannel(ch, true);
         clearActiveSend(ch);
         if (abort.signal.aborted || cancelledTransferIds.has(id)) return false;
+        signalFileTransferTransportStall();
+        resetCongestedFileChannel(ch, true);
         updateTransferUi({
           id,
           name: file.name,
