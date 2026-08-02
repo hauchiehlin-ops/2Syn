@@ -1013,6 +1013,7 @@ async function sendFileViaNativeHostChannel(file: File) {
     });
     return true;
   } catch (error) {
+    if (isNativeTransferCancelledError(error)) return false;
     console.warn("[file-transfer] Native host send failed:", error);
     updateTransferUi({
       id,
@@ -1052,6 +1053,7 @@ async function sendNativePathViaNativeHostChannel(file: NativeSelectedFile) {
     });
     return true;
   } catch (error) {
+    if (isNativeTransferCancelledError(error)) return false;
     console.warn("[file-transfer] Native path send failed:", error);
     updateTransferUi({
       id,
@@ -1715,6 +1717,10 @@ function isDesktopTauri() {
   if (typeof win.__TAURI_INTERNALS__?.invoke !== "function") return false;
   if (isMobileRuntime()) return false;
   return true;
+}
+
+function isNativeTransferCancelledError(error: unknown) {
+  return String(error).includes("file_transfer_cancelled_by_user");
 }
 
 function isMobileRuntime() {

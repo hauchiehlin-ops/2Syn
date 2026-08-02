@@ -52,6 +52,10 @@ struct AppState {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     file_complete_confirmations: tokio::sync::Mutex<std::collections::HashSet<String>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    active_file_send_ids: tokio::sync::Mutex<std::collections::HashSet<String>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    file_cancelled_transfers: tokio::sync::Mutex<std::collections::HashSet<String>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     signaling_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     current_pin: Arc<tokio::sync::RwLock<String>>,
@@ -2071,18 +2075,22 @@ async fn has_active_file_transfer_channel(state: State<'_, AppState>) -> Result<
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 async fn cancel_active_file_transfer(state: State<'_, AppState>) -> Result<(), String> {
-    let mut channels = Vec::new();
-    if let Some(dc) = state.active_file_channel.lock().await.take() {
-        channels.push(dc);
+    let ids: Vec<String> = state.active_file_send_ids.lock().await.iter().cloned().collect();
+    if ids.is_empty() {
+        return Ok(());
     }
-    if let Some(dc) = state.active_file_control_channel.lock().await.take() {
-        channels.push(dc);
+    {
+        let mut cancelled = state.file_cancelled_transfers.lock().await;
+        for id in &ids {
+            cancelled.insert(id.clone());
+        }
     }
-    channels.extend(std::mem::take(&mut *state.active_file_data_channels.lock().await));
-    for dc in channels {
-        dc.close()
-            .await
-            .map_err(|e| format!("無法關閉檔案傳輸通道: {}", e))?;
+    if let Ok(dc) = active_file_control_channel(&state).await {
+        for id in ids {
+            let _ = dc
+                .send_text(serde_json::json!({ "action": "cancel", "id": id }).to_string())
+                .await;
+        }
     }
     Ok(())
 }
@@ -2150,7 +2158,9 @@ async fn send_file_to_client(
         metadata.modified().ok(),
     );
     let id = send_file_start(&dc, &file_name, metadata.len(), &fingerprint).await?;
+    register_native_file_transfer(&state, &id).await;
     let offset = wait_for_resume_offset(&state, &id).await?.min(metadata.len());
+    ensure_native_file_transfer_not_cancelled(&state, &dc, &id).await?;
     let _ = app.emit(
         "file-transfer-send-progress",
         serde_json::json!({
@@ -2173,6 +2183,7 @@ async fn send_file_to_client(
     let mut transferred = offset;
     let mut last_reported = offset;
     loop {
+        ensure_native_file_transfer_not_cancelled(&state, &dc, &id).await?;
         let n = file
             .read(&mut buf)
             .await
@@ -2196,8 +2207,10 @@ async fn send_file_to_client(
         }
     }
 
+    ensure_native_file_transfer_not_cancelled(&state, &dc, &id).await?;
     send_file_end(&dc, &id).await?;
     wait_for_remote_file_complete(&state, &id).await?;
+    unregister_native_file_transfer(&state, &id).await;
     Ok(())
 }
 
@@ -2212,18 +2225,23 @@ async fn send_selected_file_to_client(
     let dc = active_file_control_channel(&state).await?;
     let fingerprint = file_resume_fingerprint(&file_name, bytes.len() as u64, None);
     let id = send_file_start(&dc, &file_name, bytes.len() as u64, &fingerprint).await?;
+    register_native_file_transfer(&state, &id).await;
     let offset = wait_for_resume_offset(&state, &id)
         .await?
         .min(bytes.len() as u64) as usize;
+    ensure_native_file_transfer_not_cancelled(&state, &dc, &id).await?;
 
     let mut transferred = offset as u64;
     for chunk in bytes[offset..].chunks(FILE_TRANSFER_CHUNK_SIZE) {
+        ensure_native_file_transfer_not_cancelled(&state, &dc, &id).await?;
         send_file_chunk_round_robin(&state, &dc, transferred, chunk).await?;
         transferred += chunk.len() as u64;
     }
 
+    ensure_native_file_transfer_not_cancelled(&state, &dc, &id).await?;
     send_file_end(&dc, &id).await?;
     wait_for_remote_file_complete(&state, &id).await?;
+    unregister_native_file_transfer(&state, &id).await;
     Ok(())
 }
 
@@ -2297,6 +2315,10 @@ async fn send_file_start(
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 async fn wait_for_resume_offset(state: &State<'_, AppState>, id: &str) -> Result<u64, String> {
     for _ in 0..600 {
+        if state.file_cancelled_transfers.lock().await.contains(id) {
+            unregister_native_file_transfer(state, id).await;
+            return Err("file_transfer_cancelled_by_user".to_string());
+        }
         if let Some(offset) = state.file_resume_offsets.lock().await.remove(id) {
             return Ok(offset);
         }
@@ -2308,12 +2330,44 @@ async fn wait_for_resume_offset(state: &State<'_, AppState>, id: &str) -> Result
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 async fn wait_for_remote_file_complete(state: &State<'_, AppState>, id: &str) -> Result<(), String> {
     for _ in 0..600 {
+        if state.file_cancelled_transfers.lock().await.contains(id) {
+            unregister_native_file_transfer(state, id).await;
+            return Err("file_transfer_cancelled_by_user".to_string());
+        }
         if state.file_complete_confirmations.lock().await.remove(id) {
             return Ok(());
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     Err("遠端尚未確認檔案保存完成".to_string())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn register_native_file_transfer(state: &State<'_, AppState>, id: &str) {
+    state.file_cancelled_transfers.lock().await.remove(id);
+    state.active_file_send_ids.lock().await.insert(id.to_string());
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn unregister_native_file_transfer(state: &State<'_, AppState>, id: &str) {
+    state.active_file_send_ids.lock().await.remove(id);
+    state.file_cancelled_transfers.lock().await.remove(id);
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn ensure_native_file_transfer_not_cancelled(
+    state: &State<'_, AppState>,
+    dc: &Arc<webrtc::data_channel::RTCDataChannel>,
+    id: &str,
+) -> Result<(), String> {
+    if !state.file_cancelled_transfers.lock().await.contains(id) {
+        return Ok(());
+    }
+    let _ = dc
+        .send_text(serde_json::json!({ "action": "cancel", "id": id }).to_string())
+        .await;
+    unregister_native_file_transfer(state, id).await;
+    Err("file_transfer_cancelled_by_user".to_string())
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -2486,6 +2540,10 @@ pub fn run() {
             file_resume_offsets: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             file_complete_confirmations: tokio::sync::Mutex::new(std::collections::HashSet::new()),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            active_file_send_ids: tokio::sync::Mutex::new(std::collections::HashSet::new()),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            file_cancelled_transfers: tokio::sync::Mutex::new(std::collections::HashSet::new()),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             signaling_tx: tokio::sync::Mutex::new(None),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
