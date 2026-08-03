@@ -416,6 +416,7 @@ function translateLogMessage(msg: string, tFunc: (key: string) => string): strin
 // WebRTC 信令與 P2P 連線全域狀態
 // =========================================================================
 let signalingWs: WebSocket | null = null;
+let signalingReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let peerConnection: RTCPeerConnection | null = null;
 let videoScale = 1;
 let videoTranslateX = 0;
@@ -475,6 +476,7 @@ let _clipboardPollInterval: ReturnType<typeof setInterval> | null = null;
 let _lastRemoteClipboard = "";
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
 let currentRemotePin: string | null = null;  // 當前連線 PIN，用於媒體凍結時自癒重協商
+let currentCallSessionId = "";
 let fileTransferRecoveryScheduled = false;
 const FILE_TRANSFER_DATA_LANES = 3;
 let interactiveTransportRecoveryInFlight = false;
@@ -1939,6 +1941,14 @@ function initDeviceBook() {
 // =========================================================================
 let heartbeatTimer: any = null;
 function initSignalingClient() {
+  if (signalingReconnectTimer) {
+    clearTimeout(signalingReconnectTimer);
+    signalingReconnectTimer = null;
+  }
+  if (signalingWs && (signalingWs.readyState === WebSocket.OPEN || signalingWs.readyState === WebSocket.CONNECTING)) {
+    console.log("[Signaling] Existing WebSocket is still active; skipping duplicate init.");
+    return;
+  }
   const url = getSignalingUrl();
   console.log(t("log_sig_trying"), url);
   
@@ -1975,11 +1985,15 @@ function initSignalingClient() {
     switch (msg.type) {
       case "offer":
         // 我們是被動端（被呼叫者），核對 PIN
-        await handleIncomingOffer(msg.source, msg.sdp, msg.pin);
+        await handleIncomingOffer(msg.source, msg.sdp, msg.pin, msg.sessionId);
         break;
       case "answer":
+        if (msg.sessionId && currentCallSessionId && msg.sessionId !== currentCallSessionId) {
+          console.warn(`[WebRTC] Ignoring stale answer for session ${msg.sessionId}; current=${currentCallSessionId}`);
+          break;
+        }
         // 收到遠端回傳的 Answer
-        if (peerConnection) {
+        if (peerConnection && peerConnection.signalingState === "have-local-offer") {
           try {
             await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: msg.sdp }));
             console.log(t("log_webrtc_answer_applied"));
@@ -1987,9 +2001,15 @@ function initSignalingClient() {
           } catch (e) {
             console.error("[WebRTC] 處理 Answer 失敗:", e);
           }
+        } else {
+          console.warn(`[WebRTC] Ignoring answer while signalingState=${peerConnection?.signalingState ?? "null"}`);
         }
         break;
       case "ice":
+        if (msg.sessionId && currentCallSessionId && msg.sessionId !== currentCallSessionId) {
+          console.warn(`[WebRTC] Ignoring stale ICE for session ${msg.sessionId}; current=${currentCallSessionId}`);
+          break;
+        }
         // 收到遠端 ICE Candidate
         if (msg.candidate !== undefined && msg.candidate !== null && msg.candidate !== "null" && msg.candidate !== "") {
           if (peerConnection) {
@@ -2106,7 +2126,12 @@ function initSignalingClient() {
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
       }
-      setTimeout(initSignalingClient, 5000);
+      if (!signalingReconnectTimer) {
+        signalingReconnectTimer = setTimeout(() => {
+          signalingReconnectTimer = null;
+          initSignalingClient();
+        }, 5000);
+      }
     }
   };
 
@@ -2147,18 +2172,32 @@ function clearRemoteMediaForReconnect() {
   }
 }
 
-function createPeerConnection(remoteId: string): RTCPeerConnection {
+function disconnectCurrentPeerConnection(reason: string) {
+  console.log(`[WebRTC] Disconnecting current PeerConnection: ${reason}`);
+  if (peerConnection) {
+    try {
+      peerConnection.close();
+    } catch (err) {
+      console.warn("[WebRTC] Error closing peerConnection:", err);
+    }
+    peerConnection = null;
+  }
+  dataChannelControl = null;
+  dataChannelUnreliable = null;
+  dataChannelClipboard = null;
+  clearFileTransferChannels();
+  dataChannelSystemControl = null;
+  iceCandidateQueue = [];
+  rustIceCandidateQueue = [];
+  rustOfferProcessed = false;
+  currentCallSessionId = "";
+  clearRemoteMediaForReconnect();
+}
+
+function createPeerConnection(remoteId: string, sessionId = currentCallSessionId): RTCPeerConnection {
   // 若已有舊連線，先關閉
   if (peerConnection) {
-    peerConnection.close();
-    peerConnection = null;
-    dataChannelControl = null;
-    dataChannelUnreliable = null;
-    dataChannelClipboard = null;
-    clearFileTransferChannels();
-    dataChannelSystemControl = null;
-    iceCandidateQueue = [];
-    clearRemoteMediaForReconnect();
+    disconnectCurrentPeerConnection("replaced by a new call");
   }
 
   // 每次新連線把輸入序號計數器歸零，與 host 新 session 的 last_seq=0 對齊。
@@ -2171,6 +2210,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
 
   currentRemoteId = remoteId;
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  (pc as any).__synSessionId = sessionId;
 
   // --- WebRTC State Debug Listeners ---
   pc.oniceconnectionstatechange = () => {
@@ -2202,11 +2242,13 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
 
   // 當 ICE Candidate 產生時，轉發給信令伺服器（包含 end-of-candidates）
   pc.onicecandidate = (event) => {
+    if (peerConnection !== pc) return;
     if (signalingWs?.readyState === WebSocket.OPEN) {
       signalingWs.send(JSON.stringify({
         type: "ice",
         target: remoteId,
         candidate: JSON.stringify(event.candidate),
+        sessionId,
       }));
     }
   };
@@ -2640,7 +2682,8 @@ async function startCall(remoteId: string, pin: string) {
 
   try {
     currentRemotePin = pin;
-    const pc = createPeerConnection(remoteId);
+    currentCallSessionId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    const pc = createPeerConnection(remoteId, currentCallSessionId);
     peerConnection = pc;
 
     // 主動端建立 Data Channels
@@ -2682,6 +2725,7 @@ async function startCall(remoteId: string, pin: string) {
       target: remoteId,
       pin: pin,
       sdp: offer.sdp,
+      sessionId: currentCallSessionId,
     }));
 
     // 設置 15 秒連線逾時器
@@ -2706,7 +2750,7 @@ async function startCall(remoteId: string, pin: string) {
 }
 
 // 被動端：收到 Offer，驗證 PIN 後回傳 Answer
-async function handleIncomingOffer(sourceId: string, sdpString: string, incomingPin?: string) {
+async function handleIncomingOffer(sourceId: string, sdpString: string, incomingPin?: string, sessionId?: string) {
   if (!isDesktopTauri()) {
     console.warn("[WebRTC] Browser client cannot act as host; rejecting incoming offer.");
     if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
@@ -2722,6 +2766,7 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
   rustOfferProcessed = false;
   rustIceCandidateQueue = [];
   currentRemoteId = sourceId;
+  currentCallSessionId = sessionId || "";
 
   // 2. 驗證無人值守密碼 (靜態無人值守密碼為唯一連線驗證金鑰)
   let isStaticValid = false;
@@ -2756,6 +2801,7 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
         type: "answer",
         target: sourceId,
         sdp: answerSdp,
+        sessionId,
       }));
     }
     console.log(`[WebRTC] Rust Answer 已回傳給 ${sourceId}`);
@@ -2939,6 +2985,7 @@ function resetConnectionUI() {
   remoteHostOs = ""; // 避免跨連線沿用上一台被控端的 OS 資訊
   currentRemoteId = null;
   currentRemotePin = null;
+  currentCallSessionId = "";
   fileTransferRecoveryScheduled = false;
   lastInteractiveTransportRecoveryAt = 0;
   if (deferredRtcDisconnectTimer) {
@@ -6473,20 +6520,7 @@ function initQuickMenu() {
     btnSessionDisconnect.onclick = (e) => {
       e.stopPropagation();
       console.log("[RemoteSession] Session Disconnect clicked");
-      if (peerConnection) {
-        try {
-          peerConnection.close();
-        } catch (err) {
-          console.warn("[WebRTC] Error closing peerConnection:", err);
-        }
-        peerConnection = null;
-      }
-      dataChannelControl = null;
-      dataChannelUnreliable = null;
-      dataChannelClipboard = null;
-      clearFileTransferChannels();
-      dataChannelSystemControl = null;
-      iceCandidateQueue = [];
+      disconnectCurrentPeerConnection("user session logout");
       resetConnectionUI();
     };
   }
@@ -6597,20 +6631,7 @@ function initQuickMenu() {
     btnDisconnect.onclick = () => {
       console.log("[QuickMenu] Disconnect clicked");
       if (confirm(t("ui_confirm_disconnect"))) {
-        if (peerConnection) {
-          try {
-            peerConnection.close();
-          } catch (e) {
-            console.warn("[WebRTC] Error closing peerConnection:", e);
-          }
-          peerConnection = null;
-        }
-        dataChannelControl = null;
-        dataChannelUnreliable = null;
-        dataChannelClipboard = null;
-        clearFileTransferChannels();
-        dataChannelSystemControl = null;
-        iceCandidateQueue = [];
+        disconnectCurrentPeerConnection("user disconnect");
         resetConnectionUI();
       }
     };

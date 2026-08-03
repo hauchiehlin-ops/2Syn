@@ -40,11 +40,11 @@ enum SignalingMessage {
     #[serde(rename = "login")]
     Login { id: String },
     #[serde(rename = "offer")]
-    Offer { target: String, pin: String, sdp: String },
+    Offer { target: String, pin: String, sdp: String, #[serde(rename = "sessionId")] session_id: Option<String> },
     #[serde(rename = "answer")]
-    Answer { target: String, sdp: String },
+    Answer { target: String, sdp: String, #[serde(rename = "sessionId")] session_id: Option<String> },
     #[serde(rename = "ice")]
-    Ice { target: String, candidate: String },
+    Ice { target: String, candidate: String, #[serde(rename = "sessionId")] session_id: Option<String> },
     #[serde(rename = "error")]
     Error { target: String, message: String },
     #[serde(rename = "ping")]
@@ -55,11 +55,11 @@ enum SignalingMessage {
 #[serde(tag = "type")]
 enum ServerMessage {
     #[serde(rename = "offer")]
-    Offer { source: String, pin: String, sdp: String },
+    Offer { source: String, pin: String, sdp: String, #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none")] session_id: Option<String> },
     #[serde(rename = "answer")]
-    Answer { source: String, sdp: String },
+    Answer { source: String, sdp: String, #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none")] session_id: Option<String> },
     #[serde(rename = "ice")]
-    Ice { source: String, candidate: String },
+    Ice { source: String, candidate: String, #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none")] session_id: Option<String> },
     #[serde(rename = "error")]
     Error { message: String },
     #[serde(rename = "pong")]
@@ -213,7 +213,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                 state.clients.write().await.insert(id, tx.clone());
                                 println!("Client logged in: {:?}", client_id);
                             }
-                            SignalingMessage::Offer { target, pin, sdp } => {
+                            SignalingMessage::Offer { target, pin, sdp, session_id } => {
                                 // 這裡實務上要驗證目標的 PIN（目前假定為同意或由目標自行驗證）
                                 // 為簡化，直接將 Offer 轉發給目標，包含 PIN 碼
                                 let target_tx_opt = {
@@ -225,6 +225,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                         source: client_id.clone().unwrap_or_default(),
                                         pin,
                                         sdp,
+                                        session_id,
                                     };
                                     let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
                                 } else {
@@ -232,7 +233,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                     let _ = tx.send(Message::Text(serde_json::to_string(&err).unwrap())).await;
                                 }
                             }
-                            SignalingMessage::Answer { target, sdp } => {
+                            SignalingMessage::Answer { target, sdp, session_id } => {
                                 let target_tx_opt = {
                                     let clients = state.clients.read().await;
                                     clients.get(&target).cloned()
@@ -241,11 +242,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                     let out_msg = ServerMessage::Answer {
                                         source: client_id.clone().unwrap_or_default(),
                                         sdp,
+                                        session_id,
                                     };
                                     let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
                                 }
                             }
-                            SignalingMessage::Ice { target, candidate } => {
+                            SignalingMessage::Ice { target, candidate, session_id } => {
                                 let target_tx_opt = {
                                     let clients = state.clients.read().await;
                                     clients.get(&target).cloned()
@@ -254,6 +256,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                     let out_msg = ServerMessage::Ice {
                                         source: client_id.clone().unwrap_or_default(),
                                         candidate,
+                                        session_id,
                                     };
                                     let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
                                 }

@@ -62,6 +62,8 @@ struct AppState {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     current_remote_id: Arc<tokio::sync::RwLock<String>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    active_session_id: Arc<tokio::sync::RwLock<String>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     signaling_abort: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     has_active_webrtc: Arc<std::sync::atomic::AtomicBool>,
@@ -1382,9 +1384,16 @@ enum IncomingMessage {
         source: String,
         pin: String,
         sdp: String,
+        #[serde(rename = "sessionId")]
+        session_id: Option<String>,
     },
     #[serde(rename = "ice")]
-    Ice { source: String, candidate: String },
+    Ice {
+        source: String,
+        candidate: String,
+        #[serde(rename = "sessionId")]
+        session_id: Option<String>,
+    },
     #[serde(rename = "error")]
     Error { message: String },
     #[serde(rename = "pong")]
@@ -1588,7 +1597,7 @@ async fn start_rust_signaling_task(
 
                 if let Ok(incoming) = serde_json::from_str::<IncomingMessage>(&text) {
                     match incoming {
-                        IncomingMessage::Offer { source, pin, sdp } => {
+                        IncomingMessage::Offer { source, pin, sdp, session_id } => {
                             let msg = format!("收到來自 {} 的 Offer，進行驗證...", source);
                             println!("[Rust Signaling] {}", msg);
                             let _ = app_handle_clone
@@ -1619,6 +1628,7 @@ async fn start_rust_signaling_task(
                             }
 
                             *state.current_remote_id.write().await = source.clone();
+                            *state.active_session_id.write().await = session_id.clone().unwrap_or_default();
 
                             // 純 Rust 背景無人值守路徑，沒有 JS/localStorage 可讀取使用者
                             // 設定的自訂 TURN，只能套用預設 fallback（見 resolve_ice_servers）
@@ -1632,7 +1642,8 @@ async fn start_rust_signaling_task(
                                     let answer_msg = serde_json::json!({
                                         "type": "answer",
                                         "target": source,
-                                        "sdp": answer_sdp
+                                        "sdp": answer_sdp,
+                                        "sessionId": session_id
                                     });
                                     let _ = tx_clone
                                         .send(WsMessage::Text(answer_msg.to_string()))
@@ -1656,8 +1667,18 @@ async fn start_rust_signaling_task(
                                 }
                             }
                         }
-                        IncomingMessage::Ice { source, candidate } => {
+                        IncomingMessage::Ice { source, candidate, session_id } => {
                             let state = app_handle_clone.state::<AppState>();
+                            if let Some(incoming_session_id) = session_id.as_deref() {
+                                let active_session_id = state.active_session_id.read().await.clone();
+                                if !active_session_id.is_empty() && active_session_id != incoming_session_id {
+                                    println!(
+                                        "[Rust Signaling] 忽略舊 session ICE：incoming={} current={}",
+                                        incoming_session_id, active_session_id
+                                    );
+                                    continue;
+                                }
+                            }
                             let msg = format!("收到來自 {} 的 ICE Candidate，套用中...", source);
                             println!("[Rust Signaling] {}", msg);
                             let _ = app_handle_clone
@@ -1771,6 +1792,32 @@ async fn start_rust_signaling(
         start_rust_signaling_task(app_handle, my_id, rx, abort_rx).await;
     });
 
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[tauri::command]
+async fn disconnect_active_webrtc_session(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .has_active_webrtc
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    *state.current_remote_id.write().await = String::new();
+    *state.active_session_id.write().await = String::new();
+    *state.active_file_channel.lock().await = None;
+    *state.active_file_control_channel.lock().await = None;
+    state.active_file_data_channels.lock().await.clear();
+    *state.file_receive_state.lock().await = None;
+    state.file_resume_offsets.lock().await.clear();
+    state.file_complete_confirmations.lock().await.clear();
+    state.active_file_send_ids.lock().await.clear();
+    state.file_cancelled_transfers.lock().await.clear();
+
+    let old_pc = state.active_pc.lock().await.take();
+    if let Some(pc) = old_pc {
+        pc.close()
+            .await
+            .map_err(|e| format!("關閉 WebRTC session 失敗: {}", e))?;
+    }
     Ok(())
 }
 
@@ -2551,6 +2598,8 @@ pub fn run() {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             current_remote_id: Arc::new(tokio::sync::RwLock::new(String::new())),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            active_session_id: Arc::new(tokio::sync::RwLock::new(String::new())),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             signaling_abort: tokio::sync::Mutex::new(None),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             has_active_webrtc: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -2586,6 +2635,8 @@ pub fn run() {
             add_ice_candidate_to_rust,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             start_rust_signaling,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            disconnect_active_webrtc_session,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             get_connection_status,
             check_network_health,
