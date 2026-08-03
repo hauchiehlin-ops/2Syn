@@ -20,6 +20,16 @@
 
 # 歷程
 
+## 2026-08-03 — 修正桌面 Duel 主控時 offer 沒送到遠端 host
+
+- **問題/目標**：macOS 版 `2syn_Duel` 發起連線到 Windows 版 `2syn_Duel` 時，Windows 端完全沒有出現「收到 Offer / Answer sent」日誌；症狀看似跨平台不能連線，但實際卡在信令路由階段，尚未進入 WebRTC/TURN/螢幕擷取。
+- **根因/做法**：
+  1. 桌面端初始化時只啟動 Rust signaling 作為 host 長駐接收端，但「開始連線」的主控流程仍直接使用 JS `signalingWs.send(...)` 發 offer/ICE。`[Frontend] 發起 WebRTC...` 這行又在 `startCall()` 前印出，容易誤導成 offer 已送出；實際上 JS WebSocket 不在線時 `startCall()` 會直接離線返回。
+  2. 若嘗試讓桌面端同時啟動 JS signaling 與 Rust signaling，兩條 WebSocket 會用同一個本機 ID 登入信令伺服器；伺服器 `clients[id]` 只保留最後登入者，導致同 ID 連線互相覆蓋，遠端 offer 可能被送到不能 host 的 JS 端，或 answer/ICE 回到 Rust 端但 JS 主控收不到。
+  3. `desktop/src/main.ts` 新增 `sendSignalingMessage()` 與共用 `handleSignalingMessage()`：桌面端所有 offer/answer/ICE/error/custom log 訊息改由 Rust signaling bridge 發送；網頁端維持原本 JS WebSocket。
+  4. `desktop/src-tauri/src/lib.rs` 的 Rust signaling 新增 `answer` 處理，並將 `answer`/`error` 透過 `rust-signaling-message` 事件橋接回前端；收到 ICE 時若目前沒有 Rust host `active_pc`，代表桌面端正在扮演 JS 主控 client，改橋接給 JS peer connection。
+- **驗證**：`cd desktop && npx tsc --noEmit` 通過；`CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo check -p syn-desktop` 通過（僅既有 warning）。
+
 ## 2026-08-01 — 同步今日功能至操作手冊、隱私政策與多國語系
 
 - **問題/目標**：今日新增的檔案傳輸保存位置、地址簿保存登入密碼、免費版移除 MAC/WOL/HWID 等變更，若只改 UI 與程式碼，操作手冊與隱私政策會落後，且非中英文語系會缺少新增檔案傳輸提示文字。

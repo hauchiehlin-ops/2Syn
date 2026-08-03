@@ -1387,6 +1387,13 @@ enum IncomingMessage {
         #[serde(rename = "sessionId")]
         session_id: Option<String>,
     },
+    #[serde(rename = "answer")]
+    Answer {
+        source: String,
+        sdp: String,
+        #[serde(rename = "sessionId")]
+        session_id: Option<String>,
+    },
     #[serde(rename = "ice")]
     Ice {
         source: String,
@@ -1667,8 +1674,27 @@ async fn start_rust_signaling_task(
                                 }
                             }
                         }
+                        IncomingMessage::Answer { source, sdp, session_id } => {
+                            let msg = serde_json::json!({
+                                "type": "answer",
+                                "source": source,
+                                "sdp": sdp,
+                                "sessionId": session_id,
+                            });
+                            let _ = app_handle_clone.emit("rust-signaling-message", msg.to_string());
+                        }
                         IncomingMessage::Ice { source, candidate, session_id } => {
                             let state = app_handle_clone.state::<AppState>();
+                            if state.active_pc.lock().await.is_none() {
+                                let msg = serde_json::json!({
+                                    "type": "ice",
+                                    "source": source,
+                                    "candidate": candidate,
+                                    "sessionId": session_id,
+                                });
+                                let _ = app_handle_clone.emit("rust-signaling-message", msg.to_string());
+                                continue;
+                            }
                             if let Some(incoming_session_id) = session_id.as_deref() {
                                 let active_session_id = state.active_session_id.read().await.clone();
                                 if !active_session_id.is_empty() && active_session_id != incoming_session_id {
@@ -1697,6 +1723,11 @@ async fn start_rust_signaling_task(
                             eprintln!("[Rust Signaling] {}", err_msg);
                             let _ = app_handle_clone
                                 .emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
+                            let msg = serde_json::json!({
+                                "type": "error",
+                                "message": message,
+                            });
+                            let _ = app_handle_clone.emit("rust-signaling-message", msg.to_string());
                             if message.contains("shutting down") {
                                 println!(
                                     "[Rust Signaling] 偵測到伺服器優雅退出通知，主動斷開以觸發重連"

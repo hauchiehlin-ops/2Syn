@@ -1940,6 +1940,163 @@ function initDeviceBook() {
 // 信令客戶端：建立 WebSocket 連線並處理訊息路由
 // =========================================================================
 let heartbeatTimer: any = null;
+
+async function sendSignalingMessage(message: any): Promise<void> {
+  const serialized = JSON.stringify(message);
+  if (signalingWs?.readyState === WebSocket.OPEN) {
+    signalingWs.send(serialized);
+    return;
+  }
+
+  if (isDesktopTauri()) {
+    await invoke("send_custom_signaling_message", { message: serialized });
+    return;
+  }
+
+  throw new Error("signaling_offline");
+}
+
+async function handleSignalingMessage(msg: any) {
+  console.log("[Signaling] 收到:", msg);
+
+  switch (msg.type) {
+    case "offer":
+      // 我們是被動端（被呼叫者），核對 PIN
+      await handleIncomingOffer(msg.source, msg.sdp, msg.pin, msg.sessionId);
+      break;
+    case "answer":
+      if (msg.sessionId && currentCallSessionId && msg.sessionId !== currentCallSessionId) {
+        console.warn(`[WebRTC] Ignoring stale answer for session ${msg.sessionId}; current=${currentCallSessionId}`);
+        break;
+      }
+      // 收到遠端回傳的 Answer
+      if (peerConnection && peerConnection.signalingState === "have-local-offer") {
+        try {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: msg.sdp }));
+          console.log(t("log_webrtc_answer_applied"));
+          flushIceCandidateQueue();
+        } catch (e) {
+          console.error("[WebRTC] 處理 Answer 失敗:", e);
+        }
+      } else {
+        console.warn(`[WebRTC] Ignoring answer while signalingState=${peerConnection?.signalingState ?? "null"}`);
+      }
+      break;
+    case "ice":
+      if (msg.sessionId && currentCallSessionId && msg.sessionId !== currentCallSessionId) {
+        console.warn(`[WebRTC] Ignoring stale ICE for session ${msg.sessionId}; current=${currentCallSessionId}`);
+        break;
+      }
+      // 收到遠端 ICE Candidate
+      if (msg.candidate !== undefined && msg.candidate !== null && msg.candidate !== "null" && msg.candidate !== "") {
+        if (peerConnection) {
+          // 發起端 (Client) JS WebRTC 處理
+          if (peerConnection.remoteDescription) {
+            try {
+              const candidateObj = JSON.parse(msg.candidate);
+              await peerConnection.addIceCandidate(candidateObj);
+            } catch (e) {
+              console.warn("[WebRTC] 無法加入 ICE Candidate:", e);
+            }
+          } else {
+            // peerConnection 尚未就緒或 remoteDescription 尚未設定，先加入佇列避免遺失
+            iceCandidateQueue.push(JSON.parse(msg.candidate));
+          }
+        } else {
+          // 被控端 (Host) Rust WebRTC 處理
+          if (!rustOfferProcessed) {
+            rustIceCandidateQueue.push(msg.candidate);
+          } else {
+            try {
+              await invoke("add_ice_candidate_to_rust", { candidateStr: msg.candidate });
+            } catch (e) {
+              console.warn("[WebRTC] 無法將 ICE Candidate 傳遞給 Rust:", e);
+            }
+          }
+        }
+      }
+      break;
+    case "custom_request_logs":
+      {
+        const logOverlay = document.getElementById("debug-overlay");
+        const logsList: string[] = [];
+        if (logOverlay) {
+          Array.from(logOverlay.children).forEach((child) => {
+            logsList.push(child.textContent || "");
+          });
+        }
+        try {
+          await sendSignalingMessage({
+            type: "custom_response_logs",
+            target: msg.source,
+            source: myId,
+            logs: logsList.slice(-35) // 回傳最近 35 條日誌，避免數據過大
+          });
+        } catch (e) {
+          console.warn("[Signaling] 發送遠端日誌回覆失敗:", e);
+        }
+      }
+      break;
+    case "custom_response_logs":
+      {
+        // 收到回覆：取消逾時計時器
+        if (remoteLogsTimeout) { clearTimeout(remoteLogsTimeout); remoteLogsTimeout = null; }
+        const remoteLogs = msg.logs || [];
+        const container = document.getElementById("remote-logs-container");
+        if (container) {
+          container.style.color = ""; // 還原逾時時設的黃色
+          if (remoteLogs.length === 0) {
+            container.textContent = "No log records received from remote host.";
+          } else {
+            container.innerHTML = "";
+            remoteLogs.forEach((log: string) => {
+              const div = document.createElement("div");
+              if (log.includes("失敗") || log.includes("failed") || log.includes("Error") || log.includes("錯誤") || log.includes("err_")) {
+                div.style.color = "#f87171"; // 紅色
+              } else if (log.includes("警告") || log.includes("warn") || log.includes("Warning") || log.includes("timeout")) {
+                div.style.color = "#fbbf24"; // 黃色
+              } else {
+                div.style.color = "#34d399"; // 綠色
+              }
+              div.textContent = log;
+              container.appendChild(div);
+            });
+            container.scrollTop = container.scrollHeight;
+          }
+        }
+      }
+      break;
+    case "error":
+      console.error("[Signaling] 伺服器錯誤:", msg.message);
+      if (msg.message === "Target offline") {
+        const offlineMsg = t("err_target_offline");
+        const btnConnect = document.getElementById("btn-connect");
+        if (btnConnect) {
+          btnConnect.textContent = offlineMsg;
+          btnConnect.style.backgroundColor = "#e74c3c";
+          setTimeout(() => {
+            btnConnect.textContent = t("btn_connect");
+            btnConnect.style.backgroundColor = "";
+          }, 3000);
+        }
+        resetConnectionUI();
+      } else if (msg.message.includes("Connection rejected")) {
+        const rejectMsg = t("err_rejected");
+        const btnConnect = document.getElementById("btn-connect");
+        if (btnConnect) {
+          btnConnect.textContent = rejectMsg;
+          btnConnect.style.backgroundColor = "#e74c3c";
+          setTimeout(() => {
+            btnConnect.textContent = t("btn_connect");
+            btnConnect.style.backgroundColor = "";
+          }, 3000);
+        }
+        resetConnectionUI();
+      }
+      break;
+  }
+}
+
 function initSignalingClient() {
   if (signalingReconnectTimer) {
     clearTimeout(signalingReconnectTimer);
@@ -1980,142 +2137,7 @@ function initSignalingClient() {
   signalingWs.onmessage = async (event) => {
     let msg: any;
     try { msg = JSON.parse(event.data); } catch { return; }
-    console.log("[Signaling] 收到:", msg);
-
-    switch (msg.type) {
-      case "offer":
-        // 我們是被動端（被呼叫者），核對 PIN
-        await handleIncomingOffer(msg.source, msg.sdp, msg.pin, msg.sessionId);
-        break;
-      case "answer":
-        if (msg.sessionId && currentCallSessionId && msg.sessionId !== currentCallSessionId) {
-          console.warn(`[WebRTC] Ignoring stale answer for session ${msg.sessionId}; current=${currentCallSessionId}`);
-          break;
-        }
-        // 收到遠端回傳的 Answer
-        if (peerConnection && peerConnection.signalingState === "have-local-offer") {
-          try {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: msg.sdp }));
-            console.log(t("log_webrtc_answer_applied"));
-            flushIceCandidateQueue();
-          } catch (e) {
-            console.error("[WebRTC] 處理 Answer 失敗:", e);
-          }
-        } else {
-          console.warn(`[WebRTC] Ignoring answer while signalingState=${peerConnection?.signalingState ?? "null"}`);
-        }
-        break;
-      case "ice":
-        if (msg.sessionId && currentCallSessionId && msg.sessionId !== currentCallSessionId) {
-          console.warn(`[WebRTC] Ignoring stale ICE for session ${msg.sessionId}; current=${currentCallSessionId}`);
-          break;
-        }
-        // 收到遠端 ICE Candidate
-        if (msg.candidate !== undefined && msg.candidate !== null && msg.candidate !== "null" && msg.candidate !== "") {
-          if (peerConnection) {
-            // 發起端 (Client) JS WebRTC 處理
-            if (peerConnection.remoteDescription) {
-              try {
-                const candidateObj = JSON.parse(msg.candidate);
-                await peerConnection.addIceCandidate(candidateObj);
-              } catch (e) {
-                console.warn("[WebRTC] 無法加入 ICE Candidate:", e);
-              }
-            } else {
-              // peerConnection 尚未就緒或 remoteDescription 尚未設定，先加入佇列避免遺失
-              iceCandidateQueue.push(JSON.parse(msg.candidate));
-            }
-          } else {
-            // 被控端 (Host) Rust WebRTC 處理
-            if (!rustOfferProcessed) {
-              rustIceCandidateQueue.push(msg.candidate);
-            } else {
-              try {
-                await invoke("add_ice_candidate_to_rust", { candidateStr: msg.candidate });
-              } catch (e) {
-                console.warn("[WebRTC] 無法將 ICE Candidate 傳遞給 Rust:", e);
-              }
-            }
-          }
-        }
-        break;
-      case "custom_request_logs":
-        {
-          const logOverlay = document.getElementById("debug-overlay");
-          const logsList: string[] = [];
-          if (logOverlay) {
-            Array.from(logOverlay.children).forEach((child) => {
-              logsList.push(child.textContent || "");
-            });
-          }
-          if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
-            signalingWs.send(JSON.stringify({
-              type: "custom_response_logs",
-              target: msg.source,
-              source: myId,
-              logs: logsList.slice(-35) // 回傳最近 35 條日誌，避免數據過大
-            }));
-          }
-        }
-        break;
-      case "custom_response_logs":
-        {
-          // 收到回覆：取消逾時計時器
-          if (remoteLogsTimeout) { clearTimeout(remoteLogsTimeout); remoteLogsTimeout = null; }
-          const remoteLogs = msg.logs || [];
-          const container = document.getElementById("remote-logs-container");
-          if (container) {
-            container.style.color = ""; // 還原逾時時設的黃色
-            if (remoteLogs.length === 0) {
-              container.textContent = "No log records received from remote host.";
-            } else {
-              container.innerHTML = "";
-              remoteLogs.forEach((log: string) => {
-                const div = document.createElement("div");
-                if (log.includes("失敗") || log.includes("failed") || log.includes("Error") || log.includes("錯誤") || log.includes("err_")) {
-                  div.style.color = "#f87171"; // 紅色
-                } else if (log.includes("警告") || log.includes("warn") || log.includes("Warning") || log.includes("timeout")) {
-                  div.style.color = "#fbbf24"; // 黃色
-                } else {
-                  div.style.color = "#34d399"; // 綠色
-                }
-                div.textContent = log;
-                container.appendChild(div);
-              });
-              container.scrollTop = container.scrollHeight;
-            }
-          }
-        }
-        break;
-      case "error":
-        console.error("[Signaling] 伺服器錯誤:", msg.message);
-        if (msg.message === "Target offline") {
-          const offlineMsg = t("err_target_offline");
-          const btnConnect = document.getElementById("btn-connect");
-          if (btnConnect) {
-            btnConnect.textContent = offlineMsg;
-            btnConnect.style.backgroundColor = "#e74c3c";
-            setTimeout(() => {
-              btnConnect.textContent = t("btn_connect");
-              btnConnect.style.backgroundColor = "";
-            }, 3000);
-          }
-          resetConnectionUI();
-        } else if (msg.message.includes("Connection rejected")) {
-          const rejectMsg = t("err_rejected");
-          const btnConnect = document.getElementById("btn-connect");
-          if (btnConnect) {
-            btnConnect.textContent = rejectMsg;
-            btnConnect.style.backgroundColor = "#e74c3c";
-            setTimeout(() => {
-              btnConnect.textContent = t("btn_connect");
-              btnConnect.style.backgroundColor = "";
-            }, 3000);
-          }
-          resetConnectionUI();
-        }
-        break;
-    }
+    await handleSignalingMessage(msg);
   };
 
   signalingWs.onclose = function(this: WebSocket) {
@@ -2243,14 +2265,12 @@ function createPeerConnection(remoteId: string, sessionId = currentCallSessionId
   // 當 ICE Candidate 產生時，轉發給信令伺服器（包含 end-of-candidates）
   pc.onicecandidate = (event) => {
     if (peerConnection !== pc) return;
-    if (signalingWs?.readyState === WebSocket.OPEN) {
-      signalingWs.send(JSON.stringify({
-        type: "ice",
-        target: remoteId,
-        candidate: JSON.stringify(event.candidate),
-        sessionId,
-      }));
-    }
+    void sendSignalingMessage({
+      type: "ice",
+      target: remoteId,
+      candidate: JSON.stringify(event.candidate),
+      sessionId,
+    }).catch((e) => console.warn("[Signaling] 發送 ICE Candidate 失敗:", e));
   };
 
   // 監聽連線狀態變化
@@ -2654,7 +2674,7 @@ function scheduleFileTransferRenegotiation() {
 
 async function recoverInteractiveTransport(reason: string) {
   if (interactiveTransportRecoveryInFlight || !currentRemoteId || !currentRemotePin) return;
-  if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) return;
+  if (!isDesktopTauri() && (!signalingWs || signalingWs.readyState !== WebSocket.OPEN)) return;
   const now = Date.now();
   if (now - lastInteractiveTransportRecoveryAt < 15_000) return;
   lastInteractiveTransportRecoveryAt = now;
@@ -2674,7 +2694,7 @@ async function recoverInteractiveTransport(reason: string) {
 
 // 主動端：建立 Data Channels 並發起 Offer
 async function startCall(remoteId: string, pin: string) {
-  if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
+  if (!isDesktopTauri() && (!signalingWs || signalingWs.readyState !== WebSocket.OPEN)) {
     alert(t("err_signaling_offline"));
     resetConnectionUI();
     return;
@@ -2720,13 +2740,13 @@ async function startCall(remoteId: string, pin: string) {
     await pc.setLocalDescription(offer);
 
     // 透過信令伺服器轉發 Offer（含 PIN）
-    signalingWs.send(JSON.stringify({
+    await sendSignalingMessage({
       type: "offer",
       target: remoteId,
       pin: pin,
       sdp: offer.sdp,
       sessionId: currentCallSessionId,
-    }));
+    });
 
     // 設置 15 秒連線逾時器
     if (connectionTimeoutTimer) clearTimeout(connectionTimeoutTimer);
@@ -2753,12 +2773,14 @@ async function startCall(remoteId: string, pin: string) {
 async function handleIncomingOffer(sourceId: string, sdpString: string, incomingPin?: string, sessionId?: string) {
   if (!isDesktopTauri()) {
     console.warn("[WebRTC] Browser client cannot act as host; rejecting incoming offer.");
-    if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
-      signalingWs.send(JSON.stringify({
+    try {
+      await sendSignalingMessage({
         type: "error",
         target: sourceId,
         message: "Connection rejected: Browser client cannot host"
-      }));
+      });
+    } catch (e) {
+      console.warn("[Signaling] 發送拒絕連線訊息失敗:", e);
     }
     return;
   }
@@ -2780,12 +2802,14 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
 
   if (!isStaticValid) {
     console.warn(t("log_webrtc_pwd_mismatch"));
-    if (signalingWs && signalingWs.readyState === WebSocket.OPEN) {
-      signalingWs.send(JSON.stringify({
+    try {
+      await sendSignalingMessage({
         type: "error",
         target: sourceId,
         message: "Connection rejected: Invalid Password"
-      }));
+      });
+    } catch (e) {
+      console.warn("[Signaling] 發送密碼錯誤拒絕訊息失敗:", e);
     }
     return;
   }
@@ -2796,13 +2820,15 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
     const answerSdp: string = await invoke("handle_remote_offer_as_host", { offerSdp: sdpString, turnServers: getValidatedCustomTurnServers() });
 
     // 回傳 Rust 產生的 Answer 給發起方
-    if (signalingWs?.readyState === WebSocket.OPEN) {
-      signalingWs.send(JSON.stringify({
+    try {
+      await sendSignalingMessage({
         type: "answer",
         target: sourceId,
         sdp: answerSdp,
         sessionId,
-      }));
+      });
+    } catch (e) {
+      console.warn("[Signaling] 發送 Answer 失敗:", e);
     }
     console.log(`[WebRTC] Rust Answer 已回傳給 ${sourceId}`);
     
@@ -3273,13 +3299,13 @@ function initConnectButton() {
   }
 
   listen('rust-ice-candidate', (event: any) => {
-    console.log("[WebRTC] 攔截到 Rust 產生的 ICE Candidate, 準備透過 WebSocket 轉發");
-    if (signalingWs && signalingWs.readyState === WebSocket.OPEN && currentRemoteId) {
-      signalingWs.send(JSON.stringify({
+    console.log("[WebRTC] 攔截到 Rust 產生的 ICE Candidate, 準備透過信令通道轉發");
+    if (currentRemoteId) {
+      void sendSignalingMessage({
         type: "ice",
         target: currentRemoteId,
         candidate: JSON.stringify(event.payload)
-      }));
+      }).catch((e) => console.warn("[Signaling] 轉發 Rust ICE Candidate 失敗:", e));
     }
   });
 
@@ -6382,7 +6408,7 @@ function initRemoteLogsDiagnostics() {
       // 索取遠端日誌依賴：①信令通道連通 ②已有目標遠端 ID ③被控端在線並會回覆。
       // 若被控端根本離線（往往正是連不上的原因），請求送不到、也永遠等不到回覆，
       // 故不能無限期停在「載入中」，需給定逾時與明確失敗說明。
-      if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) {
+      if (!isDesktopTauri() && (!signalingWs || signalingWs.readyState !== WebSocket.OPEN)) {
         showToast(t("remote_logs_no_signaling") || "尚未連上信令伺服器，無法索取遠端日誌。");
         return;
       }
@@ -6392,11 +6418,14 @@ function initRemoteLogsDiagnostics() {
       }
 
       console.log(`[Diagnostic] 發送遠端主機除錯日誌索取請求給 ${currentRemoteId}`);
-      signalingWs.send(JSON.stringify({
+      sendSignalingMessage({
         type: "custom_request_logs",
         target: currentRemoteId,
         source: myId
-      }));
+      }).catch((e) => {
+        console.warn("[Diagnostic] 發送遠端主機除錯日誌索取請求失敗:", e);
+        showToast(t("remote_logs_no_signaling") || "尚未連上信令伺服器，無法索取遠端日誌。");
+      });
 
       if (container) {
         container.textContent = t("loading_remote_logs") || "Loading remote logs...";
@@ -6800,6 +6829,16 @@ async function initializeApp() {
     // 監聽來自 Rust 的信令連線日誌，自動透過 interceptor 顯示於系統日誌
     listen<string>("rust-signaling-log", (event) => {
       console.log(event.payload);
+    });
+
+    // 桌面端只讓 Rust WebSocket 登入同一個本機 ID；當桌面端扮演主控端時，
+    // Rust 收到 answer/ice/error 後再橋接回 JS WebRTC，避免雙 WebSocket 搶註冊。
+    listen<string>("rust-signaling-message", async (event) => {
+      try {
+        await handleSignalingMessage(JSON.parse(event.payload));
+      } catch (err) {
+        console.error("[Signaling] 處理 Rust bridge 訊息失敗:", err);
+      }
     });
 
     // 監聽來自 Rust 的信令連線狀態更新，並同步更新 UI 狀態燈號
