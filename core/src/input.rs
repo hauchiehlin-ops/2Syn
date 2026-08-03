@@ -201,6 +201,7 @@ impl InputEvent {
         #[cfg(target_os = "windows")]
         {
             use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
+            use windows_sys::Win32::Foundation::GetLastError;
             use std::mem::size_of;
 
             // 將正規化座標 (0..1) 轉為 SendInput 的絕對座標 dx/dy（與 MouseMove 相同換算邏輯），
@@ -235,6 +236,60 @@ impl InputEvent {
                     (dx, dy, flags)
                 }
             };
+
+            unsafe fn send_input_checked(inputs: &mut [INPUT], context: &str) -> Result<(), CoreError> {
+                let sent = SendInput(inputs.len() as u32, inputs.as_mut_ptr(), size_of::<INPUT>() as i32);
+                if sent != inputs.len() as u32 {
+                    return Err(CoreError::SystemError(format!(
+                        "Windows SendInput({}) 呼叫失敗: sent={}, error={}",
+                        context,
+                        sent,
+                        GetLastError()
+                    )));
+                }
+                Ok(())
+            }
+
+            unsafe fn mouse_move_input(dx: i32, dy: i32, flags: u32) -> INPUT {
+                let mut input = std::mem::zeroed::<INPUT>();
+                input.r#type = INPUT_MOUSE;
+                input.Anonymous.mi.dx = dx;
+                input.Anonymous.mi.dy = dy;
+                input.Anonymous.mi.dwFlags = flags | MOUSEEVENTF_MOVE;
+                input
+            }
+
+            fn is_extended_key(vk: u16) -> bool {
+                matches!(
+                    vk,
+                    VK_INSERT | VK_DELETE | VK_HOME | VK_END | VK_PRIOR | VK_NEXT |
+                    VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN |
+                    VK_RCONTROL | VK_RMENU | VK_NUMLOCK | VK_DIVIDE
+                )
+            }
+
+            unsafe fn keyboard_input(vk: u16, key_up: bool) -> INPUT {
+                let mut input = std::mem::zeroed::<INPUT>();
+                input.r#type = INPUT_KEYBOARD;
+
+                let scan = MapVirtualKeyW(vk as u32, 4);
+                if scan == 0 {
+                    input.Anonymous.ki.wVk = vk;
+                    input.Anonymous.ki.dwFlags = if key_up { KEYEVENTF_KEYUP } else { 0 };
+                    return input;
+                }
+
+                input.Anonymous.ki.wVk = 0;
+                input.Anonymous.ki.wScan = (scan & 0xff) as u16;
+                input.Anonymous.ki.dwFlags = KEYEVENTF_SCANCODE;
+                if key_up {
+                    input.Anonymous.ki.dwFlags |= KEYEVENTF_KEYUP;
+                }
+                if is_extended_key(vk) || (scan & 0xff00) != 0 {
+                    input.Anonymous.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+                }
+                input
+            }
 
             unsafe {
                 let mut input = std::mem::zeroed::<INPUT>();
@@ -281,28 +336,34 @@ impl InputEvent {
                         input.Anonymous.mi.dwFlags = flags;
                     }
                     InputEvent::MouseDown { button, x, y } => {
-                        input.r#type = INPUT_MOUSE;
                         let (dx, dy, mut flags) = absolute_mouse_dxdy(*x, *y);
-                        flags |= match button {
+                        let button_flags = match button {
                             MouseButton::Left => MOUSEEVENTF_LEFTDOWN,
                             MouseButton::Right => MOUSEEVENTF_RIGHTDOWN,
                             MouseButton::Middle => MOUSEEVENTF_MIDDLEDOWN,
                         };
-                        input.Anonymous.mi.dx = dx;
-                        input.Anonymous.mi.dy = dy;
-                        input.Anonymous.mi.dwFlags = flags;
+                        flags |= MOUSEEVENTF_MOVE;
+                        let move_input = mouse_move_input(dx, dy, flags);
+                        let mut down_input = std::mem::zeroed::<INPUT>();
+                        down_input.r#type = INPUT_MOUSE;
+                        down_input.Anonymous.mi.dwFlags = button_flags;
+                        send_input_checked(&mut [move_input, down_input], "MouseDown")?;
+                        return Ok(());
                     }
                     InputEvent::MouseUp { button, x, y } => {
-                        input.r#type = INPUT_MOUSE;
                         let (dx, dy, mut flags) = absolute_mouse_dxdy(*x, *y);
-                        flags |= match button {
+                        let button_flags = match button {
                             MouseButton::Left => MOUSEEVENTF_LEFTUP,
                             MouseButton::Right => MOUSEEVENTF_RIGHTUP,
                             MouseButton::Middle => MOUSEEVENTF_MIDDLEUP,
                         };
-                        input.Anonymous.mi.dx = dx;
-                        input.Anonymous.mi.dy = dy;
-                        input.Anonymous.mi.dwFlags = flags;
+                        flags |= MOUSEEVENTF_MOVE;
+                        let move_input = mouse_move_input(dx, dy, flags);
+                        let mut up_input = std::mem::zeroed::<INPUT>();
+                        up_input.r#type = INPUT_MOUSE;
+                        up_input.Anonymous.mi.dwFlags = button_flags;
+                        send_input_checked(&mut [move_input, up_input], "MouseUp")?;
+                        return Ok(());
                     }
                     InputEvent::MouseScroll { delta_x: _, delta_y } => {
                         input.r#type = INPUT_MOUSE;
@@ -310,14 +371,10 @@ impl InputEvent {
                         input.Anonymous.mi.mouseData = *delta_y as u32;
                     }
                     InputEvent::KeyDown { keycode, modifiers: _ } => {
-                        input.r#type = INPUT_KEYBOARD;
-                        input.Anonymous.ki.wVk = *keycode;
-                        input.Anonymous.ki.dwFlags = 0; // 0 代表 KeyDown
+                        input = keyboard_input(*keycode, false);
                     }
                     InputEvent::KeyUp { keycode, modifiers: _ } => {
-                        input.r#type = INPUT_KEYBOARD;
-                        input.Anonymous.ki.wVk = *keycode;
-                        input.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
+                        input = keyboard_input(*keycode, true);
                     }
                     InputEvent::MouseRelativeMove { dx, dy } => {
                         // 疊加正規化比例位置後改走絕對定位（與 MouseMove 相同公式），
@@ -344,14 +401,10 @@ impl InputEvent {
                             txt_input.Anonymous.ki.wScan = ch;
                             txt_input.Anonymous.ki.dwFlags = KEYEVENTF_UNICODE;
                             
-                            if SendInput(1, &txt_input, size_of::<INPUT>() as i32) == 0 {
-                                return Err(CoreError::SystemError("Windows SendInput(Unicode) 呼叫失敗".to_string()));
-                            }
+                            send_input_checked(&mut [txt_input], "Unicode")?;
                             
                             txt_input.Anonymous.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
-                            if SendInput(1, &txt_input, size_of::<INPUT>() as i32) == 0 {
-                                return Err(CoreError::SystemError("Windows SendInput(Unicode KeyUp) 呼叫失敗".to_string()));
-                            }
+                            send_input_checked(&mut [txt_input], "Unicode KeyUp")?;
                         }
                         return Ok(());
                     }
@@ -377,7 +430,7 @@ impl InputEvent {
                         ];
                         for &vk in &keys_to_release {
                             input.Anonymous.ki.wVk = vk;
-                            SendInput(1, &input, size_of::<INPUT>() as i32);
+                            let _ = send_input_checked(&mut [input], "ResetState key");
                         }
                         
                         // 釋放滑鼠按鍵
@@ -385,15 +438,12 @@ impl InputEvent {
                         input.Anonymous.mi.dx = 0;
                         input.Anonymous.mi.dy = 0;
                         input.Anonymous.mi.dwFlags = MOUSEEVENTF_LEFTUP | MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_MIDDLEUP;
-                        SendInput(1, &input, size_of::<INPUT>() as i32);
+                        let _ = send_input_checked(&mut [input], "ResetState mouse");
                         return Ok(());
                     }
                 }
                 
-                let sent = SendInput(1, &input, size_of::<INPUT>() as i32);
-                if sent == 0 {
-                    return Err(CoreError::SystemError("Windows SendInput 呼叫失敗".to_string()));
-                }
+                send_input_checked(&mut [input], "single")?;
             }
             Ok(())
         }

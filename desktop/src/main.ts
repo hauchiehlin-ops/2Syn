@@ -3156,7 +3156,7 @@ function updateConnectionStatusUI(state: string) {
         if (currentState === "failed" || currentIceState === "failed") {
           updateConnectionStatusUI("failed");
         }
-      }, 15000);
+      }, 180000);
       return;
     }
     if (deferredRtcFailedTimer) {
@@ -3196,7 +3196,7 @@ function updateConnectionStatusUI(state: string) {
         return;
       }
       resetConnectionUI();
-    }, pickerActive ? 30000 : 20000);
+    }, pickerActive ? 180000 : 20000);
   } else if (state === "closed") {
     resetConnectionUI();
   }
@@ -5068,18 +5068,18 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       wasLongPressDrag = false;
 
       if (longPressTimer) clearTimeout(longPressTimer);
-      // 單指長按重壓 -> 觸發拖曳模式 (滑鼠左鍵按下，伴隨重震動)
+      // 單指長按 -> 顯示快捷命令列。不要先送左鍵按下，避免長按被遠端
+      // 解讀成拖曳/框選，也避免手指微動讓選單變得難以點選。
       longPressTimer = setTimeout(() => {
         hasTriggeredLongPress = true;
-        
-        isDragging = true;
-        wasLongPressDrag = true;
-        
-        // 發送滑鼠左鍵按下
-        sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, currentCursorPercentX, currentCursorPercentY)));
+
+        const target = isDirectTouchMode
+          ? videoPointToPercent(touchStartClientX, touchStartClientY)
+          : { x: currentCursorPercentX, y: currentCursorPercentY };
+        showFloatingMenu(touchStartClientX, touchStartClientY, target.x, target.y);
 
         triggerHaptic("heavy");
-        console.log("[Gesture] 單指長按重壓，觸發左鍵拖曳模式");
+        console.log("[Gesture] 單指長按，顯示快捷命令列");
       }, 500); // 400→500ms：降低「手指稍停就誤觸拖曳/框選」的機率
 
       isDragging = false;
@@ -5221,7 +5221,8 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       }
 
       if (hasTriggeredLongPress) {
-        // 長按重壓拖曳中：長按觸發後會直接進入 dragging，這裡交給下方的 isDragging 處理位置更新
+        // 快捷命令列已顯示；在手指放開前忽略後續微動，避免轉成拖曳或位移。
+        return;
       }
       
       const rect = videoEl.getBoundingClientRect();
@@ -5431,18 +5432,12 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       hasMouseMoved = false;
 
       if (hasTriggeredLongPress) {
-        // 長按重壓拖曳結束：釋放滑鼠左鍵，並彈出懸浮選項選單
-        sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, releaseX, releaseY)));
+        // 長按命令列已在 timer 觸發時顯示；此處只清狀態，不送遠端點擊/拖曳事件。
         isDragging = false;
-        
-        const clientX = e.changedTouches.length > 0 ? e.changedTouches[0].clientX : window.innerWidth / 2;
-        const clientY = e.changedTouches.length > 0 ? e.changedTouches[0].clientY : window.innerHeight / 2;
-        showFloatingMenu(clientX, clientY, releaseX, releaseY);
-        
+
         hasTriggeredLongPress = false;
         initialPinchDistance = -1;
         touchStartTime = 0;
-        lastTapTime = now;
         lastTouchX = 0;
         lastTouchY = 0;
         maxTouches = 0;

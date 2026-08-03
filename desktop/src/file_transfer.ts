@@ -186,6 +186,16 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
   fileInput.accept = "*/*";
   fileInput.style.display = "none";
   document.body.appendChild(fileInput);
+
+  // Mobile WebViews can expose "Take Photo/Video" from a regular file picker.
+  // Several engines are fragile when that picker is opened from a `multiple`
+  // input, so use a dedicated single-file input on touch runtimes.
+  const mobileFileInput = document.createElement("input");
+  mobileFileInput.type = "file";
+  mobileFileInput.multiple = false;
+  mobileFileInput.accept = "*/*";
+  mobileFileInput.style.display = "none";
+  document.body.appendChild(mobileFileInput);
   bindQueueActions(getChannel);
 
   const showZone = () => {
@@ -219,7 +229,7 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
     // remains available while a temporarily interrupted channel recovers.
     if (!isDesktopTauri()) {
       setFilePickerActive(true);
-      fileInput.click();
+      activePickerInput().click();
       return;
     }
 
@@ -227,7 +237,7 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
     if (hasOpenJsChannel) {
       // WKWebView/Safari requires the file input to open in the original click gesture.
       setFilePickerActive(true);
-      fileInput.click();
+      activePickerInput().click();
       return;
     }
 
@@ -253,14 +263,29 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
     });
   });
 
-  fileInput.addEventListener("change", async () => {
-    if (fileInput.files) {
-      addPendingFiles(Array.from(fileInput.files).map(toBrowserSelectedFile));
+  const activePickerInput = () => isMobileRuntime() ? mobileFileInput : fileInput;
+  const handleFilePickerChange = (input: HTMLInputElement) => {
+    try {
+      if (input.files) {
+        addPendingFiles(Array.from(input.files).map(toBrowserSelectedFile));
+      }
+    } catch (error) {
+      console.warn("[file-transfer] Failed to process selected files:", error);
+      showTransferNotice(`${transferText("file_transfer_failed", "Transfer failed")}: ${String(error)}`);
+    } finally {
+      input.value = "";
+      window.setTimeout(() => setFilePickerActive(false), 1200);
     }
-    fileInput.value = "";
-    window.setTimeout(() => setFilePickerActive(false), 1200);
-  });
+  };
+
+  fileInput.addEventListener("change", () => handleFilePickerChange(fileInput));
+  mobileFileInput.addEventListener("change", () => handleFilePickerChange(mobileFileInput));
+  fileInput.addEventListener("cancel", () => window.setTimeout(() => setFilePickerActive(false), 1200));
+  mobileFileInput.addEventListener("cancel", () => window.setTimeout(() => setFilePickerActive(false), 1200));
   window.addEventListener("focus", () => {
+    window.setTimeout(() => setFilePickerActive(false), isMobileRuntime() ? 5000 : 1200);
+  });
+  window.addEventListener("pageshow", () => {
     window.setTimeout(() => setFilePickerActive(false), 1200);
   });
 

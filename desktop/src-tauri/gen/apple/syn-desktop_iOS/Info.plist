@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>6.4.0</string>
+	<string>6.5.0</string>
 	<key>CFBundleVersion</key>
-	<string>6.4.0</string>
+	<string>6.5.0</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -44,6 +44,14 @@
 	</array>
 	<key>CFBundleDisplayName</key>
 	<string>2syn Client</string>
+	<key>NSCameraUsageDescription</key>
+	<string>2syn needs camera access when you choose Take Photo or Video from file transfer so the captured media can be sent to your connected device.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>2syn needs microphone access when you record video from file transfer so the captured video can include audio.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>2syn needs photo library access when you choose photos or videos for file transfer.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>2syn may save received photos or videos to your library when you choose a photo-library destination.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>2syn uses the local network to establish a direct peer-to-peer WebRTC connection with your host computer, enabling low-latency remote desktop control without routing traffic through a server.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -6,6 +6,14 @@
 	<false/>
 	<key>CFBundleDisplayName</key>
 	<string>2syn Client</string>
+	<key>NSCameraUsageDescription</key>
+	<string>2syn needs camera access when you choose Take Photo or Video from file transfer so the captured media can be sent to your connected device.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>2syn needs microphone access when you record video from file transfer so the captured video can include audio.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>2syn needs photo library access when you choose photos or videos for file transfer.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>2syn may save received photos or videos to your library when you choose a photo-library destination.</string>
 	<!--
 		iOS 13+ 採用 UIScene 生命週期。tao 只有在此旗標為 true 時才會把 UIWindow
 		掛上 UIWindowScene（見 tao ios view.rs create_window / multiple_scenes_enabled）。
