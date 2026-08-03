@@ -125,11 +125,11 @@ impl ConnectionManager {
         // 1. 判斷連線媒介是否為 Relay
         // （堅持不使用 TURN 策略：不會出現 Relay 狀態，保留分支以備未來擴展如 Tailscale Relay）
         if metrics.connection_type == ConnectionType::Relay {
-            config.target_fps = 30;
-            config.bitrate_limit_kbps = 8000; // relay/TURN 仍優先保留可讀文字畫質
+            config.target_fps = 24;
+            config.bitrate_limit_kbps = 10_000; // relay/TURN 優先保留文字畫質，幀率略降換取清晰度
             config.color_format = ColorFormat::Yuv420;
-            config.target_width = 1920;
-            config.target_height = 1080;
+            config.target_width = 2560;
+            config.target_height = 1440;
         }
 
         // 2. 基於網路指標 (ABR: Adaptive Bitrate) 的動態調整
@@ -171,9 +171,7 @@ impl ConnectionManager {
             // desktop usable while reserving headroom for the transfer instead
             // of collapsing the video stream to a choppy 15 fps preview.
             config.target_fps = config.target_fps.min(30).max(24);
-            config.bitrate_limit_kbps = config.bitrate_limit_kbps.min(6000);
-            config.target_width = config.target_width.min(1920);
-            config.target_height = config.target_height.min(1080);
+            config.bitrate_limit_kbps = config.bitrate_limit_kbps.min(8000);
         }
 
         config

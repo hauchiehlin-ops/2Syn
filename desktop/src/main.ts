@@ -475,10 +475,10 @@ let _clipboardPollInterval: ReturnType<typeof setInterval> | null = null;
 let _lastRemoteClipboard = "";
 let currentRemoteId: string | null = null;   // 當前連線的遠端 ID（追蹤用）
 let currentRemotePin: string | null = null;  // 當前連線 PIN，用於媒體凍結時自癒重協商
-let renegotiationInFlight = false;
 let fileTransferRecoveryScheduled = false;
 const FILE_TRANSFER_DATA_LANES = 3;
 let interactiveTransportRecoveryInFlight = false;
+let lastInteractiveTransportRecoveryAt = 0;
 let lastInputPongAt = 0;
 let lastInputPingAt = 0;
 let myId: string = "";                        // 本機 9 位數 ID
@@ -2132,6 +2132,21 @@ async function flushIceCandidateQueue() {
   }
 }
 
+function clearRemoteMediaForReconnect() {
+  const videoEl = document.getElementById("remote-video") as HTMLVideoElement | null;
+  if (videoEl?.srcObject) {
+    const stream = videoEl.srcObject as MediaStream;
+    stream.getTracks().forEach((track) => track.stop());
+    videoEl.srcObject = null;
+  }
+  const audioEl = document.getElementById("remote-audio") as HTMLAudioElement | null;
+  if (audioEl?.srcObject) {
+    const stream = audioEl.srcObject as MediaStream;
+    stream.getTracks().forEach((track) => track.stop());
+    audioEl.srcObject = null;
+  }
+}
+
 function createPeerConnection(remoteId: string): RTCPeerConnection {
   // 若已有舊連線，先關閉
   if (peerConnection) {
@@ -2143,6 +2158,7 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
     clearFileTransferChannels();
     dataChannelSystemControl = null;
     iceCandidateQueue = [];
+    clearRemoteMediaForReconnect();
   }
 
   // 每次新連線把輸入序號計數器歸零，與 host 新 session 的 last_seq=0 對齊。
@@ -2281,7 +2297,12 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
             return; // 結束，不覆蓋背景軌道
         }
 
-        if (!videoEl.srcObject) {
+        const existingVideoTrack = (videoEl.srcObject as MediaStream | null)?.getVideoTracks()[0];
+        if (existingVideoTrack && existingVideoTrack !== event.track) {
+          existingVideoTrack.stop();
+          videoEl.srcObject = null;
+        }
+        if (!videoEl.srcObject || existingVideoTrack?.readyState === "ended") {
           // 強制僅綁定視訊軌道，避免 iOS Safari 因為混入音訊軌道而無條件阻擋 autoplay
           try {
             (event.track as any).contentHint = "detail";
@@ -2325,11 +2346,12 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
 
           // 持續偵測影片凍結並自動恢復：部分 WebView/Chromium 在 media path 停住時，
           // connectionState/data channel 仍維持 connected，host 仍會收到 input，但 client
-          // 端畫面停在最後一幀。此時單純 play() 不夠，需要嘗試 ICE restart 讓媒體路徑恢復。
+          // 端畫面停在最後一幀。Rust host 端把新 offer 視為新 session，因此這裡重建
+          // 整條 transport，避免 in-place 重協商關掉既有 DataChannel 後留下半失效狀態。
           let lastCurrentTime = 0;
           let lastPresentedFrames = 0;
           let freezeDetectCount = 0;
-          let lastIceRestartAt = 0;
+          let lastTransportRebuildAt = 0;
           const freezeWatchdog = setInterval(() => {
             if (!videoEl.srcObject) { clearInterval(freezeWatchdog); return; }
             const ct = videoEl.currentTime;
@@ -2345,13 +2367,13 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
                 console.warn("[Video] 偵測到影片無新幀，嘗試恢復播放...");
                 videoEl.play().catch(() => {});
               }
-              if (freezeDetectCount >= 4) {
+              if (freezeDetectCount >= 6) {
                 const now = Date.now();
                 const state = peerConnection?.connectionState;
                 const iceState = peerConnection?.iceConnectionState;
-                if (peerConnection && (state === "connected" || state === "connecting") && (iceState === "connected" || iceState === "completed") && now - lastIceRestartAt > 15000) {
-                  lastIceRestartAt = now;
-                  awaitSafeRenegotiate("video has no decoded frames while ICE is connected");
+                if (peerConnection && (state === "connected" || state === "connecting") && (iceState === "connected" || iceState === "completed") && now - lastTransportRebuildAt > 45000) {
+                  lastTransportRebuildAt = now;
+                  void recoverInteractiveTransport("video has no decoded frames while ICE is connected");
                 }
                 freezeDetectCount = 0;
               }
@@ -2398,7 +2420,12 @@ function createPeerConnection(remoteId: string): RTCPeerConnection {
 
         const btnAudioToggle = document.getElementById("btn-audio-toggle") as HTMLButtonElement;
 
-        if (!audioEl.srcObject) {
+        const existingAudioTrack = (audioEl.srcObject as MediaStream | null)?.getAudioTracks()[0];
+        if (existingAudioTrack && existingAudioTrack !== event.track) {
+            existingAudioTrack.stop();
+            audioEl.srcObject = null;
+        }
+        if (!audioEl.srcObject || existingAudioTrack?.readyState === "ended") {
             audioEl.srcObject = event.streams && event.streams.length > 0
                 ? event.streams[0]
                 : new MediaStream([event.track]);
@@ -2576,55 +2603,19 @@ function scheduleFileTransferRenegotiation() {
       fileTransferRecoveryScheduled = false;
       return;
     }
-    if (renegotiationInFlight || peerConnection?.signalingState !== "stable") {
-      window.setTimeout(attempt, 300);
-      return;
-    }
     fileTransferRecoveryScheduled = false;
-    awaitSafeRenegotiate("file-transfer channel recovery");
+    void recoverInteractiveTransport("file-transfer channel recovery did not open in time");
   };
   // Give a newly negotiated channel time to open before deciding it needs repair.
   window.setTimeout(attempt, 1200);
 }
 
-async function renegotiateCurrentPeerConnection(reason: string) {
-  if (!peerConnection || !currentRemoteId || !currentRemotePin) return;
-  if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) return;
-  if (renegotiationInFlight) return;
-  if (peerConnection.signalingState !== "stable") {
-    console.warn(`[WebRTC] 略過重協商 (${reason})，signalingState=${peerConnection.signalingState}`);
-    return;
-  }
-
-  renegotiationInFlight = true;
-  try {
-    console.warn(`[WebRTC] 觸發重協商: ${reason}`);
-    const offer = await peerConnection.createOffer({ iceRestart: true });
-    await peerConnection.setLocalDescription(offer);
-    signalingWs.send(JSON.stringify({
-      type: "offer",
-      target: currentRemoteId,
-      pin: currentRemotePin,
-      sdp: offer.sdp,
-    }));
-  } catch (err) {
-    console.warn("[WebRTC] 重協商失敗:", err);
-  } finally {
-    setTimeout(() => {
-      renegotiationInFlight = false;
-    }, 3000);
-  }
-}
-
-function awaitSafeRenegotiate(reason: string) {
-  renegotiateCurrentPeerConnection(reason).catch((err) => {
-    console.warn("[WebRTC] 自癒重協商例外:", err);
-  });
-}
-
 async function recoverInteractiveTransport(reason: string) {
   if (interactiveTransportRecoveryInFlight || !currentRemoteId || !currentRemotePin) return;
   if (!signalingWs || signalingWs.readyState !== WebSocket.OPEN) return;
+  const now = Date.now();
+  if (now - lastInteractiveTransportRecoveryAt < 15_000) return;
+  lastInteractiveTransportRecoveryAt = now;
 
   interactiveTransportRecoveryInFlight = true;
   console.warn(`[WebRTC] Rebuilding stalled interactive transport: ${reason}`);
@@ -2655,6 +2646,7 @@ async function startCall(remoteId: string, pin: string) {
     // 主動端建立 Data Channels
     dataChannelControl = pc.createDataChannel("input-control", {
       ordered: true,
+      maxPacketLifeTime: 500,
     });
     dataChannelControl.bufferedAmountLowThreshold = 1024;
     bindControlChannel(dataChannelControl);
@@ -2947,8 +2939,8 @@ function resetConnectionUI() {
   remoteHostOs = ""; // 避免跨連線沿用上一台被控端的 OS 資訊
   currentRemoteId = null;
   currentRemotePin = null;
-  renegotiationInFlight = false;
   fileTransferRecoveryScheduled = false;
+  lastInteractiveTransportRecoveryAt = 0;
   if (deferredRtcDisconnectTimer) {
     clearTimeout(deferredRtcDisconnectTimer);
     deferredRtcDisconnectTimer = null;
@@ -3116,8 +3108,22 @@ function updateConnectionStatusUI(state: string) {
         updateConnectionStatusUI("connected");
         return;
       }
+      const anyDataChannelOpen = [
+        dataChannelControl,
+        dataChannelUnreliable,
+        dataChannelSystemControl,
+        dataChannelFileTransfer,
+        dataChannelFileTransferControl,
+        dataChannelClipboard,
+        ...dataChannelFileTransferData,
+      ].some((channel) => channel?.readyState === "open");
+      if (anyDataChannelOpen) {
+        console.warn("[WebRTC] ICE disconnected but a DataChannel is still open; keeping the session and rebuilding media transport.");
+        void recoverInteractiveTransport("ICE disconnected while DataChannel remained open");
+        return;
+      }
       resetConnectionUI();
-    }, pickerActive ? 15000 : 8000);
+    }, pickerActive ? 30000 : 20000);
   } else if (state === "closed") {
     resetConnectionUI();
   }
@@ -3584,7 +3590,7 @@ function initOfflineSdpMode() {
         currentRemoteId = "manual";
 
         // 建立 Data Channels
-        dataChannelControl = pc.createDataChannel("input-control", { ordered: true });
+        dataChannelControl = pc.createDataChannel("input-control", { ordered: true, maxPacketLifeTime: 500 });
         dataChannelControl.bufferedAmountLowThreshold = 1024;
         bindControlChannel(dataChannelControl);
         
