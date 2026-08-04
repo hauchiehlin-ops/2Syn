@@ -5068,18 +5068,20 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       wasLongPressDrag = false;
 
       if (longPressTimer) clearTimeout(longPressTimer);
-      // 單指長按 -> 顯示快捷命令列。不要先送左鍵按下，避免長按被遠端
-      // 解讀成拖曳/框選，也避免手指微動讓選單變得難以點選。
+      // 單指長按 -> 直接送出遠端右鍵，讓作業系統/應用程式顯示原生 context menu。
       longPressTimer = setTimeout(() => {
         hasTriggeredLongPress = true;
 
         const target = isDirectTouchMode
           ? videoPointToPercent(touchStartClientX, touchStartClientY)
           : { x: currentCursorPercentX, y: currentCursorPercentY };
-        showFloatingMenu(touchStartClientX, touchStartClientY, target.x, target.y);
+        sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(2, target.x, target.y)));
+        setTimeout(() => {
+          sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(2, target.x, target.y)));
+        }, 80);
 
         triggerHaptic("heavy");
-        console.log("[Gesture] 單指長按，顯示快捷命令列");
+        console.log("[Gesture] 單指長按，送出原生右鍵");
       }, 500); // 400→500ms：降低「手指稍停就誤觸拖曳/框選」的機率
 
       isDragging = false;
@@ -5221,7 +5223,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       }
 
       if (hasTriggeredLongPress) {
-        // 快捷命令列已顯示；在手指放開前忽略後續微動，避免轉成拖曳或位移。
+        // 原生右鍵已送出；在手指放開前忽略後續微動，避免轉成拖曳或位移。
         return;
       }
       
@@ -5432,7 +5434,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       hasMouseMoved = false;
 
       if (hasTriggeredLongPress) {
-        // 長按命令列已在 timer 觸發時顯示；此處只清狀態，不送遠端點擊/拖曳事件。
+        // 長按右鍵已在 timer 觸發時送出；此處只清狀態，不送遠端左鍵/拖曳事件。
         isDragging = false;
 
         hasTriggeredLongPress = false;
@@ -5451,8 +5453,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         if (isDragging) {
           sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, releaseX, releaseY)));
           isDragging = false;
-          // 註：一般拖曳（拖視窗、捲動、移動圖示）結束不再彈出懸浮選單，
-          // 懸浮選單只在「長按」這個明確手勢後出現（見上方 hasTriggeredLongPress 分支），避免太容易誤觸。
         } else {
           const tapDist = Math.sqrt(Math.pow(endX - lastTapPos.x, 2) + Math.pow(endY - lastTapPos.y, 2));
           if (now - lastTapTime < 350 && tapDist < 35) {
@@ -5505,7 +5505,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         if (isDragging) {
           sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, releaseX, releaseY)));
           isDragging = false;
-          // 註：軌跡板一般拖曳結束不再彈出懸浮選單，只在「長按」手勢後出現（避免誤觸）。
         } else if (isPotentialDrag) {
           isPotentialDrag = false;
           sendDoubleClickSequence();
@@ -6148,196 +6147,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       onResetTrigger();
     }
   });
-
-  // 建立精美的懸浮功能選單 (Floating Option Menu)
-  let activeFloatingMenu: HTMLDivElement | null = null;
-  let activeFloatingMenuRemotePoint: { x: number; y: number } | null = null;
-
-  const closeFloatingMenu = (immediate = false) => {
-    if (!activeFloatingMenu) return;
-    const menu = activeFloatingMenu;
-    const finish = () => {
-      menu.remove();
-      if (activeFloatingMenu === menu) {
-        activeFloatingMenu = null;
-        activeFloatingMenuRemotePoint = null;
-      }
-    };
-
-    if (immediate) {
-      finish();
-      return;
-    }
-
-    menu.style.transform = "translateY(-4px) scale(0.98)";
-    menu.style.opacity = "0";
-    setTimeout(finish, 140);
-  };
-
-  const showFloatingMenu = (x: number, y: number, remoteX: number = currentCursorPercentX, remoteY: number = currentCursorPercentY) => {
-    // 先移除舊選單
-    if (activeFloatingMenu) {
-      closeFloatingMenu(true);
-    }
-    activeFloatingMenuRemotePoint = {
-      x: Math.max(0, Math.min(1, remoteX)),
-      y: Math.max(0, Math.min(1, remoteY))
-    };
-
-    const menu = document.createElement("div");
-    activeFloatingMenu = menu;
-    menu.id = "floating-selection-menu";
-    
-    // 毛玻璃玻璃擬態 Glassmorphism 精美樣式
-    menu.style.position = "fixed";
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y - 65}px`; // 預設顯示在點擊位置上方 65 像素
-    menu.style.transform = "translateY(-4px) scale(0.98)";
-    menu.style.opacity = "0";
-    menu.style.transition = "opacity 0.14s ease, transform 0.14s ease";
-    menu.style.zIndex = "3000";
-    menu.style.background = "rgba(20, 24, 34, 0.94)";
-    menu.style.backdropFilter = "blur(16px)";
-    menu.style.setProperty("-webkit-backdrop-filter", "blur(16px)");
-    menu.style.border = "1px solid rgba(255, 255, 255, 0.16)";
-    menu.style.borderRadius = "10px";
-    menu.style.padding = "6px";
-    menu.style.display = "flex";
-    menu.style.flexDirection = "column";
-    menu.style.gap = "2px";
-    menu.style.minWidth = "168px";
-    menu.style.boxShadow = "0 16px 40px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.08)";
-
-    // 選單選項清單
-    const options = [
-      { label: "📋 複製", action: "copy" },
-      { label: "📥 貼上", action: "paste" },
-      { label: "🔍 全選", action: "selectall" },
-      { label: "⚡ 右鍵", action: "rightclick" },
-      { label: "✕", action: "cancel" }
-    ];
-
-    options.forEach(opt => {
-      const btn = document.createElement("button");
-      btn.textContent = opt.label;
-      btn.style.background = "transparent";
-      btn.style.border = "none";
-      btn.style.color = "white";
-      btn.style.fontSize = "14px";
-      btn.style.fontWeight = "600";
-      btn.style.padding = "10px 12px";
-      btn.style.borderRadius = "7px";
-      btn.style.cursor = "pointer";
-      btn.style.transition = "all 0.15s ease";
-      btn.style.whiteSpace = "nowrap";
-      btn.style.textAlign = "left";
-      btn.style.width = "100%";
-
-      btn.addEventListener("mouseenter", () => {
-        btn.style.background = "rgba(255, 255, 255, 0.15)";
-      });
-      btn.addEventListener("mouseleave", () => {
-        btn.style.background = "transparent";
-      });
-
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        triggerHaptic("light");
-
-        const ctrlCode = 17;
-        const winCode = 91;
-        const cCode = 67;
-        const vCode = 86;
-        const aCode = 65;
-
-        // 依被控端 OS 送出「單一」正確的快捷鍵組合。
-        // 舊版為了雙系統相容同時送 Cmd+X 與 Ctrl+X，導致部分 app 兩組都觸發
-        // （貼上重複兩次、macOS Terminal 的 Ctrl+C 送出 SIGINT、Windows 的
-        // Win+V 打開剪貼簿歷史）。host_info 未知時保守預設 macOS。
-        const sendShortcut = (keyCode: number, after?: () => void) => {
-          const modCode = remoteHostOs === "windows" || remoteHostOs === "linux" ? ctrlCode : winCode;
-          const modBit = modCode === ctrlCode ? 2 : 8;
-          pressKey(modCode, modBit);
-          setTimeout(() => pressKey(keyCode, modBit), 20);
-          setTimeout(() => {
-            releaseKey(keyCode, modBit);
-            setTimeout(() => {
-              releaseKey(modCode, 0);
-              after?.();
-            }, 20);
-          }, 100);
-        };
-
-        if (opt.action === "copy") {
-          sendShortcut(cCode, () => {
-            setTimeout(requestClipboardFromHost, 160);
-            setTimeout(requestClipboardFromHost, 520);
-          });
-        } else if (opt.action === "paste") {
-          pushClipboardToHost().finally(() => {
-            sendShortcut(vCode);
-          });
-        } else if (opt.action === "selectall") {
-          sendShortcut(aCode);
-        } else if (opt.action === "rightclick") {
-          const target = activeFloatingMenuRemotePoint ?? { x: currentCursorPercentX, y: currentCursorPercentY };
-          const menuClickX = target.x, menuClickY = target.y;
-          closeFloatingMenu(true);
-          sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(2, menuClickX, menuClickY)));
-          setTimeout(() => {
-            sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(2, menuClickX, menuClickY)));
-          }, 80);
-          return;
-        }
-
-        // 點擊後隱藏選單
-        closeFloatingMenu();
-      });
-
-      menu.appendChild(btn);
-    });
-
-    document.body.appendChild(menu);
-
-    // 限制選單不要超出螢幕左右與上下邊界
-    const rect = menu.getBoundingClientRect();
-    const menuWidth = rect.width;
-    const halfWidth = menuWidth / 2;
-    const padding = 12; // 邊距 px
-    let targetLeft = x;
-
-    if (x - halfWidth < padding) {
-      targetLeft = halfWidth + padding;
-    } else if (x + halfWidth > window.innerWidth - padding) {
-      targetLeft = window.innerWidth - halfWidth - padding;
-    }
-    menu.style.left = `${targetLeft - halfWidth}px`;
-
-    let targetTop = y - 65;
-    const menuHeight = rect.height;
-    if (targetTop < padding) {
-      // 若上方空間不足，則顯示在點擊位置下方 25 像素
-      targetTop = y + 25;
-    } else if (targetTop + menuHeight > window.innerHeight - padding) {
-      targetTop = window.innerHeight - menuHeight - padding;
-    }
-    menu.style.top = `${targetTop}px`;
-    
-    // 觸發進場動畫
-    requestAnimationFrame(() => {
-      menu.style.transform = "translateY(0) scale(1)";
-      menu.style.opacity = "1";
-    });
-  };
-
-  // 全局點擊/觸控時關閉懸浮選單
-  const dismissFloatingMenu = (e: Event) => {
-    if (activeFloatingMenu && !activeFloatingMenu.contains(e.target as Node)) {
-      closeFloatingMenu();
-    }
-  };
-  document.addEventListener("click", dismissFloatingMenu);
-  document.addEventListener("touchstart", dismissFloatingMenu, { passive: true });
 
 }
 

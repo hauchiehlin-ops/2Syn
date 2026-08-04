@@ -193,7 +193,15 @@ export function setupFileTransferDropZone(getChannel: () => RTCDataChannel | nul
   const mobileFileInput = document.createElement("input");
   mobileFileInput.type = "file";
   mobileFileInput.multiple = false;
-  mobileFileInput.accept = "*/*";
+  mobileFileInput.accept = isIosRuntime()
+    ? [
+        ".pdf", ".txt", ".csv", ".json", ".zip", ".rar", ".7z",
+        ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        "application/octet-stream",
+        "application/pdf",
+        "text/*",
+      ].join(",")
+    : "*/*";
   mobileFileInput.style.display = "none";
   document.body.appendChild(mobileFileInput);
   bindQueueActions(getChannel);
@@ -1752,6 +1760,11 @@ function isMobileRuntime() {
   const ua = navigator.userAgent.toLowerCase();
   if (/iphone|ipad|ipod|android/.test(ua)) return true;
   return /macintosh/.test(ua) && navigator.maxTouchPoints > 2;
+}
+
+function isIosRuntime() {
+  const ua = navigator.userAgent.toLowerCase();
+  return /iphone|ipad|ipod/.test(ua) || (/macintosh/.test(ua) && navigator.maxTouchPoints > 2);
 }
 
 function isDesktopBrowserRuntime() {
