@@ -20,6 +20,26 @@
 
 # 歷程
 
+## 2026-08-05 — 連線成功率與穩定度提升（ICE Restart、TURN 升級、指數退避、Gathering Timeout）
+
+- **問題/目標**：WebRTC ICE 失敗時需手動重連；公共 TURN 只有 UDP port 80、企業防火牆常封鎖；信令重連固定 5 秒在 Render 冷啟動場景反覆失敗；ICE gathering 無超時保護最壞情況等 15 秒。
+- **根因/做法**：
+  1. **ICE Restart（main.ts）**：`updateConnectionStatusUI("failed")` 原本直接 `alert` + `resetConnectionUI`。改為：先呼叫 `peerConnection.restartIce()` 靜默重試，設 10 秒觀察計時器，10 秒後若仍失敗才顯示錯誤。適用 Wi-Fi ↔ 4G 切換等短暫路由中斷場景。
+  2. **TURN 升級（turn.rs + main.ts）**：`default_turn_servers()` 原本只有 `turn:openrelay.metered.ca:80`（UDP 單端）。改為同時提供 `turn:port80 UDP`、`turn:port80 TCP`、`turn:port443 TCP`、`turns:port443 TLS`；並加入 `freestun.net:3479` 備援。前端 `DEFAULT_STUN_SERVERS` 同步加入相同 TURN。`turns://`（TLS port 443）是穿透嚴格防火牆的關鍵，因為 port 443 幾乎所有網路都允許出站。
+  3. **指數退避重連（signaling_client.rs + main.ts）**：Rust 端與 JS 端的信令斷線重連，由固定 5 秒改為 5 → 10 → 20 → 40 → 60 秒指數退避。連線成功後重置。解決 Render 免費 tier 冷啟動 30–60 秒期間反覆失敗的問題。
+  4. **ICE Gathering Timeout（main.ts）**：`onicegatheringstatechange` 偵測到 `gathering` 狀態後啟動 4 秒計時器，若 4 秒後仍未完成則強制送 `null` candidate（end-of-candidates），讓雙方提前以現有候選決策，把最壞情況等待時間從 15 秒縮短至 ~8 秒。
+- **驗證**：`cargo check -p syn-core`、`cargo check -p syn-desktop` 均 Finished 0 errors；`npx tsc --noEmit` 0 errors。
+
+## 2026-08-05 — 修復 iOS 建置失敗（5 個 E0433 錯誤）+ Install Service 按鈕修正
+
+
+- **問題/目標**：`cargo check -p syn-desktop --target aarch64-apple-ios` 失敗，5 個 `E0433: cannot find 'engine'/'system_config' in 'syn_core'`；同時 UI 的 Install Service / Uninstall Service 按鈕點擊無作用。
+- **根因/做法**：
+  1. **按鈕無作用**：`desktop/src/main.ts:1536,1555` 呼叫的 `invoke("install_service")` / `invoke("uninstall_service")` 與 Rust 實際定義的 command 名稱 `install_unattended_service` / `uninstall_unattended_service` 不符，改正即可。
+  2. **iOS 建置失敗**：`core/src/lib.rs` 從未加入 `pub mod engine;`、`pub mod system_config;`、`pub mod signaling_client;`、`pub mod host_session;`、`pub mod turn;` 的宣告。在 macOS 桌面版，這些模組能被其他模組間接引用而不報錯；但切換到 iOS 目標、所有桌面模組被 cfg gate 排除後，`desktop/src-tauri/src/lib.rs` 裡 `AppState` struct 和 `set_static_password` 直接引用 `syn_core::engine::*`、`syn_core::system_config::*` 就產生找不到模組的錯誤。
+  3. **修正**：`core/src/lib.rs` 加入五個 `#[cfg(not(any(target_os = "ios", target_os = "android")))] pub mod ...;`；`desktop/src-tauri/src/lib.rs` 對 `AppState` struct、`set_static_password` 內的 daemon config 寫入、及 `builder.manage(AppState{...})` 初始化各加 `#[cfg(not(ios/android))]` 保護（`.manage()` 因屬方法鏈，改用 `builder = builder.manage(...)` 賦值模式）。
+- **教訓**：Rust 不會像 Go 或 C 那樣在模組未使用時報錯；未宣告的模組在一個目標下能工作，換另一個平台後才暴露。iOS 目標應定期在 CI 驗證。
+
 ## 2026-08-03 — 修正桌面 Duel 主控時 offer 沒送到遠端 host
 
 - **問題/目標**：macOS 版 `2syn_Duel` 發起連線到 Windows 版 `2syn_Duel` 時，Windows 端完全沒有出現「收到 Offer / Answer sent」日誌；症狀看似跨平台不能連線，但實際卡在信令路由階段，尚未進入 WebRTC/TURN/螢幕擷取。

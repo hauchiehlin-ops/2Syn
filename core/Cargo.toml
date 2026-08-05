@@ -1,6 +1,6 @@
 [package]
 name = "syn-core"
-version = "6.5.1"
+version = "7.1.0"
 edition = "2021"
 
 [dependencies]
@@ -11,6 +11,11 @@ totp-rs = { version = "5.5", features = ["qr"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.7", features = ["v4"] }
+
+tokio-tungstenite = { version = "0.21.0", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+url = "2.5"
+
 aes-gcm = "0.10"
 pbkdf2 = "0.12"
 sha2 = "0.10"
@@ -19,6 +24,7 @@ libc = "0.2"
 hex = "0.4"
 base32 = "0.5"
 dirs = "6.0.0"
+log = "0.4.33"
     
 
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
@@ -29,6 +35,7 @@ openh264 = "0.9.3"
 rayon = "1.8"
 opus = "0.3.1"
 cpal = "0.17.3"
+arboard = "3.6.1"
 
 [target.'cfg(all(not(target_os = "macos"), not(any(target_os = "ios", target_os = "android"))))'.dependencies]
 xcap = "0.9.6"

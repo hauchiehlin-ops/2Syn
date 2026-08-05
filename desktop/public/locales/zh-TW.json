@@ -440,5 +440,25 @@
   "file_transfer_already_running": "已有檔案正在傳輸中。",
   "file_transfer_waiting_network": "等待傳輸緩衝區送出中...",
   "file_transfer_buffered": "仍有 {0} 在網路佇列中等待送出",
-  "file_transfer_browser_saved_selected": "已儲存到選擇的位置"
+  "file_transfer_browser_saved_selected": "已儲存到選擇的位置",
+
+  "service_title": "背景服務（無人値守遠端存取）",
+  "service_desc": "安裝為系統服務後，即使未登入使用者帳號，遠端裝置仍可自動連線到本機。",
+  "service_help": "「無人値守遠端存取」會將 2syn 安裝為一項 macOS/Windows 系統服務（自動啟動程式）。安裝後即使登出證號者或機器重開，它仍會在背景中執行，保持連線且接受遠端連線。適合需要隨時遠控機器的情境（例如：遠操家中電腦、遠端支援場景）。",
+  "service_status_installed": "已安裝",
+  "service_status_not_installed": "未安裝",
+  "service_btn_install": "安裝服務",
+  "service_btn_installing": "安裝中...",
+  "service_btn_uninstall": "移除",
+  "service_btn_uninstalling": "移除中...",
+  "service_install_failed": "安裝失敗：",
+  "service_uninstall_failed": "移除失敗：",
+  "service_onboard_title": "首次設定—第 2 步：背景安全服務",
+  "service_onboard_subtitle": "建議安裝，一次設定能連線",
+  "service_onboard_body": "安裝背景服務後，即使登出帳號或機器重開，2syn 仍會在背景中持續執行並接受遠端連線。適合需要隨時遠控機器的使用場景。",
+  "service_onboard_tip": "系統服務需要管理員權限才能安裝（使用 sudo），安裝後即使關閉應用視窗也不影響遠端連線。",
+  "service_onboard_btn_install": "立即安裝服務",
+  "service_onboard_btn_installing": "安裝中...",
+  "service_onboard_btn_skip": "我知道了，稍後再說",
+  "service_onboard_success": "背景服務安裝成功！遠端裝置即使在您登出後仍可連線。"
 }

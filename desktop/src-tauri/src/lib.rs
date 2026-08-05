@@ -34,39 +34,9 @@ struct SelectedTransferFile {
     last_modified: u64,
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 struct AppState {
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    connection_manager: Arc<ConnectionManager>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    active_pc: tokio::sync::Mutex<Option<Arc<webrtc::peer_connection::RTCPeerConnection>>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    active_file_channel: tokio::sync::Mutex<Option<Arc<webrtc::data_channel::RTCDataChannel>>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    active_file_control_channel: tokio::sync::Mutex<Option<Arc<webrtc::data_channel::RTCDataChannel>>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    active_file_data_channels: tokio::sync::Mutex<Vec<Arc<webrtc::data_channel::RTCDataChannel>>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    file_receive_state: tokio::sync::Mutex<Option<Arc<tokio::sync::Mutex<syn_core::file_transfer::FileTransferState>>>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    file_resume_offsets: tokio::sync::Mutex<std::collections::HashMap<String, u64>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    file_complete_confirmations: tokio::sync::Mutex<std::collections::HashSet<String>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    active_file_send_ids: tokio::sync::Mutex<std::collections::HashSet<String>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    file_cancelled_transfers: tokio::sync::Mutex<std::collections::HashSet<String>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    signaling_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    current_pin: Arc<tokio::sync::RwLock<String>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    current_remote_id: Arc<tokio::sync::RwLock<String>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    active_session_id: Arc<tokio::sync::RwLock<String>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    signaling_abort: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    has_active_webrtc: Arc<std::sync::atomic::AtomicBool>,
+    engine: std::sync::Arc<syn_core::engine::CoreEngine>,
 }
 
 /// 回傳目前執行中的後端 build 身分，協助確認安裝包是否真的更新。
@@ -91,11 +61,149 @@ const STATIC_PWD_KEY: &str = "2syn_static_password";
 #[tauri::command]
 async fn set_static_password(password: String) -> Result<(), String> {
     if password.is_empty() {
-        // 清除密碼 (如果 keyring 支援 delete_secret)
-        // 為了簡單起見，如果是空的，我們存一個特殊標記或拒絕
         return Err("Password cannot be empty".to_string());
     }
-    SecureStorage::save_secret(STATIC_PWD_KEY, &password).map_err(|e| e.to_string())
+    // Save to user's keychain for legacy compatibility
+    let _ = SecureStorage::save_secret(STATIC_PWD_KEY, &password);
+
+    // Also save to system config for daemon (desktop only — iOS is client-only, no daemon)
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let hashed = syn_core::system_config::SystemConfig::hash_password(&password);
+        let mut config = syn_core::system_config::SystemConfig::read_config();
+        config.hashed_password = Some(hashed);
+        syn_core::system_config::SystemConfig::write_config(&config)
+            .map_err(|e| format!("Failed to write system config: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// 安裝背景服務 (需提權)
+#[tauri::command]
+async fn install_unattended_service() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_dir = exe_path.parent().unwrap();
+        let daemon_path = exe_dir.join("2syn-daemon.exe");
+        
+        let script = format!(
+            "Start-Process sc.exe -ArgumentList 'create', '2syn-daemon', 'binPath=', '\"{}\"', 'start=', 'auto' -Verb RunAs",
+            daemon_path.display()
+        );
+        
+        std::process::Command::new("powershell")
+            .args(&["-Command", &script])
+            .output()
+            .map_err(|e| format!("Failed to invoke powershell: {}", e))?;
+        
+        // Start it immediately
+        let start_script = "Start-Process sc.exe -ArgumentList 'start', '2syn-daemon' -Verb RunAs";
+        std::process::Command::new("powershell")
+            .args(&["-Command", start_script])
+            .output()
+            .map_err(|e| format!("Failed to start service: {}", e))?;
+            
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_dir = exe_path.parent().unwrap();
+        let daemon_path = exe_dir.join("2syn-daemon");
+        
+        let plist_content = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.2syn.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>"#, daemon_path.display());
+
+        let temp_plist = "/tmp/com.2syn.daemon.plist";
+        std::fs::write(temp_plist, plist_content).map_err(|e| e.to_string())?;
+
+        let script = format!(
+            "do shell script \"mv {} /Library/LaunchDaemons/com.2syn.daemon.plist && chown root:wheel /Library/LaunchDaemons/com.2syn.daemon.plist && launchctl load /Library/LaunchDaemons/com.2syn.daemon.plist\" with administrator privileges",
+            temp_plist
+        );
+
+        std::process::Command::new("osascript")
+            .args(&["-e", &script])
+            .output()
+            .map_err(|e| format!("Failed to invoke osascript: {}", e))?;
+            
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Err("Unsupported OS".to_string())
+    }
+}
+
+/// 查詢背景服務是否已安裝（直接檢查系統名稱/plist，不依賴 localStorage）
+#[tauri::command]
+async fn check_service_installed() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // 檢查 launchd plist 檔案是否存在
+        Ok(std::path::Path::new("/Library/LaunchDaemons/com.2syn.daemon.plist").exists())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // 檢查 Windows 服務是否存在
+        let output = std::process::Command::new("sc")
+            .args(&["query", "2syn-daemon"])
+            .output()
+            .map_err(|e| format!("Failed to query service: {}", e))?;
+        // sc query 返回 0 表示服務存在（無論啟動狀態）
+        Ok(output.status.success())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Ok(false)
+    }
+}
+
+/// 移除背景服務 (需提權)
+#[tauri::command]
+async fn uninstall_unattended_service() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let script = "Start-Process sc.exe -ArgumentList 'stop', '2syn-daemon' -Verb RunAs; Start-Process sc.exe -ArgumentList 'delete', '2syn-daemon' -Verb RunAs";
+        std::process::Command::new("powershell")
+            .args(&["-Command", script])
+            .output()
+            .map_err(|e| format!("Failed to invoke powershell: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let script = "do shell script \"launchctl unload /Library/LaunchDaemons/com.2syn.daemon.plist && rm /Library/LaunchDaemons/com.2syn.daemon.plist\" with administrator privileges";
+        std::process::Command::new("osascript")
+            .args(&["-e", script])
+            .output()
+            .map_err(|e| format!("Failed to invoke osascript: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Err("Unsupported OS".to_string())
+    }
 }
 
 /// 驗證靜態無人值守密碼
@@ -694,7 +802,7 @@ async fn handle_remote_offer_as_host(
     syn_core::debug_log!("TAURI", "AudioStreamer created");
     use tauri::Manager;
     let app_state = app_handle.state::<AppState>();
-    let active_webrtc = app_state.has_active_webrtc.clone();
+    let active_webrtc = app_state.engine.has_active_webrtc.clone();
     let active_webrtc_audio = active_webrtc.clone();
 
     // 本 session 專屬存活旗標：pc 關閉/失敗時歸零，令 video/audio 擷取迴圈徹底退出，
@@ -718,7 +826,7 @@ async fn handle_remote_offer_as_host(
     });
 
     let state = app_handle.state::<AppState>();
-    let config_rx = state.connection_manager.subscribe();
+    let config_rx = state.engine.connection_manager.subscribe();
 
     // 建立監聽螢幕切換的 watch channel
     let (monitor_tx, monitor_rx) = tokio::sync::watch::channel(0usize);
@@ -735,11 +843,11 @@ async fn handle_remote_offer_as_host(
 
     // 啟動 ABR 網路指標監控與位元率動態決策任務
     syn_core::connection::ConnectionManager::spawn_monitor_task(
-        state.connection_manager.clone(),
+        state.engine.connection_manager.clone(),
         session.get_peer_connection(),
     );
 
-    let active_webrtc = app_state.has_active_webrtc.clone();
+    let active_webrtc = app_state.engine.has_active_webrtc.clone();
     let session_alive_video = Arc::clone(&session_alive);
     syn_core::debug_log!("TAURI", "Starting video capture loop");
 
@@ -769,8 +877,8 @@ async fn handle_remote_offer_as_host(
                     let json_for_event = json.clone();
                     tokio::spawn(async move {
                         let state = app_inner.state::<AppState>();
-                        let remote_id = state.current_remote_id.read().await.clone();
-                        let tx_opt = state.signaling_tx.lock().await.clone();
+                        let remote_id = state.engine.current_remote_id.read().await.clone();
+                        let tx_opt = state.engine.signaling_tx.lock().await.clone();
                         if !remote_id.is_empty() {
                             if let Some(tx) = tx_opt {
                                 let ice_msg = serde_json::json!({
@@ -824,7 +932,7 @@ async fn handle_remote_offer_as_host(
                 if matches!(state_val, RTCPeerConnectionState::Connected) {
                     // 連上：一律標記活躍（安全方向，讓影像流動）
                     app_state
-                        .has_active_webrtc
+                        .engine.has_active_webrtc
                         .store(true, std::sync::atomic::Ordering::SeqCst);
                     println!("WebRTC 狀態變更: {:?}, 是否活躍: true", state_val);
                 } else if matches!(state_val, RTCPeerConnectionState::Disconnected) {
@@ -835,7 +943,7 @@ async fn handle_remote_offer_as_host(
                 } else if matches!(state_val, RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed) {
                     // 失敗/關閉：僅當本 pc 仍是當前 active session 時才標記非活躍。
                     let is_current = app_state
-                        .active_pc
+                        .engine.active_pc
                         .lock()
                         .await
                         .as_ref()
@@ -843,7 +951,7 @@ async fn handle_remote_offer_as_host(
                         .unwrap_or(false);
                     if is_current {
                         app_state
-                            .has_active_webrtc
+                            .engine.has_active_webrtc
                             .store(false, std::sync::atomic::Ordering::SeqCst);
                         println!("WebRTC 狀態變更: {:?}, 是否活躍: false（當前 session）", state_val);
                     } else {
@@ -870,7 +978,7 @@ async fn handle_remote_offer_as_host(
                 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
                 let app_state = app.state::<AppState>();
                 let is_current = app_state
-                    .active_pc
+                    .engine.active_pc
                     .lock()
                     .await
                     .as_ref()
@@ -884,13 +992,13 @@ async fn handle_remote_offer_as_host(
 
                 if matches!(ice_state, RTCIceConnectionState::Connected | RTCIceConnectionState::Completed) {
                     app_state
-                        .has_active_webrtc
+                        .engine.has_active_webrtc
                         .store(true, std::sync::atomic::Ordering::SeqCst);
                     println!("ICE 狀態變更: {:?}, 是否活躍: true", ice_state);
                 } else if matches!(ice_state, RTCIceConnectionState::Failed | RTCIceConnectionState::Closed) {
                     session_alive.store(false, std::sync::atomic::Ordering::SeqCst);
                     app_state
-                        .has_active_webrtc
+                        .engine.has_active_webrtc
                         .store(false, std::sync::atomic::Ordering::SeqCst);
                     println!("ICE 狀態變更: {:?}, 是否活躍: false", ice_state);
                 } else if matches!(ice_state, RTCIceConnectionState::Disconnected) {
@@ -985,7 +1093,7 @@ async fn handle_remote_offer_as_host(
                             if json["type"] == "file_transfer_priority" {
                                 let active = json["active"].as_bool().unwrap_or(false);
                                 let state = app.state::<AppState>();
-                                state.connection_manager.set_transfer_priority(active).await;
+                                state.engine.connection_manager.set_transfer_priority(active).await;
                                 println!(
                                     "[file-transfer] Transfer priority mode {}",
                                     if active { "enabled" } else { "disabled" }
@@ -1104,7 +1212,7 @@ async fn handle_remote_offer_as_host(
                 tokio::spawn(async move {
                     *app_for_receive_state
                         .state::<AppState>()
-                        .file_receive_state
+                        .engine.file_receive_state
                         .lock()
                         .await = Some(state_for_receive);
                 });
@@ -1114,7 +1222,7 @@ async fn handle_remote_offer_as_host(
                 tokio::spawn(async move {
                     *app_for_initial_state
                         .state::<AppState>()
-                        .active_file_control_channel
+                        .engine.active_file_control_channel
                         .lock()
                         .await = Some(dc_for_initial_state);
                 });
@@ -1125,7 +1233,7 @@ async fn handle_remote_offer_as_host(
                     let dc = Arc::clone(&dc_for_state);
                     let app = app_for_state.clone();
                     Box::pin(async move {
-                        *app.state::<AppState>().active_file_control_channel.lock().await = Some(dc);
+                        *app.state::<AppState>().engine.active_file_control_channel.lock().await = Some(dc);
                         println!("[file-transfer] Split control channel is ready");
                     })
                 }));
@@ -1137,7 +1245,7 @@ async fn handle_remote_offer_as_host(
                     let dc = Arc::clone(&dc_for_close);
                     Box::pin(async move {
                         let state = app.state::<AppState>();
-                        let mut active = state.active_file_control_channel.lock().await;
+                        let mut active = state.engine.active_file_control_channel.lock().await;
                         if active.as_ref().map(|current| Arc::ptr_eq(current, &dc)).unwrap_or(false) {
                             *active = None;
                         }
@@ -1156,7 +1264,7 @@ async fn handle_remote_offer_as_host(
                         if !text_str.starts_with("{") { return; }
                         *app
                             .state::<AppState>()
-                            .file_receive_state
+                            .engine.file_receive_state
                             .lock()
                             .await = Some(Arc::clone(&file_state));
                         if let Ok(value) = serde_json::from_str::<serde_json::Value>(text_str) {
@@ -1179,7 +1287,7 @@ async fn handle_remote_offer_as_host(
                 tokio::spawn(async move {
                     app_for_initial_state
                         .state::<AppState>()
-                        .active_file_data_channels
+                        .engine.active_file_data_channels
                         .lock()
                         .await
                         .push(dc_for_initial_state);
@@ -1191,7 +1299,7 @@ async fn handle_remote_offer_as_host(
                     let dc = Arc::clone(&dc_for_close);
                     Box::pin(async move {
                         app.state::<AppState>()
-                            .active_file_data_channels
+                            .engine.active_file_data_channels
                             .lock()
                             .await
                             .retain(|current| !Arc::ptr_eq(current, &dc));
@@ -1203,7 +1311,7 @@ async fn handle_remote_offer_as_host(
                     let app = app_for_data.clone();
                     Box::pin(async move {
                         let state = app.state::<AppState>();
-                        let file_state = state.file_receive_state.lock().await.clone();
+                        let file_state = state.engine.file_receive_state.lock().await.clone();
                         let Some(file_state) = file_state else { return; };
                         let mut receiver = file_state.lock().await;
                         receiver.handle_binary(&data);
@@ -1227,7 +1335,7 @@ async fn handle_remote_offer_as_host(
                 let dc_for_initial_state = Arc::clone(&d);
                 tokio::spawn(async move {
                     let state = app_for_initial_state.state::<AppState>();
-                    *state.active_file_channel.lock().await = Some(dc_for_initial_state);
+                    *state.engine.active_file_channel.lock().await = Some(dc_for_initial_state);
                 });
 
                 let dc_for_state = Arc::clone(&d);
@@ -1237,7 +1345,7 @@ async fn handle_remote_offer_as_host(
                     let app = app_for_state.clone();
                     Box::pin(async move {
                         let state = app.state::<AppState>();
-                        *state.active_file_channel.lock().await = Some(dc);
+                        *state.engine.active_file_channel.lock().await = Some(dc);
                         println!("[file-transfer] Active file channel is ready");
                     })
                 }));
@@ -1249,7 +1357,7 @@ async fn handle_remote_offer_as_host(
                     let dc = Arc::clone(&dc_for_close);
                     Box::pin(async move {
                         let state = app.state::<AppState>();
-                        let mut active = state.active_file_channel.lock().await;
+                        let mut active = state.engine.active_file_channel.lock().await;
                         let is_current = active
                             .as_ref()
                             .map(|current| Arc::ptr_eq(current, &dc))
@@ -1288,7 +1396,7 @@ async fn handle_remote_offer_as_host(
                                             .unwrap_or(0);
                                         let app_state = app.state::<AppState>();
                                         app_state
-                                            .file_resume_offsets
+                                            .engine.file_resume_offsets
                                             .lock()
                                             .await
                                             .insert(id.to_string(), offset);
@@ -1297,7 +1405,7 @@ async fn handle_remote_offer_as_host(
                                     if let Some(id) = value.get("id").and_then(|value| value.as_str()) {
                                         let app_state = app.state::<AppState>();
                                         app_state
-                                            .file_complete_confirmations
+                                            .engine.file_complete_confirmations
                                             .lock()
                                             .await
                                             .insert(id.to_string());
@@ -1355,7 +1463,7 @@ async fn handle_remote_offer_as_host(
     // 序號體系，造成「重連後點擊失效、移動正常」等半失效症狀。Android 斷線清理
     // 乾淨故不觸發。此處在換上新 pc 前主動 close 舊 pc，確保單一 active session。
     let state = app_handle.state::<AppState>();
-    let old_pc = state.active_pc.lock().await.replace(Arc::clone(&pc));
+    let old_pc = state.engine.active_pc.lock().await.replace(Arc::clone(&pc));
     if let Some(old) = old_pc {
         tokio::spawn(async move {
             if let Err(e) = old.close().await {
@@ -1375,39 +1483,6 @@ async fn handle_remote_offer_as_host(
     Ok(answer.sdp)
 }
 
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-#[derive(serde::Deserialize, Debug)]
-#[serde(tag = "type")]
-enum IncomingMessage {
-    #[serde(rename = "offer")]
-    Offer {
-        source: String,
-        pin: String,
-        sdp: String,
-        #[serde(rename = "sessionId")]
-        session_id: Option<String>,
-    },
-    #[serde(rename = "answer")]
-    Answer {
-        source: String,
-        sdp: String,
-        #[serde(rename = "sessionId")]
-        session_id: Option<String>,
-    },
-    #[serde(rename = "ice")]
-    Ice {
-        source: String,
-        candidate: String,
-        #[serde(rename = "sessionId")]
-        session_id: Option<String>,
-    },
-    #[serde(rename = "error")]
-    Error { message: String },
-    #[serde(rename = "pong")]
-    Pong,
-    #[serde(rename = "custom_request_logs")]
-    CustomRequestLogs { source: String, target: String },
-}
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 async fn apply_ice_candidate(state: &AppState, candidate_str: &str) -> Result<(), String> {
@@ -1415,7 +1490,7 @@ async fn apply_ice_candidate(state: &AppState, candidate_str: &str) -> Result<()
         return Ok(());
     }
     use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
-    let pc_opt = state.active_pc.lock().await.clone();
+    let pc_opt = state.engine.active_pc.lock().await.clone();
     if let Some(pc) = pc_opt {
         match serde_json::from_str::<RTCIceCandidateInit>(candidate_str) {
             Ok(candidate) => {
@@ -1432,381 +1507,19 @@ async fn apply_ice_candidate(state: &AppState, candidate_str: &str) -> Result<()
     Ok(())
 }
 
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-async fn start_rust_signaling_task(
-    app_handle: tauri::AppHandle,
-    my_id: String,
-    mut ws_rx: tokio::sync::mpsc::Receiver<String>,
-    abort_rx: tokio::sync::oneshot::Receiver<()>,
-) {
-    let ws_url = "wss://twosyn-signaling.onrender.com/ws";
-
-    // 共享當前活躍之 WebSocket 傳送端
-    let active_ws_sender = Arc::new(tokio::sync::Mutex::new(None));
-
-    // 轉發任務在 loop 外僅 spawn 一次，防止 Receiver 擁有權移入 loop 內部
-    let active_ws_sender_clone = Arc::clone(&active_ws_sender);
-    let mut _forward_task = tokio::spawn(async move {
-        while let Some(msg_str) = ws_rx.recv().await {
-            let tx_opt: Option<tokio::sync::mpsc::Sender<WsMessage>> =
-                active_ws_sender_clone.lock().await.clone();
-            if let Some(tx) = tx_opt {
-                let _ = tx.send(WsMessage::Text(msg_str)).await;
-            }
-        }
-    });
-
-    let mut abort_rx = abort_rx;
-    loop {
-        // 檢查是否收到中止信號
-        if !matches!(
-            abort_rx.try_recv(),
-            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
-        ) {
-            println!("[Rust Signaling] 偵測到中止信號或通道已關閉，退出舊信令任務");
-            break;
-        }
-
-        let connect_msg = format!("嘗試連線到信令伺服器: {}", ws_url);
-        println!("[Rust Signaling] {}", connect_msg);
-        let _ = app_handle.emit("rust-signaling-log", format!("[Rust] {}", connect_msg));
-        let _ = app_handle.emit("rust-signaling-status", "connecting");
-
-        let url_parsed = match url::Url::parse(ws_url) {
-            Ok(u) => u,
-            Err(e) => {
-                let err_msg = format!("URL 解析錯誤: {}", e);
-                eprintln!("[Rust Signaling] {}", err_msg);
-                let _ = app_handle.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                continue;
-            }
-        };
-
-        let conn_res = connect_async(url_parsed).await;
-        let (ws_stream, _) = match conn_res {
-            Ok(val) => val,
-            Err(e) => {
-                let err_msg = format!("連線信令伺服器失敗: {}, 5 秒後重試", e);
-                eprintln!("[Rust Signaling] {}", err_msg);
-                let _ = app_handle.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
-                let _ = app_handle.emit("rust-signaling-status", "offline");
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                continue;
-            }
-        };
-
-        let success_msg = "已成功建立 WebSocket 連線，正在登入...";
-        println!("[Rust Signaling] {}", success_msg);
-        let _ = app_handle.emit("rust-signaling-log", format!("[Rust] {}", success_msg));
-
-        let (mut ws_write, mut ws_read) = ws_stream.split();
-
-        let login_msg = serde_json::json!({
-            "type": "login",
-            "id": my_id
-        });
-        if let Err(e) = ws_write.send(WsMessage::Text(login_msg.to_string())).await {
-            let err_msg = format!("發送登入封包失敗: {}", e);
-            eprintln!("[Rust Signaling] {}", err_msg);
-            let _ = app_handle.emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
-            let _ = app_handle.emit("rust-signaling-status", "offline");
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            continue;
-        }
-
-        let _ = app_handle.emit("rust-signaling-status", "online");
-        let login_ok_msg = format!("登入成功，ID: {}", my_id);
-        println!("[Rust Signaling] {}", login_ok_msg);
-        let _ = app_handle.emit("rust-signaling-log", format!("[Rust] {}", login_ok_msg));
-
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<WsMessage>(100);
-
-        // 更新當前活躍的 WebSocket 傳送端
-        *active_ws_sender.lock().await = Some(tx.clone());
-
-        // 建立最後讀取時間指標以防範半關閉假死
-        let last_read_time = Arc::new(tokio::sync::RwLock::new(std::time::Instant::now()));
-        let last_read_time_write = Arc::clone(&last_read_time);
-
-        // 1. 獨立的看門狗任務 (Watchdog) 用於偵測心跳接收超時，即使發送端卡死也絕不受影響
-        let app_handle_timeout = app_handle.clone();
-        let last_read_time_timeout = Arc::clone(&last_read_time);
-        let start_time = std::time::Instant::now();
-        let mut timeout_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
-            loop {
-                interval.tick().await;
-
-                // A. 心跳超時檢測
-                let elapsed = last_read_time_timeout.read().await.elapsed();
-                if elapsed > std::time::Duration::from_secs(35) {
-                    let err_msg = format!(
-                        "心跳接收超時 ({} 秒未收到伺服器訊息)，主動判定斷線",
-                        elapsed.as_secs()
-                    );
-                    eprintln!("[Rust Signaling] {}", err_msg);
-                    let _ = app_handle_timeout
-                        .emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
-                    break;
-                }
-
-                // B. 每 10 分鐘無活動 WebRTC 連線時，自動斷開重新建立信令以刷新負載均衡路由
-                let conn_duration = start_time.elapsed();
-                if conn_duration > std::time::Duration::from_secs(600) {
-                    let app_state = app_handle_timeout.state::<AppState>();
-                    let has_active = app_state
-                        .has_active_webrtc
-                        .load(std::sync::atomic::Ordering::SeqCst);
-                    if !has_active {
-                        let self_healing_msg = format!(
-                            "信令連線已達 {} 秒且無活動控制連線，執行自動重連自癒以更新路由",
-                            conn_duration.as_secs()
-                        );
-                        println!("[Rust Signaling] {}", self_healing_msg);
-                        let _ = app_handle_timeout.emit(
-                            "rust-signaling-log",
-                            format!("[Rust Warn] {}", self_healing_msg),
-                        );
-                        break;
-                    }
-                }
-            }
-        });
-
-        // 2. 寫入任務，只負責發送心跳及轉發，防止與超時檢測相互干擾卡死
-        let mut ws_write_task = tokio::spawn(async move {
-            let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
-            loop {
-                tokio::select! {
-                    _ = heartbeat.tick() => {
-                        let ping_msg = serde_json::json!({ "type": "ping" });
-                        if ws_write.send(WsMessage::Text(ping_msg.to_string())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Some(msg) = rx.recv() => {
-                        if ws_write.send(msg).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-
-        // 3. 讀取任務
-        let app_handle_clone = app_handle.clone();
-        let tx_clone = tx.clone();
-        let mut ws_read_task = tokio::spawn(async move {
-            while let Some(Ok(WsMessage::Text(text))) = ws_read.next().await {
-                // 更新最後讀取時間
-                *last_read_time_write.write().await = std::time::Instant::now();
-
-                if let Ok(incoming) = serde_json::from_str::<IncomingMessage>(&text) {
-                    match incoming {
-                        IncomingMessage::Offer { source, pin, sdp, session_id } => {
-                            let msg = format!("收到來自 {} 的 Offer，進行驗證...", source);
-                            println!("[Rust Signaling] {}", msg);
-                            let _ = app_handle_clone
-                                .emit("rust-signaling-log", format!("[Rust] {}", msg));
-                            let state = app_handle_clone.state::<AppState>();
-
-                            let is_static_valid = match SecureStorage::load_secret(STATIC_PWD_KEY) {
-                                Ok(saved_pwd) => !saved_pwd.is_empty() && saved_pwd == pin,
-                                Err(_) => false,
-                            };
-
-                            if !is_static_valid {
-                                let reject_info =
-                                    format!("拒絕來自 {} 的連線：無人值守密碼驗證失敗", source);
-                                println!("[Rust Signaling] {}", reject_info);
-                                let _ = app_handle_clone.emit(
-                                    "rust-signaling-log",
-                                    format!("[Rust Error] {}", reject_info),
-                                );
-                                let reject_msg = serde_json::json!({
-                                    "type": "error",
-                                    "target": source,
-                                    "message": "Connection rejected: Invalid Password"
-                                });
-                                let _ =
-                                    tx_clone.send(WsMessage::Text(reject_msg.to_string())).await;
-                                continue;
-                            }
-
-                            *state.current_remote_id.write().await = source.clone();
-                            *state.active_session_id.write().await = session_id.clone().unwrap_or_default();
-
-                            // 純 Rust 背景無人值守路徑，沒有 JS/localStorage 可讀取使用者
-                            // 設定的自訂 TURN，只能套用預設 fallback（見 resolve_ice_servers）
-                            match handle_remote_offer_as_host(app_handle_clone.clone(), sdp, None).await {
-                                Ok(answer_sdp) => {
-                                    let ok_msg =
-                                        format!("成功處理 Offer，正在回傳 Answer 至 {}...", source);
-                                    println!("[Rust Signaling] {}", ok_msg);
-                                    let _ = app_handle_clone
-                                        .emit("rust-signaling-log", format!("[Rust] {}", ok_msg));
-                                    let answer_msg = serde_json::json!({
-                                        "type": "answer",
-                                        "target": source,
-                                        "sdp": answer_sdp,
-                                        "sessionId": session_id
-                                    });
-                                    let _ = tx_clone
-                                        .send(WsMessage::Text(answer_msg.to_string()))
-                                        .await;
-                                }
-                                Err(e) => {
-                                    let err_msg = format!("處理 Offer 失敗: {}", e);
-                                    eprintln!("[Rust Signaling] {}", err_msg);
-                                    let _ = app_handle_clone.emit(
-                                        "rust-signaling-log",
-                                        format!("[Rust Error] {}", err_msg),
-                                    );
-                                    let reject_msg = serde_json::json!({
-                                        "type": "error",
-                                        "target": source,
-                                        "message": format!("Connection rejected: {}", e)
-                                    });
-                                    let _ = tx_clone
-                                        .send(WsMessage::Text(reject_msg.to_string()))
-                                        .await;
-                                }
-                            }
-                        }
-                        IncomingMessage::Answer { source, sdp, session_id } => {
-                            let msg = serde_json::json!({
-                                "type": "answer",
-                                "source": source,
-                                "sdp": sdp,
-                                "sessionId": session_id,
-                            });
-                            let _ = app_handle_clone.emit("rust-signaling-message", msg.to_string());
-                        }
-                        IncomingMessage::Ice { source, candidate, session_id } => {
-                            let state = app_handle_clone.state::<AppState>();
-                            if state.active_pc.lock().await.is_none() {
-                                let msg = serde_json::json!({
-                                    "type": "ice",
-                                    "source": source,
-                                    "candidate": candidate,
-                                    "sessionId": session_id,
-                                });
-                                let _ = app_handle_clone.emit("rust-signaling-message", msg.to_string());
-                                continue;
-                            }
-                            if let Some(incoming_session_id) = session_id.as_deref() {
-                                let active_session_id = state.active_session_id.read().await.clone();
-                                if !active_session_id.is_empty() && active_session_id != incoming_session_id {
-                                    println!(
-                                        "[Rust Signaling] 忽略舊 session ICE：incoming={} current={}",
-                                        incoming_session_id, active_session_id
-                                    );
-                                    continue;
-                                }
-                            }
-                            let msg = format!("收到來自 {} 的 ICE Candidate，套用中...", source);
-                            println!("[Rust Signaling] {}", msg);
-                            let _ = app_handle_clone
-                                .emit("rust-signaling-log", format!("[Rust] {}", msg));
-                            if let Err(e) = apply_ice_candidate(&state, &candidate).await {
-                                let err_msg = format!("套用 ICE Candidate 失敗: {}", e);
-                                eprintln!("[Rust Signaling] {}", err_msg);
-                                let _ = app_handle_clone.emit(
-                                    "rust-signaling-log",
-                                    format!("[Rust Error] {}", err_msg),
-                                );
-                            }
-                        }
-                        IncomingMessage::Error { message } => {
-                            let err_msg = format!("收到伺服器錯誤: {}", message);
-                            eprintln!("[Rust Signaling] {}", err_msg);
-                            let _ = app_handle_clone
-                                .emit("rust-signaling-log", format!("[Rust Error] {}", err_msg));
-                            let msg = serde_json::json!({
-                                "type": "error",
-                                "message": message,
-                            });
-                            let _ = app_handle_clone.emit("rust-signaling-message", msg.to_string());
-                            if message.contains("shutting down") {
-                                println!(
-                                    "[Rust Signaling] 偵測到伺服器優雅退出通知，主動斷開以觸發重連"
-                                );
-                                break;
-                            }
-                        }
-                        IncomingMessage::Pong => {
-                            // 收到心跳回覆，只為更新最後讀取時間，無須額外動作
-                        }
-                        IncomingMessage::CustomRequestLogs { source, target } => {
-                            let msg = format!("收到來自 {} 的自訂日誌索取請求", source);
-                            println!("[Rust Signaling] {}", msg);
-                            let _ = app_handle_clone
-                                .emit("rust-signaling-log", format!("[Rust] {}", msg));
-                            // 將請求轉發給前端 JS
-                            let _ = app_handle_clone.emit(
-                                "custom-request-logs-event",
-                                serde_json::json!({
-                                    "source": source,
-                                    "target": target
-                                })
-                                .to_string(),
-                            );
-                        }
-                    }
-                }
-            }
-        });
-
-        // 監聽三個子任務，任何一方結束或拋錯即觸發其餘任務的中斷與斷線重連
-        tokio::select! {
-            _ = &mut ws_write_task => {
-                ws_read_task.abort();
-                timeout_task.abort();
-            }
-            _ = &mut ws_read_task => {
-                ws_write_task.abort();
-                timeout_task.abort();
-            }
-            _ = &mut timeout_task => {
-                ws_write_task.abort();
-                ws_read_task.abort();
-            }
-            _ = &mut abort_rx => {
-                ws_write_task.abort();
-                ws_read_task.abort();
-                timeout_task.abort();
-                println!("[Rust Signaling] 收到中止信號，主動結束連線");
-                break;
-            }
-        }
-
-        // 斷線後，清除當前活躍之 WebSocket 發送端
-        *active_ws_sender.lock().await = None;
-
-        let disconnect_info = "信令連線已斷開，5 秒後重新連線...";
-        println!("[Rust Signaling] {}", disconnect_info);
-        let _ = app_handle.emit(
-            "rust-signaling-log",
-            format!("[Rust Warn] {}", disconnect_info),
-        );
-        let _ = app_handle.emit("rust-signaling-status", "offline");
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    }
-}
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 async fn start_rust_signaling(
-    app_handle: tauri::AppHandle,
+    _app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
     my_id: String,
     pin: String,
 ) -> Result<(), String> {
-    *state.current_pin.write().await = pin;
+    *state.engine.current_pin.write().await = pin;
 
     // 1. 如果有舊的信令任務在跑，先發送 abort 信號將其終止
-    let mut abort_lock = state.signaling_abort.lock().await;
+    let mut abort_lock = state.engine.signaling_abort.lock().await;
     if let Some(abort_tx) = abort_lock.take() {
         let _ = abort_tx.send(());
         // 稍微等待舊連線釋放，防範連接埠或信令狀態衝突
@@ -1817,10 +1530,11 @@ async fn start_rust_signaling(
     *abort_lock = Some(abort_tx);
 
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(100);
-    *state.signaling_tx.lock().await = Some(tx);
+    *state.engine.signaling_tx.lock().await = Some(tx);
 
+    let engine_clone = std::sync::Arc::clone(&state.engine);
     tokio::spawn(async move {
-        start_rust_signaling_task(app_handle, my_id, rx, abort_rx).await;
+        engine_clone.start_signaling_task(my_id, rx, abort_rx).await;
     });
 
     Ok(())
@@ -1830,20 +1544,20 @@ async fn start_rust_signaling(
 #[tauri::command]
 async fn disconnect_active_webrtc_session(state: State<'_, AppState>) -> Result<(), String> {
     state
-        .has_active_webrtc
+        .engine.has_active_webrtc
         .store(false, std::sync::atomic::Ordering::SeqCst);
-    *state.current_remote_id.write().await = String::new();
-    *state.active_session_id.write().await = String::new();
-    *state.active_file_channel.lock().await = None;
-    *state.active_file_control_channel.lock().await = None;
-    state.active_file_data_channels.lock().await.clear();
-    *state.file_receive_state.lock().await = None;
-    state.file_resume_offsets.lock().await.clear();
-    state.file_complete_confirmations.lock().await.clear();
-    state.active_file_send_ids.lock().await.clear();
-    state.file_cancelled_transfers.lock().await.clear();
+    *state.engine.current_remote_id.write().await = String::new();
+    *state.engine.active_session_id.write().await = String::new();
+    *state.engine.active_file_channel.lock().await = None;
+    *state.engine.active_file_control_channel.lock().await = None;
+    state.engine.active_file_data_channels.lock().await.clear();
+    *state.engine.file_receive_state.lock().await = None;
+    state.engine.file_resume_offsets.lock().await.clear();
+    state.engine.file_complete_confirmations.lock().await.clear();
+    state.engine.active_file_send_ids.lock().await.clear();
+    state.engine.file_cancelled_transfers.lock().await.clear();
 
-    let old_pc = state.active_pc.lock().await.take();
+    let old_pc = state.engine.active_pc.lock().await.take();
     if let Some(pc) = old_pc {
         pc.close()
             .await
@@ -1855,7 +1569,7 @@ async fn disconnect_active_webrtc_session(state: State<'_, AppState>) -> Result<
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 async fn update_rust_pin(state: State<'_, AppState>, pin: String) -> Result<(), String> {
-    *state.current_pin.write().await = pin;
+    *state.engine.current_pin.write().await = pin;
     println!("[Rust] PIN 碼已同步更新");
     Ok(())
 }
@@ -1874,8 +1588,8 @@ async fn add_ice_candidate_to_rust(
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 async fn get_connection_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let config = state.connection_manager.get_current_config().await;
-    let metrics = state.connection_manager.get_current_metrics().await;
+    let config = state.engine.connection_manager.get_current_config().await;
+    let metrics = state.engine.connection_manager.get_current_metrics().await;
 
     let color_format_str = match config.color_format {
         syn_core::connection::ColorFormat::Yuv444 => "color_yuv444",
@@ -1985,7 +1699,7 @@ async fn trigger_network_simulation(
         "[DEBUG] 收到網路模擬請求: {} ms, {}%, relay: {}",
         rtt_ms, loss_rate, is_relay
     );
-    let mut metrics = state.connection_manager.get_current_metrics().await;
+    let mut metrics = state.engine.connection_manager.get_current_metrics().await;
 
     metrics.rtt_ms = rtt_ms;
     metrics.packet_loss_rate = loss_rate;
@@ -1995,7 +1709,7 @@ async fn trigger_network_simulation(
         metrics.connection_type = syn_core::connection::ConnectionType::P2PDirect;
     }
 
-    state.connection_manager.update_metrics(metrics).await;
+    state.engine.connection_manager.update_metrics(metrics).await;
     Ok("ok".to_string())
 }
 
@@ -2041,7 +1755,7 @@ async fn send_custom_signaling_message(
     state: State<'_, AppState>,
     message: String,
 ) -> Result<(), String> {
-    let tx_opt = state.signaling_tx.lock().await.clone();
+    let tx_opt = state.engine.signaling_tx.lock().await.clone();
     if let Some(tx) = tx_opt {
         tx.send(message)
             .await
@@ -2115,12 +1829,12 @@ async fn record_file_transfer_control_message(
         Some("resume") => {
             if let Some(id) = value.get("id").and_then(|value| value.as_str()) {
                 let offset = value.get("offset").and_then(|value| value.as_u64()).unwrap_or(0);
-                state.file_resume_offsets.lock().await.insert(id.to_string(), offset);
+                state.engine.file_resume_offsets.lock().await.insert(id.to_string(), offset);
             }
         }
         Some("complete") => {
             if let Some(id) = value.get("id").and_then(|value| value.as_str()) {
-                state.file_complete_confirmations.lock().await.insert(id.to_string());
+                state.engine.file_complete_confirmations.lock().await.insert(id.to_string());
             }
         }
         _ => {}
@@ -2153,12 +1867,12 @@ async fn has_active_file_transfer_channel(state: State<'_, AppState>) -> Result<
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 async fn cancel_active_file_transfer(state: State<'_, AppState>) -> Result<(), String> {
-    let ids: Vec<String> = state.active_file_send_ids.lock().await.iter().cloned().collect();
+    let ids: Vec<String> = state.engine.active_file_send_ids.lock().await.iter().cloned().collect();
     if ids.is_empty() {
         return Ok(());
     }
     {
-        let mut cancelled = state.file_cancelled_transfers.lock().await;
+        let mut cancelled = state.engine.file_cancelled_transfers.lock().await;
         for id in &ids {
             cancelled.insert(id.clone());
         }
@@ -2329,8 +2043,8 @@ async fn active_file_control_channel(
 ) -> Result<Arc<webrtc::data_channel::RTCDataChannel>, String> {
     use webrtc::data_channel::data_channel_state::RTCDataChannelState;
 
-    let split = state.active_file_control_channel.lock().await.clone();
-    let legacy = state.active_file_channel.lock().await.clone();
+    let split = state.engine.active_file_control_channel.lock().await.clone();
+    let legacy = state.engine.active_file_channel.lock().await.clone();
     for candidate in [split, legacy].into_iter().flatten() {
         if candidate.ready_state() == RTCDataChannelState::Open {
             return Ok(candidate);
@@ -2348,7 +2062,7 @@ async fn send_file_chunk_round_robin(
 ) -> Result<(), String> {
     use webrtc::data_channel::data_channel_state::RTCDataChannelState;
 
-    let split_control = state.active_file_control_channel.lock().await.clone();
+    let split_control = state.engine.active_file_control_channel.lock().await.clone();
     if !split_control
         .as_ref()
         .map(|channel| Arc::ptr_eq(channel, control))
@@ -2356,7 +2070,7 @@ async fn send_file_chunk_round_robin(
     {
         return send_file_chunk(control, offset, chunk).await;
     }
-    let data_channels = state.active_file_data_channels.lock().await.clone();
+    let data_channels = state.engine.active_file_data_channels.lock().await.clone();
     let open_channels: Vec<_> = data_channels
         .into_iter()
         .filter(|channel| channel.ready_state() == RTCDataChannelState::Open)
@@ -2393,11 +2107,11 @@ async fn send_file_start(
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 async fn wait_for_resume_offset(state: &State<'_, AppState>, id: &str) -> Result<u64, String> {
     for _ in 0..600 {
-        if state.file_cancelled_transfers.lock().await.contains(id) {
+        if state.engine.file_cancelled_transfers.lock().await.contains(id) {
             unregister_native_file_transfer(state, id).await;
             return Err("file_transfer_cancelled_by_user".to_string());
         }
-        if let Some(offset) = state.file_resume_offsets.lock().await.remove(id) {
+        if let Some(offset) = state.engine.file_resume_offsets.lock().await.remove(id) {
             return Ok(offset);
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -2408,11 +2122,11 @@ async fn wait_for_resume_offset(state: &State<'_, AppState>, id: &str) -> Result
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 async fn wait_for_remote_file_complete(state: &State<'_, AppState>, id: &str) -> Result<(), String> {
     for _ in 0..600 {
-        if state.file_cancelled_transfers.lock().await.contains(id) {
+        if state.engine.file_cancelled_transfers.lock().await.contains(id) {
             unregister_native_file_transfer(state, id).await;
             return Err("file_transfer_cancelled_by_user".to_string());
         }
-        if state.file_complete_confirmations.lock().await.remove(id) {
+        if state.engine.file_complete_confirmations.lock().await.remove(id) {
             return Ok(());
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -2422,14 +2136,14 @@ async fn wait_for_remote_file_complete(state: &State<'_, AppState>, id: &str) ->
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 async fn register_native_file_transfer(state: &State<'_, AppState>, id: &str) {
-    state.file_cancelled_transfers.lock().await.remove(id);
-    state.active_file_send_ids.lock().await.insert(id.to_string());
+    state.engine.file_cancelled_transfers.lock().await.remove(id);
+    state.engine.active_file_send_ids.lock().await.insert(id.to_string());
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 async fn unregister_native_file_transfer(state: &State<'_, AppState>, id: &str) {
-    state.active_file_send_ids.lock().await.remove(id);
-    state.file_cancelled_transfers.lock().await.remove(id);
+    state.engine.active_file_send_ids.lock().await.remove(id);
+    state.engine.file_cancelled_transfers.lock().await.remove(id);
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -2438,7 +2152,7 @@ async fn ensure_native_file_transfer_not_cancelled(
     dc: &Arc<webrtc::data_channel::RTCDataChannel>,
     id: &str,
 ) -> Result<(), String> {
-    if !state.file_cancelled_transfers.lock().await.contains(id) {
+    if !state.engine.file_cancelled_transfers.lock().await.contains(id) {
         return Ok(());
     }
     let _ = dc
@@ -2598,47 +2312,73 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec![])));
     }
 
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        builder = builder.manage(AppState {
+            engine: std::sync::Arc::new(syn_core::engine::CoreEngine::new()),
+        });
+    }
+
     builder
         .plugin(tauri_plugin_shell::init())
-        .manage(AppState {
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            connection_manager,
-
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            active_pc: tokio::sync::Mutex::new(None),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            active_file_channel: tokio::sync::Mutex::new(None),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            active_file_control_channel: tokio::sync::Mutex::new(None),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            active_file_data_channels: tokio::sync::Mutex::new(Vec::new()),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            file_receive_state: tokio::sync::Mutex::new(None),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            file_resume_offsets: tokio::sync::Mutex::new(std::collections::HashMap::new()),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            file_complete_confirmations: tokio::sync::Mutex::new(std::collections::HashSet::new()),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            active_file_send_ids: tokio::sync::Mutex::new(std::collections::HashSet::new()),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            file_cancelled_transfers: tokio::sync::Mutex::new(std::collections::HashSet::new()),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            signaling_tx: tokio::sync::Mutex::new(None),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            current_pin: Arc::new(tokio::sync::RwLock::new(String::new())),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            current_remote_id: Arc::new(tokio::sync::RwLock::new(String::new())),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            active_session_id: Arc::new(tokio::sync::RwLock::new(String::new())),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            signaling_abort: tokio::sync::Mutex::new(None),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            has_active_webrtc: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        })
         .setup(|_app| {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             {
-                // AppState 與初始邏輯已移至啟動階段
+                let app_handle = _app.handle().clone();
+                let state = _app.state::<AppState>();
+                let mut event_rx = state.engine.event_rx.clone();
+
+                tauri::async_runtime::spawn(async move {
+                    while event_rx.changed().await.is_ok() {
+                        let event = event_rx.borrow().clone();
+                        if let Some(event) = event {
+                            match event {
+                                syn_core::engine::EngineEvent::SignalingLog(log) => {
+                                    let _ = app_handle.emit("rust-signaling-log", log);
+                                }
+                                syn_core::engine::EngineEvent::SignalingStatus(status) => {
+                                    let _ = app_handle.emit("rust-signaling-status", status);
+                                }
+                                syn_core::engine::EngineEvent::IncomingOffer(source, _pin, sdp, session_id) => {
+                                    // Forward offer to frontend
+                                    let payload = serde_json::json!({
+                                        "source": source,
+                                        "sdp": sdp,
+                                        "sessionId": session_id
+                                    });
+                                    let _ = app_handle.emit("rust-incoming-offer", payload);
+                                }
+                                syn_core::engine::EngineEvent::IncomingIce(source, candidate, session_id) => {
+                                    let payload = serde_json::json!({
+                                        "source": source,
+                                        "candidate": candidate,
+                                        "sessionId": session_id
+                                    });
+                                    let _ = app_handle.emit("rust-incoming-ice", payload);
+                                }
+                                syn_core::engine::EngineEvent::SignalingConnected => {
+                                    let _ = app_handle.emit("rust-signaling-connected", ());
+                                }
+                                syn_core::engine::EngineEvent::SignalingDisconnected => {
+                                    let _ = app_handle.emit("rust-signaling-disconnected", ());
+                                }
+                                syn_core::engine::EngineEvent::PeerConnected(peer) => {
+                                    let _ = app_handle.emit("rust-peer-connected", peer);
+                                }
+                                syn_core::engine::EngineEvent::PeerDisconnected(peer) => {
+                                    let _ = app_handle.emit("rust-peer-disconnected", peer);
+                                }
+                                syn_core::engine::EngineEvent::VideoStatus(status) => {
+                                    let _ = app_handle.emit("rust-video-status", status);
+                                }
+                                syn_core::engine::EngineEvent::WebRtcStateChange(state) => {
+                                    let _ = app_handle.emit("rust-webrtc-state", state);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                });
             }
             Ok(())
         })
@@ -2650,6 +2390,9 @@ pub fn run() {
             verify_static_password,
             check_has_static_password,
             delete_static_password,
+            install_unattended_service,
+            uninstall_unattended_service,
+            check_service_installed,
             verify_license_key,
             check_license_status,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]

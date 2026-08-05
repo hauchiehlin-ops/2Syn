@@ -7,7 +7,7 @@
   <meta name="description" content="2syn_Duel — Secure WebRTC remote desktop with end-to-end encryption.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>2syn_Duel v6.5.1</title>
+  <title>2syn_Duel v7.1.0</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
@@ -20,11 +20,11 @@
     <!-- 連線工具列（可收合）：把 模式 / 顯示大小 / 登出 整併成單一面板，預設只露出把手 -->
     <div id="session-toolbar" style="display: none; position: absolute; top: max(env(safe-area-inset-top), 50px); right: 16px; z-index: 1100; flex-direction: column; align-items: flex-end; gap: 8px; touch-action: manipulation;">
       <button id="btn-toolbar-toggle" aria-label="Toolbar" style="width: 44px; height: 44px; border-radius: 22px; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.18); color: white; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.35); transition: all 0.2s;">⚙️</button>
-      <button id="btn-file-transfer-direct" class="session-file-direct" type="button" aria-label="Choose local files" title="Choose local files">
-        <span aria-hidden="true">📁</span>
-        <span id="txt-btn-file-transfer-direct">Local Files</span>
-      </button>
       <div id="toolbar-actions" style="display: none; flex-direction: column; align-items: flex-end; gap: 8px;">
+        <button id="btn-file-transfer-direct" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap; display: flex; align-items: center; gap: 6px;" type="button" aria-label="Choose local files" title="Choose local files">
+          <span aria-hidden="true" style="font-size: 14px;">📁</span>
+          <span id="txt-btn-file-transfer-direct">Local Files</span>
+        </button>
         <button id="btn-touch-mode-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">🖱️ Trackpad</button>
         <button id="btn-toggle-keyboard-float" style="background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">⌨️ Keyboard</button>
         <button id="btn-session-disconnect" style="background: rgba(220, 38, 38, 0.45); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(220, 38, 38, 0.6); border-radius: 20px; padding: 7px 14px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap;">🚪 登出</button>
@@ -321,7 +321,7 @@
               <button id="btn-delete-static-pwd" class="btn-secondary" style="padding: 6px 12px; flex-shrink: 0; background: var(--color-danger-bg, rgba(230, 45, 65, 0.1)); color: var(--color-danger, #e62d41); border: 1px solid rgba(230, 45, 65, 0.2); display: none;">Delete</button>
             </div>
           </div>
-          
+          </div>
 
         </div>
 
@@ -662,6 +662,43 @@
         </button>
         <button id="btn-first-run-skip" style="width: 100%; padding: 10px; background: transparent; border: 1px solid rgba(160,180,220,0.2); color: rgba(160,180,220,0.6); border-radius: 10px; font-size: 13px; cursor: pointer; transition: all 0.2s;">
           <span id="txt-first-run-btn-skip">稍後再設定（連線將被拒絕）</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 背景服務安裝引導 Modal（Onboarding Step 2） -->
+  <div id="service-onboard-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 300; background: rgba(0,0,0,0.65); backdrop-filter: blur(8px); justify-content: center; align-items: center; padding: 20px;">
+    <div style="background: var(--glass-bg, rgba(18,24,38,0.98)); border: 1px solid rgba(99,179,237,0.3); border-radius: 20px; padding: 32px 28px; max-width: 480px; width: 100%; box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(99,179,237,0.1); display: flex; flex-direction: column; gap: 20px;">
+      <!-- 進度指示 -->
+      <div style="display: flex; justify-content: center; gap: 6px; align-items: center;">
+        <div style="width: 8px; height: 8px; border-radius: 50%; background: rgba(99,179,237,0.35);"></div>
+        <div style="width: 24px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #3b82f6, #6366f1);"></div>
+      </div>
+      <!-- Header -->
+      <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; text-align: center;">
+        <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #10b981, #3b82f6); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 28px; margin-bottom: 4px;">⚙️</div>
+        <h2 id="txt-service-onboard-title" style="margin: 0; font-size: 20px; font-weight: 700; color: var(--text-main, #f0f4ff); line-height: 1.3;"></h2>
+        <p id="txt-service-onboard-subtitle" style="margin: 0; font-size: 13px; color: rgba(160,180,220,0.8); line-height: 1.5;"></p>
+      </div>
+      <!-- Content -->
+      <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(99,179,237,0.15); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; gap: 12px; align-items: flex-start;">
+          <span style="font-size: 20px; line-height: 1;">🔄</span>
+          <p id="txt-service-onboard-body" style="margin: 0; font-size: 13px; color: var(--text-main, #e2e8f0); line-height: 1.65;"></p>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: flex-start;">
+          <span style="font-size: 20px; line-height: 1;">🔑</span>
+          <p id="txt-service-onboard-tip" style="margin: 0; font-size: 12px; color: rgba(160,180,220,0.75); line-height: 1.6;"></p>
+        </div>
+      </div>
+      <!-- Actions -->
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <button id="btn-service-onboard-install" style="width: 100%; padding: 13px; background: linear-gradient(135deg, #10b981, #3b82f6); border: none; color: white; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s, transform 0.1s; box-shadow: 0 4px 16px rgba(16,185,129,0.35);">
+          <span id="txt-service-onboard-btn-install"></span>
+        </button>
+        <button id="btn-service-onboard-skip" style="width: 100%; padding: 10px; background: transparent; border: 1px solid rgba(160,180,220,0.2); color: rgba(160,180,220,0.6); border-radius: 10px; font-size: 13px; cursor: pointer; transition: all 0.2s;">
+          <span id="txt-service-onboard-btn-skip"></span>
         </button>
       </div>
     </div>

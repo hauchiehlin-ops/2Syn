@@ -437,5 +437,27 @@
   "file_transfer_already_running": "A file transfer is already running.",
   "file_transfer_waiting_network": "Waiting for the transfer buffer to drain...",
   "file_transfer_buffered": "{0} queued for network delivery",
-  "file_transfer_browser_saved_selected": "Saved to the selected location"
+  "file_transfer_browser_saved_selected": "Saved to the selected location",
+
+  "service_title": "Background Service (Unattended Access)",
+  "service_desc": "Install as a system service to allow remote access even when you are logged out.",
+  "service_help": "\"Unattended Access\" installs 2syn as a macOS/Windows system service that starts automatically. Once installed, it runs silently in the background even after you log out or restart the machine — keeping the device online and ready to accept remote connections. Ideal for scenarios where you need to access the machine at any time (e.g. accessing your home PC remotely, remote support).",
+  "service_status_installed": "Installed",
+  "service_status_not_installed": "Not Installed",
+  "service_btn_install": "Install Service",
+  "service_btn_installing": "Installing...",
+  "service_btn_uninstall": "Uninstall",
+  "service_btn_uninstalling": "Uninstalling...",
+  "service_install_failed": "Installation failed: ",
+  "service_uninstall_failed": "Uninstallation failed: ",
+
+  "service_onboard_title": "Setup Step 2: Background Service",
+  "service_onboard_subtitle": "Recommended — Stay accessible even when logged out",
+  "service_onboard_body": "Installing the background service lets 2syn run silently at system startup. Even after you log out or restart, your device will remain online and ready to accept remote connections.",
+  "service_onboard_tip": "Installation requires administrator privileges (uses sudo). Once installed, closing the app window won't interrupt remote access.",
+  "service_onboard_btn_install": "Install Background Service",
+  "service_onboard_btn_installing": "Installing...",
+  "service_onboard_btn_skip": "Skip for now",
+  "service_onboard_success": "Background service installed! Remote devices can now connect even when you're logged out."
 }
+

@@ -459,6 +459,10 @@ let remoteLogsTimeout: ReturnType<typeof setTimeout> | null = null; // 遠端日
 let connectionTimeoutTimer: ReturnType<typeof setTimeout> | null = null; // 連線逾時計時器
 let deferredRtcFailedTimer: ReturnType<typeof setTimeout> | null = null;
 let deferredRtcDisconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let iceRestartAttempted = false;           // 是否已嘗試 ICE Restart（避免重複）
+let iceRestartRecoveryTimer: ReturnType<typeof setTimeout> | null = null; // ICE Restart 後的觀察計時器
+let iceGatheringTimeoutTimer: ReturnType<typeof setTimeout> | null = null; // ICE gathering 超時保護
+let signalingRetryDelaySec = 5;            // JS 信令指數退避秒數
 let activeSyncStatefulLabels: (() => void) | null = null; // 動態語意狀態標籤同步回調
 let dataChannelControl: RTCDataChannel | null = null;
 let dataChannelUnreliable: RTCDataChannel | null = null;
@@ -511,7 +515,20 @@ function getSignalingUrl(): string {
 
 const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-  { urls: ["stun:stun.cloudflare.com:3478"] }
+  { urls: ["stun:stun.cloudflare.com:3478"] },
+  // TURN fallback：openrelay UDP+TCP+TURNS(TLS/443)，可穿透封 UDP 的企業防火牆
+  {
+    urls: [
+      "turn:openrelay.metered.ca:80",
+      "turn:openrelay.metered.ca:80?transport=tcp",
+      "turn:openrelay.metered.ca:443?transport=tcp",
+      "turns:openrelay.metered.ca:443?transport=tcp",
+    ],
+    username: "openrelayproject",
+    credential: "openrelayproject",
+  },
+  // freestun 備援 TURN
+  { urls: ["turn:freestun.net:3479"], username: "free", credential: "free" },
 ];
 
 let ICE_SERVERS: RTCIceServer[] = [...DEFAULT_STUN_SERVERS];
@@ -1181,6 +1198,20 @@ function updateDomTranslations() {
   setTextContent("help-sim-loss", t("help_sim_loss"));
   setTextContent("help-sim-relay", t("help_sim_relay"));
   setTextContent("help-smart-auto", t("help_smart_auto"));
+  // 背景服務區塊翻譯
+  setTextContent("txt-service-title", t("service_title"));
+  setTextContent("txt-service-desc", t("service_desc"));
+  setTextContent("help-service", t("service_help"));
+  // 狀態强衝更新（保持目前建立的狀態不變，只重譯文字）
+  const _serviceBadge = document.getElementById("service-status-badge");
+  if (_serviceBadge) {
+    const isInstalled = _serviceBadge.classList.contains("status-active");
+    _serviceBadge.textContent = isInstalled ? t("service_status_installed") : t("service_status_not_installed");
+  }
+  const _btnInstall = document.getElementById("btn-install-service") as HTMLButtonElement | null;
+  if (_btnInstall && _btnInstall.style.display !== "none") _btnInstall.textContent = t("service_btn_install");
+  const _btnUninstall = document.getElementById("btn-uninstall-service") as HTMLButtonElement | null;
+  if (_btnUninstall && _btnUninstall.style.display !== "none") _btnUninstall.textContent = t("service_btn_uninstall");
   
   // 更新一鍵複製按鈕之 Tooltip 翻譯
   const btnCopyId = document.getElementById("btn-copy-id");
@@ -1296,6 +1327,14 @@ function updateDomTranslations() {
       }
     });
   }
+
+  // 背景服務安裝引導 Modal 翻譯
+  setTextContent("txt-service-onboard-title", t("service_onboard_title"));
+  setTextContent("txt-service-onboard-subtitle", t("service_onboard_subtitle"));
+  setTextContent("txt-service-onboard-body", t("service_onboard_body"));
+  setTextContent("txt-service-onboard-tip", t("service_onboard_tip"));
+  setTextContent("txt-service-onboard-btn-install", t("service_onboard_btn_install"));
+  setTextContent("txt-service-onboard-btn-skip", t("service_onboard_btn_skip"));
 
   // 首次執行提示 Modal 翻譯
   setTextContent("txt-first-run-title", t("first_run_title"));
@@ -1522,6 +1561,82 @@ async function initStaticPassword() {
   }
 }
 
+// 系統服務(Unattended Access)管理邏輯
+async function initServiceManagement() {
+  if (!isDesktopTauri()) return;
+  const btnInstall = document.getElementById("btn-install-service") as HTMLButtonElement | null;
+  const btnUninstall = document.getElementById("btn-uninstall-service") as HTMLButtonElement | null;
+  const statusBadge = document.getElementById("service-status-badge");
+
+  // 初始化按鈕文字
+  if (btnInstall) btnInstall.textContent = t("service_btn_install");
+  if (btnUninstall) btnUninstall.textContent = t("service_btn_uninstall");
+  if (statusBadge) statusBadge.textContent = t("service_status_not_installed");
+
+  // 啟動時向系統底層查詢真實安裝狀態 (檢查 launchd plist / Windows Service)
+  try {
+    const isInstalled = await invoke<boolean>("check_service_installed");
+    if (statusBadge) {
+      statusBadge.textContent = isInstalled ? t("service_status_installed") : t("service_status_not_installed");
+      statusBadge.className = isInstalled ? "status-badge status-active" : "status-badge status-inactive";
+    }
+    if (isInstalled) {
+      if (btnInstall) btnInstall.style.display = "none";
+      if (btnUninstall) btnUninstall.style.display = "block";
+    } else {
+      if (btnInstall) btnInstall.style.display = "block";
+      if (btnUninstall) btnUninstall.style.display = "none";
+    }
+  } catch (err) {
+    console.warn("[Service] 無法查詢背景服務狀態:", err);
+  }
+
+  if (btnInstall) {
+    btnInstall.addEventListener("click", async () => {
+      try {
+        btnInstall.textContent = t("service_btn_installing");
+        const res = await invoke<string>("install_unattended_service");
+        if (statusBadge) {
+          statusBadge.textContent = t("service_status_installed");
+          statusBadge.className = "status-badge status-active";
+        }
+        btnInstall.style.display = "none";
+        if (btnUninstall) {
+          btnUninstall.textContent = t("service_btn_uninstall");
+          btnUninstall.style.display = "block";
+        }
+        alert(res);
+      } catch (e) {
+        alert(t("service_install_failed") + e);
+        btnInstall.textContent = t("service_btn_install");
+      }
+    });
+  }
+
+  if (btnUninstall) {
+    btnUninstall.addEventListener("click", async () => {
+      try {
+        btnUninstall.textContent = t("service_btn_uninstalling");
+        const res = await invoke<string>("uninstall_unattended_service");
+        if (statusBadge) {
+          statusBadge.textContent = t("service_status_not_installed");
+          statusBadge.className = "status-badge status-inactive";
+        }
+        btnUninstall.style.display = "none";
+        if (btnInstall) {
+          btnInstall.style.display = "block";
+          btnInstall.textContent = t("service_btn_install");
+        }
+        alert(res);
+      } catch (e) {
+        alert(t("service_uninstall_failed") + e);
+        btnUninstall.textContent = t("service_btn_uninstall");
+      }
+    });
+  }
+}
+
+
 // =========================================================================
 // 剪貼簿雙向同步
 // =========================================================================
@@ -1704,6 +1819,9 @@ async function initFirstRunPrompt() {
         pwdSection.scrollIntoView({ behavior: "smooth", block: "center" });
         setTimeout(() => pwdSection.focus(), 400);
       }
+
+      // 密碼設定完後，延遲顯示背景服務安裝引導
+      setTimeout(() => showServiceOnboardModal(), 800);
     });
   }
 
@@ -1712,8 +1830,104 @@ async function initFirstRunPrompt() {
   if (btnSkip) {
     btnSkip.addEventListener("click", () => {
       modal.style.display = "none";
+      // 關閉密碼 Modal 後，延遲顯示背景服務安裝引導
+      setTimeout(() => showServiceOnboardModal(), 600);
     });
   }
+}
+
+// =========================================================================
+// 背景服務安裝引導 Modal (Onboarding Step 2)
+// =========================================================================
+
+/** 顯示背景服務安裝引導 Modal */
+function showServiceOnboardModal() {
+  if (!isDesktopTauri()) return;
+
+  // 如果已安裝過服務，不再顯示
+  const alreadyInstalled = localStorage.getItem("2syn_service_onboarded");
+  if (alreadyInstalled === "1") return;
+
+  const modal = document.getElementById("service-onboard-modal");
+  if (!modal) return;
+
+  // 刷新翻譯，確保語系正確
+  setTextContent("txt-service-onboard-title", t("service_onboard_title"));
+  setTextContent("txt-service-onboard-subtitle", t("service_onboard_subtitle"));
+  setTextContent("txt-service-onboard-body", t("service_onboard_body"));
+  setTextContent("txt-service-onboard-tip", t("service_onboard_tip"));
+  setTextContent("txt-service-onboard-btn-install", t("service_onboard_btn_install"));
+  setTextContent("txt-service-onboard-btn-skip", t("service_onboard_btn_skip"));
+
+  modal.style.display = "flex";
+
+  const btnInstall = document.getElementById("btn-service-onboard-install");
+  const btnSkip = document.getElementById("btn-service-onboard-skip");
+  const btnInstallLabel = document.getElementById("txt-service-onboard-btn-install");
+
+  if (btnInstall && !btnInstall.dataset.bound) {
+    btnInstall.dataset.bound = "1";
+    btnInstall.addEventListener("click", async () => {
+      if (btnInstallLabel) btnInstallLabel.textContent = t("service_onboard_btn_installing");
+      (btnInstall as HTMLButtonElement).disabled = true;
+      try {
+        await invoke<string>("install_unattended_service");
+        localStorage.setItem("2syn_service_onboarded", "1");
+        modal.style.display = "none";
+        // 同步更新正常區塊的安裝後 UI 狀態
+        const statusBadge = document.getElementById("service-status-badge");
+        if (statusBadge) {
+          statusBadge.textContent = t("service_status_installed");
+          statusBadge.className = "status-badge status-active";
+        }
+        const mainBtnInstall = document.getElementById("btn-install-service") as HTMLButtonElement | null;
+        const mainBtnUninstall = document.getElementById("btn-uninstall-service") as HTMLButtonElement | null;
+        if (mainBtnInstall) mainBtnInstall.style.display = "none";
+        if (mainBtnUninstall) {
+          mainBtnUninstall.textContent = t("service_btn_uninstall");
+          mainBtnUninstall.style.display = "block";
+        }
+        alert(t("service_onboard_success"));
+      } catch (e) {
+        alert(t("service_install_failed") + e);
+        if (btnInstallLabel) btnInstallLabel.textContent = t("service_onboard_btn_install");
+        (btnInstall as HTMLButtonElement).disabled = false;
+      }
+    });
+  }
+
+  if (btnSkip && !btnSkip.dataset.bound) {
+    btnSkip.dataset.bound = "1";
+    btnSkip.addEventListener("click", () => {
+      modal.style.display = "none";
+      // 不標記為完成，下次再安裝一次不再顯示（使用不同 key 可讓使用者很容易從設定頁手動安裝）
+    });
+  }
+}
+
+/** 初始化引導：查詢系統真實狀態，若已安裝則永不彈出 */
+async function initServiceOnboardModal() {
+  if (!isDesktopTauri()) return;
+
+  // 1. 直接向系統底層檢查是否已安裝過服務 (檢查 launchd plist 或 sc query)
+  try {
+    const isInstalled = await invoke<boolean>("check_service_installed");
+    if (isInstalled) {
+      localStorage.setItem("2syn_service_onboarded", "1");
+      return;
+    }
+  } catch (err) {
+    console.warn("[Service] 檢查服務狀態失敗:", err);
+  }
+
+  // 2. 若使用者之前已關閉或略過
+  const alreadyShown = localStorage.getItem("2syn_service_onboarded");
+  if (alreadyShown === "1") return;
+
+  // 延遲 1.5 秒後再顯示，避免與密碼 Modal 同時出現
+  setTimeout(() => {
+    showServiceOnboardModal();
+  }, 1500);
 }
 
 // =========================================================================
@@ -1895,7 +2109,9 @@ function initDeviceBook() {
       const a = document.createElement("a");
       a.href = url;
       a.download = `2syn_address_book_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     });
   }
@@ -2114,6 +2330,7 @@ function initSignalingClient() {
   signalingWs.onopen = () => {
     console.log(t("log_sig_connected_logging_in"));
     signalingWs!.send(JSON.stringify({ type: "login", id: myId }));
+    signalingRetryDelaySec = 5; // 連線成功，重置指數退避
     
     let lastHeartbeatTime = Date.now();
     if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -2141,7 +2358,7 @@ function initSignalingClient() {
   };
 
   signalingWs.onclose = function(this: WebSocket) {
-    console.warn("[Signaling] WebSocket 已斷線，5 秒後重新嘗試...");
+    console.warn(`[Signaling] WebSocket 已斷線，${signalingRetryDelaySec}秒後重新嘗試...`);
     if (signalingWs === this) {
       signalingWs = null;
       if (heartbeatTimer) {
@@ -2149,10 +2366,12 @@ function initSignalingClient() {
         heartbeatTimer = null;
       }
       if (!signalingReconnectTimer) {
+        const delay = signalingRetryDelaySec * 1000;
+        signalingRetryDelaySec = Math.min(signalingRetryDelaySec * 2, 60); // 指數退避，最長 60 秒
         signalingReconnectTimer = setTimeout(() => {
           signalingReconnectTimer = null;
           initSignalingClient();
-        }, 5000);
+        }, delay);
       }
     }
   };
@@ -2252,7 +2471,26 @@ function createPeerConnection(remoteId: string, sessionId = currentCallSessionId
     console.log(`[WebRTC] Connection State: ${pc.connectionState}`);
   };
   pc.onicegatheringstatechange = () => {
-    console.log(`[WebRTC] ICE Gathering State: ${pc.iceGatheringState}`);
+    const gs = pc.iceGatheringState;
+    console.log(`[WebRTC] ICE Gathering State: ${gs}`);
+    if (gs === "gathering") {
+      // 4 秒後若收集仍未完成，強制送出 end-of-candidates，讓雙方提前以現有候選決策
+      if (iceGatheringTimeoutTimer) clearTimeout(iceGatheringTimeoutTimer);
+      iceGatheringTimeoutTimer = setTimeout(() => {
+        if (pc.iceGatheringState !== "complete" && peerConnection === pc) {
+          console.warn("[WebRTC] ICE gathering timeout (4s), forcing end-of-candidates");
+          // 送空 candidate 通知對端收集已完成
+          void sendSignalingMessage({
+            type: "ice",
+            target: currentRemoteId!,
+            candidate: JSON.stringify(null),
+            sessionId: (pc as any).__synSessionId,
+          }).catch(() => {});
+        }
+      }, 4000);
+    } else if (gs === "complete") {
+      if (iceGatheringTimeoutTimer) { clearTimeout(iceGatheringTimeoutTimer); iceGatheringTimeoutTimer = null; }
+    }
   };
   pc.onsignalingstatechange = () => {
     console.log(`[WebRTC] Signaling State: ${pc.signalingState}`);
@@ -3159,6 +3397,35 @@ function updateConnectionStatusUI(state: string) {
       }, 180000);
       return;
     }
+    // ICE Restart 自動恢復：先嘗試 restartIce()，10 秒後才顯示錯誤
+    // 適用於 Wi-Fi 切換 4G、路由器重啟等短暫路由中斷的情境
+    if (peerConnection && !iceRestartAttempted) {
+      iceRestartAttempted = true;
+      console.warn("[WebRTC] ICE failed, attempting ICE Restart...");
+      peerConnection.restartIce();
+      if (iceRestartRecoveryTimer) clearTimeout(iceRestartRecoveryTimer);
+      iceRestartRecoveryTimer = setTimeout(() => {
+        iceRestartRecoveryTimer = null;
+        iceRestartAttempted = false;
+        const s = peerConnection?.connectionState;
+        const ice = peerConnection?.iceConnectionState;
+        if (s === "failed" || s === "disconnected" || ice === "failed" || !peerConnection) {
+          console.warn("[WebRTC] ICE Restart failed after 10s, showing error.");
+          if (deferredRtcFailedTimer) clearTimeout(deferredRtcFailedTimer);
+          alert(t("err_rtc_failed"));
+          const fixBtn = document.getElementById("btn-fix-network");
+          if (fixBtn && fixBtn.style.display !== "none") {
+            fixBtn.classList.add("pulse-highlight");
+            setTimeout(() => fixBtn.classList.remove("pulse-highlight"), 5000);
+          }
+          resetConnectionUI();
+        } else {
+          console.log("[WebRTC] ICE Restart succeeded, connection restored.");
+        }
+      }, 10_000);
+      return;
+    }
+    iceRestartAttempted = false;
     if (deferredRtcFailedTimer) {
       clearTimeout(deferredRtcFailedTimer);
       deferredRtcFailedTimer = null;
@@ -6546,6 +6813,7 @@ async function initializeApp() {
   initNetworkSimulator();
   initSignalingReconnect();
   initStaticPassword();
+  initServiceManagement();
   initPanelToggle();
   initOfflineSdpMode();
   initSystemDiagnostic();
@@ -6557,7 +6825,8 @@ async function initializeApp() {
   initTailscaleGuide();
   initPinToggle();
   initFirstRunPrompt();
-  
+  initServiceOnboardModal(); // Onboarding Step 2：背景服務安裝引導
+
   // 啟動狀態輪詢
   startStatusPolling();
 
