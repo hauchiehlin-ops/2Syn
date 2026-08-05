@@ -2092,6 +2092,22 @@ function renderDeviceBook() {
   if (icon) icon.style.transform = isOpen ? "" : "rotate(180deg)";
 };
 
+(window as any).toggleSystemLogs = () => {
+  const content = document.getElementById("logs-content-wrapper");
+  const icon = document.getElementById("logs-toggle-icon");
+  const clearBtn = document.getElementById("btn-clear-logs");
+  if (!content) return;
+  const isOpen = content.style.display !== "none";
+  content.style.display = isOpen ? "none" : "flex";
+  if (icon) icon.style.transform = isOpen ? "" : "rotate(180deg)";
+  if (clearBtn) clearBtn.style.display = isOpen ? "none" : "inline-block";
+};
+
+(window as any).clearSystemLogs = () => {
+  const overlay = document.getElementById("debug-overlay");
+  if (overlay) overlay.innerHTML = "";
+};
+
 function initDeviceBook() {
   renderDeviceBook();
 

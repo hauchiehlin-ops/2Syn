@@ -396,10 +396,11 @@ html.tauri-desktop.os-windows .orb {
   -webkit-overflow-scrolling: touch; /* iOS 順暢捲動 */
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 860px) {
   .main-content {
-    flex-direction: row; /* 可以保持 row，因為右側面板是 absolute */
-    justify-content: center; /* 讓左側控制面板置中 */
+    flex-direction: row;
+    justify-content: center;
+    align-items: stretch;
     padding: var(--space-lg);
     gap: var(--space-lg);
     overflow: hidden; 
@@ -466,9 +467,11 @@ html.tauri-desktop.os-windows .orb {
   gap: var(--space-sm);
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 860px) {
   .control-panel {
-    flex: none;
+    flex: 1.1;
+    min-width: 320px;
+    max-width: 520px;
     padding-right: 6px;
     padding-bottom: var(--space-md);
     gap: var(--space-md);
@@ -696,11 +699,13 @@ html.tauri-desktop.os-windows .orb {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+  flex: 1;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 860px) {
   .monitor-panel {
-    flex: 0.9;
+    flex: 1;
+    min-width: 320px;
     overflow-y: auto;
     padding-right: 6px;
     padding-bottom: var(--space-md);
@@ -1051,9 +1056,9 @@ input:checked + .slider:before {
 }
 
 /* =========================================================================
-   平板端特化（Tablet Specific，600px ~ 1023px）
+   平板端特化（Tablet Specific，600px ~ 859px）
    ========================================================================= */
-@media (min-width: 600px) and (max-width: 1023px) {
+@media (min-width: 600px) and (max-width: 859px) {
   .glass-container {
     width: 100%;
     max-width: 100%;
@@ -1074,11 +1079,14 @@ input:checked + .slider:before {
   }
 
   .control-panel {
-    width: 100%;
-    max-width: 800px;
-    min-width: 320px;
-    flex: 1.5;
-    flex-shrink: 1;
+    flex: 1.1;
+    min-width: 340px;
+    max-width: 540px;
+  }
+
+  .monitor-panel {
+    flex: 1;
+    min-width: 340px;
   }
 
   /* 桌面端恢復原本行高 */
