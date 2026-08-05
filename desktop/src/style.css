@@ -396,15 +396,24 @@ html.tauri-desktop.os-windows .orb {
   -webkit-overflow-scrolling: touch; /* iOS 順暢捲動 */
 }
 
-@media (min-width: 860px) {
+@media (min-width: 768px), (min-width: 600px) and (orientation: landscape) {
   .main-content {
     flex-direction: row;
     justify-content: center;
     align-items: stretch;
-    padding: var(--space-lg);
+    padding: var(--space-md) var(--space-lg);
     gap: var(--space-lg);
     overflow: hidden; 
   }
+}
+
+html.tauri-desktop .main-content {
+  flex-direction: row;
+  justify-content: center;
+  align-items: stretch;
+  padding: var(--space-md) var(--space-lg);
+  gap: var(--space-lg);
+  overflow: hidden;
 }
 
 /* =========================================================================
@@ -415,6 +424,20 @@ html.tauri-desktop.os-windows .orb {
   flex-direction: column;
   gap: var(--space-md);
   flex: 1;
+}
+
+@media (min-width: 768px), (min-width: 600px) and (orientation: landscape) {
+  .monitor-panel {
+    overflow-y: auto;
+    padding-right: 4px;
+    padding-bottom: var(--space-md);
+  }
+}
+
+html.tauri-desktop .monitor-panel {
+  overflow-y: auto;
+  padding-right: 4px;
+  padding-bottom: var(--space-md);
 }
 
 @keyframes slideInRight {
@@ -467,7 +490,7 @@ html.tauri-desktop.os-windows .orb {
   gap: var(--space-sm);
 }
 
-@media (min-width: 860px) {
+@media (min-width: 768px), (min-width: 600px) and (orientation: landscape) {
   .control-panel {
     flex: 1.1;
     min-width: 320px;
@@ -477,6 +500,16 @@ html.tauri-desktop.os-windows .orb {
     gap: var(--space-md);
     overflow-y: auto;
   }
+}
+
+html.tauri-desktop .control-panel {
+  flex: 1.1;
+  min-width: 320px;
+  max-width: 520px;
+  padding-right: 6px;
+  padding-bottom: var(--space-md);
+  gap: var(--space-md);
+  overflow-y: auto;
 }
 
 .control-panel h2 {
@@ -1056,9 +1089,9 @@ input:checked + .slider:before {
 }
 
 /* =========================================================================
-   平板端特化（Tablet Specific，600px ~ 859px）
+   平板直向端特化（Tablet Portrait Specific，600px ~ 767px）
    ========================================================================= */
-@media (min-width: 600px) and (max-width: 859px) {
+@media (min-width: 600px) and (max-width: 767px) {
   .glass-container {
     width: 100%;
     max-width: 100%;

@@ -3071,7 +3071,11 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
   try {
     // 轉交給 Rust 後端處理 WebRTC (方案 C: 啟動 Rust-native WebRTC 與硬體螢幕擷取)
     console.log("[WebRTC] 交由 Rust 處理遠端 Offer...");
-    const answerSdp: string = await invoke("handle_remote_offer_as_host", { offerSdp: sdpString, turnServers: getValidatedCustomTurnServers() });
+    const answerSdp: string = await invoke("handle_remote_offer_as_host", {
+      offerSdp: sdpString,
+      turnServers: getValidatedCustomTurnServers(),
+      remoteId: sourceId,
+    });
 
     // 回傳 Rust 產生的 Answer 給發起方
     try {
@@ -6922,9 +6926,10 @@ async function initializeApp() {
 
     // 桌面端只讓 Rust WebSocket 登入同一個本機 ID；當桌面端扮演主控端時，
     // Rust 收到 answer/ice/error 後再橋接回 JS WebRTC，避免雙 WebSocket 搶註冊。
-    listen<string>("rust-signaling-message", async (event) => {
+    listen<any>("rust-signaling-message", async (event) => {
       try {
-        await handleSignalingMessage(JSON.parse(event.payload));
+        const payload = typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload;
+        await handleSignalingMessage(payload);
       } catch (err) {
         console.error("[Signaling] 處理 Rust bridge 訊息失敗:", err);
       }

@@ -776,8 +776,15 @@ async fn handle_remote_offer_as_host(
     app_handle: tauri::AppHandle,
     offer_sdp: String,
     turn_servers: Option<Vec<TurnServerConfig>>,
+    remote_id: Option<String>,
 ) -> Result<String, String> {
     use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+
+    if let Some(ref rid) = remote_id {
+        use tauri::Manager;
+        let app_state = app_handle.state::<AppState>();
+        *app_state.engine.current_remote_id.write().await = rid.clone();
+    }
 
     let session = syn_core::connection::WebRtcSession::create_session(resolve_ice_servers(turn_servers))
         .await
@@ -2339,22 +2346,48 @@ pub fn run() {
                                 syn_core::engine::EngineEvent::SignalingStatus(status) => {
                                     let _ = app_handle.emit("rust-signaling-status", status);
                                 }
-                                syn_core::engine::EngineEvent::IncomingOffer(source, _pin, sdp, session_id) => {
-                                    // Forward offer to frontend
+                                syn_core::engine::EngineEvent::IncomingOffer(source, pin, sdp, session_id) => {
                                     let payload = serde_json::json!({
+                                        "type": "offer",
+                                        "source": source,
+                                        "pin": pin,
+                                        "sdp": sdp,
+                                        "sessionId": session_id
+                                    });
+                                    let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                                }
+                                syn_core::engine::EngineEvent::IncomingAnswer(source, sdp, session_id) => {
+                                    let payload = serde_json::json!({
+                                        "type": "answer",
                                         "source": source,
                                         "sdp": sdp,
                                         "sessionId": session_id
                                     });
-                                    let _ = app_handle.emit("rust-incoming-offer", payload);
+                                    let _ = app_handle.emit("rust-signaling-message", payload.to_string());
                                 }
                                 syn_core::engine::EngineEvent::IncomingIce(source, candidate, session_id) => {
                                     let payload = serde_json::json!({
+                                        "type": "ice",
                                         "source": source,
                                         "candidate": candidate,
                                         "sessionId": session_id
                                     });
-                                    let _ = app_handle.emit("rust-incoming-ice", payload);
+                                    let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                                }
+                                syn_core::engine::EngineEvent::SignalingError(message) => {
+                                    let payload = serde_json::json!({
+                                        "type": "error",
+                                        "message": message
+                                    });
+                                    let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                                }
+                                syn_core::engine::EngineEvent::CustomRequestLogs { source, target } => {
+                                    let payload = serde_json::json!({
+                                        "type": "custom_request_logs",
+                                        "source": source,
+                                        "target": target
+                                    });
+                                    let _ = app_handle.emit("rust-signaling-message", payload.to_string());
                                 }
                                 syn_core::engine::EngineEvent::SignalingConnected => {
                                     let _ = app_handle.emit("rust-signaling-connected", ());

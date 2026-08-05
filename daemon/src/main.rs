@@ -140,6 +140,7 @@ async fn run_worker(my_id: Option<String>, pin: Option<String>) -> Result<(), Bo
                             let input_hashed = syn_core::system_config::SystemConfig::hash_password(&offer_pin);
                             if input_hashed == hashed_pwd {
                                 info!("PIN verified for {}", source);
+                                *engine.current_remote_id.write().await = source.clone();
                                 match engine.setup_host_session(sdp.clone(), None).await {
                                     Ok(answer_sdp) => {
                                         info!("Sending Answer to {}", source);

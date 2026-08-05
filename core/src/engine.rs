@@ -27,6 +27,8 @@ pub enum EngineEvent {
     WebRtcStateChange(String),
     MonitorList(String),
     VideoStatus(String),
+    SignalingError(String),
+    CustomRequestLogs { source: String, target: String },
 }
 
 /// CoreEngine encapsulates the entire connection, WebRTC, and signaling state.

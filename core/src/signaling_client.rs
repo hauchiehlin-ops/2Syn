@@ -145,8 +145,11 @@ impl CoreEngine {
                                         }
                                         IncomingMessage::Error { message } => {
                                             engine_inner.emit(EngineEvent::SignalingLog(format!("[Rust Signaling Server Error] {}", message)));
+                                            engine_inner.emit(EngineEvent::SignalingError(message));
                                         }
-                                        IncomingMessage::CustomRequestLogs { .. } => {}
+                                        IncomingMessage::CustomRequestLogs { source, target } => {
+                                            engine_inner.emit(EngineEvent::CustomRequestLogs { source, target });
+                                        }
                                         IncomingMessage::Pong => {}
                                     }
                                 }
