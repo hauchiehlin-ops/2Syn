@@ -126,57 +126,54 @@ async fn run_worker(my_id: Option<String>, pin: Option<String>) -> Result<(), Bo
     let engine_clone = std::sync::Arc::clone(&engine);
     
     // Listen to Engine Events
-    let mut event_rx = engine.event_rx.clone();
+    let mut event_rx = engine.subscribe_events();
     tokio::spawn(async move {
-        while event_rx.changed().await.is_ok() {
-            let event = event_rx.borrow().clone();
-            if let Some(event) = event {
-                match event {
-                    syn_core::engine::EngineEvent::IncomingOffer(source, offer_pin, sdp, session_id) => {
-                        info!("Received Incoming Offer from {}", source);
-                        
-                        let config = syn_core::system_config::SystemConfig::read_config();
-                        if let Some(hashed_pwd) = config.hashed_password {
-                            let input_hashed = syn_core::system_config::SystemConfig::hash_password(&offer_pin);
-                            if input_hashed == hashed_pwd {
-                                info!("PIN verified for {}", source);
-                                *engine.current_remote_id.write().await = source.clone();
-                                match engine.setup_host_session(sdp.clone(), None).await {
-                                    Ok(answer_sdp) => {
-                                        info!("Sending Answer to {}", source);
-                                        let tx_lock = engine.signaling_tx.lock().await;
-                                        if let Some(tx) = tx_lock.as_ref() {
-                                            let msg = serde_json::json!({
-                                                "type": "answer",
-                                                "target": source,
-                                                "sdp": answer_sdp,
-                                                "sessionId": session_id
-                                            });
-                                            let _ = tx.send(msg.to_string()).await;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to setup host session: {}", e);
+        while let Ok(event) = event_rx.recv().await {
+            match event {
+                syn_core::engine::EngineEvent::IncomingOffer(source, offer_pin, sdp, session_id) => {
+                    info!("Received Incoming Offer from {}", source);
+                    
+                    let config = syn_core::system_config::SystemConfig::read_config();
+                    if let Some(hashed_pwd) = config.hashed_password {
+                        let input_hashed = syn_core::system_config::SystemConfig::hash_password(&offer_pin);
+                        if input_hashed == hashed_pwd {
+                            info!("PIN verified for {}", source);
+                            *engine.current_remote_id.write().await = source.clone();
+                            match engine.setup_host_session(sdp.clone(), None).await {
+                                Ok(answer_sdp) => {
+                                    info!("Sending Answer to {}", source);
+                                    let tx_lock = engine.signaling_tx.lock().await;
+                                    if let Some(tx) = tx_lock.as_ref() {
+                                        let msg = serde_json::json!({
+                                            "type": "answer",
+                                            "target": source,
+                                            "sdp": answer_sdp,
+                                            "sessionId": session_id
+                                        });
+                                        let _ = tx.send(msg.to_string()).await;
                                     }
                                 }
-                            } else {
-                                error!("Invalid PIN provided by {}", source);
+                                Err(e) => {
+                                    error!("Failed to setup host session: {}", e);
+                                }
                             }
                         } else {
-                            error!("No password configured. Rejecting offer from {}", source);
+                            error!("Invalid PIN provided by {}", source);
                         }
+                    } else {
+                        error!("No password configured. Rejecting offer from {}", source);
                     }
-                    syn_core::engine::EngineEvent::IncomingIce(source, candidate, _session_id) => {
-                        info!("Received ICE candidate from {}", source);
-                        if let Err(e) = engine.add_ice_candidate(candidate.clone()).await {
-                            error!("Failed to add ICE candidate: {}", e);
-                        }
-                    }
-                    syn_core::engine::EngineEvent::SignalingLog(log) => {
-                        info!("Signaling Log: {}", log);
-                    }
-                    _ => {}
                 }
+                syn_core::engine::EngineEvent::IncomingIce(source, candidate, _session_id) => {
+                    info!("Received ICE candidate from {}", source);
+                    if let Err(e) = engine.add_ice_candidate(candidate.clone()).await {
+                        error!("Failed to add ICE candidate: {}", e);
+                    }
+                }
+                syn_core::engine::EngineEvent::SignalingLog(log) => {
+                    info!("Signaling Log: {}", log);
+                }
+                _ => {}
             }
         }
     });

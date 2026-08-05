@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, RwLock, watch};
+use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use crate::connection::ConnectionManager;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -85,8 +85,7 @@ pub struct CoreEngine {
     pub has_active_webrtc: Arc<std::sync::atomic::AtomicBool>,
 
     /// Event emitter used to push engine state changes out to the host application (Tauri/Daemon)
-    pub event_tx: watch::Sender<Option<EngineEvent>>,
-    pub event_rx: watch::Receiver<Option<EngineEvent>>,
+    pub event_tx: broadcast::Sender<EngineEvent>,
 }
 
 impl Default for CoreEngine {
@@ -97,7 +96,7 @@ impl Default for CoreEngine {
 
 impl CoreEngine {
     pub fn new() -> Self {
-        let (event_tx, event_rx) = watch::channel(None);
+        let (event_tx, _) = broadcast::channel(512);
         
         Self {
             connection_manager: Arc::new(ConnectionManager::new()),
@@ -151,13 +150,16 @@ impl CoreEngine {
             has_active_webrtc: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             
             event_tx,
-            event_rx,
         }
     }
 
     /// Helper to emit an event
     pub fn emit(&self, event: EngineEvent) {
-        let _ = self.event_tx.send(Some(event));
+        let _ = self.event_tx.send(event);
+    }
+
+    pub fn subscribe_events(&self) -> broadcast::Receiver<EngineEvent> {
+        self.event_tx.subscribe()
     }
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]

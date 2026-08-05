@@ -2333,82 +2333,79 @@ pub fn run() {
             {
                 let app_handle = _app.handle().clone();
                 let state = _app.state::<AppState>();
-                let mut event_rx = state.engine.event_rx.clone();
+                let mut event_rx = state.engine.subscribe_events();
 
                 tauri::async_runtime::spawn(async move {
-                    while event_rx.changed().await.is_ok() {
-                        let event = event_rx.borrow().clone();
-                        if let Some(event) = event {
-                            match event {
-                                syn_core::engine::EngineEvent::SignalingLog(log) => {
-                                    let _ = app_handle.emit("rust-signaling-log", log);
-                                }
-                                syn_core::engine::EngineEvent::SignalingStatus(status) => {
-                                    let _ = app_handle.emit("rust-signaling-status", status);
-                                }
-                                syn_core::engine::EngineEvent::IncomingOffer(source, pin, sdp, session_id) => {
-                                    let payload = serde_json::json!({
-                                        "type": "offer",
-                                        "source": source,
-                                        "pin": pin,
-                                        "sdp": sdp,
-                                        "sessionId": session_id
-                                    });
-                                    let _ = app_handle.emit("rust-signaling-message", payload.to_string());
-                                }
-                                syn_core::engine::EngineEvent::IncomingAnswer(source, sdp, session_id) => {
-                                    let payload = serde_json::json!({
-                                        "type": "answer",
-                                        "source": source,
-                                        "sdp": sdp,
-                                        "sessionId": session_id
-                                    });
-                                    let _ = app_handle.emit("rust-signaling-message", payload.to_string());
-                                }
-                                syn_core::engine::EngineEvent::IncomingIce(source, candidate, session_id) => {
-                                    let payload = serde_json::json!({
-                                        "type": "ice",
-                                        "source": source,
-                                        "candidate": candidate,
-                                        "sessionId": session_id
-                                    });
-                                    let _ = app_handle.emit("rust-signaling-message", payload.to_string());
-                                }
-                                syn_core::engine::EngineEvent::SignalingError(message) => {
-                                    let payload = serde_json::json!({
-                                        "type": "error",
-                                        "message": message
-                                    });
-                                    let _ = app_handle.emit("rust-signaling-message", payload.to_string());
-                                }
-                                syn_core::engine::EngineEvent::CustomRequestLogs { source, target } => {
-                                    let payload = serde_json::json!({
-                                        "type": "custom_request_logs",
-                                        "source": source,
-                                        "target": target
-                                    });
-                                    let _ = app_handle.emit("rust-signaling-message", payload.to_string());
-                                }
-                                syn_core::engine::EngineEvent::SignalingConnected => {
-                                    let _ = app_handle.emit("rust-signaling-connected", ());
-                                }
-                                syn_core::engine::EngineEvent::SignalingDisconnected => {
-                                    let _ = app_handle.emit("rust-signaling-disconnected", ());
-                                }
-                                syn_core::engine::EngineEvent::PeerConnected(peer) => {
-                                    let _ = app_handle.emit("rust-peer-connected", peer);
-                                }
-                                syn_core::engine::EngineEvent::PeerDisconnected(peer) => {
-                                    let _ = app_handle.emit("rust-peer-disconnected", peer);
-                                }
-                                syn_core::engine::EngineEvent::VideoStatus(status) => {
-                                    let _ = app_handle.emit("rust-video-status", status);
-                                }
-                                syn_core::engine::EngineEvent::WebRtcStateChange(state) => {
-                                    let _ = app_handle.emit("rust-webrtc-state", state);
-                                }
-                                _ => {}
+                    while let Ok(event) = event_rx.recv().await {
+                        match event {
+                            syn_core::engine::EngineEvent::SignalingLog(log) => {
+                                let _ = app_handle.emit("rust-signaling-log", log);
                             }
+                            syn_core::engine::EngineEvent::SignalingStatus(status) => {
+                                let _ = app_handle.emit("rust-signaling-status", status);
+                            }
+                            syn_core::engine::EngineEvent::IncomingOffer(source, pin, sdp, session_id) => {
+                                let payload = serde_json::json!({
+                                    "type": "offer",
+                                    "source": source,
+                                    "pin": pin,
+                                    "sdp": sdp,
+                                    "sessionId": session_id
+                                });
+                                let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                            }
+                            syn_core::engine::EngineEvent::IncomingAnswer(source, sdp, session_id) => {
+                                let payload = serde_json::json!({
+                                    "type": "answer",
+                                    "source": source,
+                                    "sdp": sdp,
+                                    "sessionId": session_id
+                                });
+                                let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                            }
+                            syn_core::engine::EngineEvent::IncomingIce(source, candidate, session_id) => {
+                                let payload = serde_json::json!({
+                                    "type": "ice",
+                                    "source": source,
+                                    "candidate": candidate,
+                                    "sessionId": session_id
+                                });
+                                let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                            }
+                            syn_core::engine::EngineEvent::SignalingError(message) => {
+                                let payload = serde_json::json!({
+                                    "type": "error",
+                                    "message": message
+                                });
+                                let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                            }
+                            syn_core::engine::EngineEvent::CustomRequestLogs { source, target } => {
+                                let payload = serde_json::json!({
+                                    "type": "custom_request_logs",
+                                    "source": source,
+                                    "target": target
+                                });
+                                let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                            }
+                            syn_core::engine::EngineEvent::SignalingConnected => {
+                                let _ = app_handle.emit("rust-signaling-connected", ());
+                            }
+                            syn_core::engine::EngineEvent::SignalingDisconnected => {
+                                let _ = app_handle.emit("rust-signaling-disconnected", ());
+                            }
+                            syn_core::engine::EngineEvent::PeerConnected(peer) => {
+                                let _ = app_handle.emit("rust-peer-connected", peer);
+                            }
+                            syn_core::engine::EngineEvent::PeerDisconnected(peer) => {
+                                let _ = app_handle.emit("rust-peer-disconnected", peer);
+                            }
+                            syn_core::engine::EngineEvent::VideoStatus(status) => {
+                                let _ = app_handle.emit("rust-video-status", status);
+                            }
+                            syn_core::engine::EngineEvent::WebRtcStateChange(state) => {
+                                let _ = app_handle.emit("rust-webrtc-state", state);
+                            }
+                            _ => {}
                         }
                     }
                 });

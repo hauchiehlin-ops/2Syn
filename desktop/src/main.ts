@@ -6929,9 +6929,37 @@ async function initializeApp() {
     listen<any>("rust-signaling-message", async (event) => {
       try {
         const payload = typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload;
+        // 收到任何信令訊息，代表信令伺服器連線正常且處於線上狀態
+        const statusEl = document.getElementById("val-signaling-status");
+        if (statusEl && !statusEl.classList.contains("status-active")) {
+          statusEl.className = "status-badge status-active";
+          statusEl.style.backgroundColor = "";
+          statusEl.style.color = "";
+          statusEl.textContent = t("status_online") || "Online";
+        }
         await handleSignalingMessage(payload);
       } catch (err) {
         console.error("[Signaling] 處理 Rust bridge 訊息失敗:", err);
+      }
+    });
+
+    listen<void>("rust-signaling-connected", () => {
+      const statusEl = document.getElementById("val-signaling-status");
+      if (statusEl) {
+        statusEl.className = "status-badge status-active";
+        statusEl.style.backgroundColor = "";
+        statusEl.style.color = "";
+        statusEl.textContent = t("status_online") || "Online";
+      }
+    });
+
+    listen<void>("rust-signaling-disconnected", () => {
+      const statusEl = document.getElementById("val-signaling-status");
+      if (statusEl) {
+        statusEl.className = "status-badge status-inactive";
+        statusEl.style.backgroundColor = "";
+        statusEl.style.color = "";
+        statusEl.textContent = t("status_offline") || "Offline";
       }
     });
 
