@@ -17,7 +17,9 @@ use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSampl
 use webrtc::track::track_local::TrackLocal;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 
-const H264_SAFARI_FMTP: &str = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e032";
+/// 通用 WebRTC H.264 標準配置（RFC 7742 規範：Constrained Baseline Profile Level 3.1 加上 level-asymmetry-allowed=1）
+/// 相容所有平台（Android Chromium、iOS Safari、Windows、macOS、Linux、Web 瀏覽器）
+const H264_DEFAULT_FMTP: &str = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f";
 
 /// 色彩採樣格式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,6 +275,30 @@ impl WebRtcSession {
         m.register_default_codecs()
             .map_err(|e| CoreError::NetworkError(format!("註冊預設編解碼器失敗: {}", e)))?;
 
+        // 額外註冊 Safari / iOS 常用之 Profile Level 5.0 (42e032)
+        // 確保跨平台所有客戶端（Android, iOS, Windows, macOS, Web）Offer 皆能被 Host 成功協商匹配
+        use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecParameters, RTPCodecType};
+        use webrtc::rtp_transceiver::RTCPFeedback;
+        let _ = m.register_codec(
+            RTCRtpCodecParameters {
+                capability: RTCRtpCodecCapability {
+                    mime_type: "video/H264".to_owned(),
+                    clock_rate: 90_000,
+                    channels: 0,
+                    sdp_fmtp_line: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e032".to_owned(),
+                    rtcp_feedback: vec![
+                        RTCPFeedback { typ: "goog-remb".to_owned(), parameter: "".to_owned() },
+                        RTCPFeedback { typ: "ccm".to_owned(), parameter: "fir".to_owned() },
+                        RTCPFeedback { typ: "nack".to_owned(), parameter: "".to_owned() },
+                        RTCPFeedback { typ: "nack".to_owned(), parameter: "pli".to_owned() },
+                    ],
+                },
+                payload_type: 125,
+                ..Default::default()
+            },
+            RTPCodecType::Video,
+        );
+
         let api = APIBuilder::new()
             .with_media_engine(m)
             .build();
@@ -316,7 +342,7 @@ impl WebRtcSession {
             RTCRtpCodecCapability {
                 mime_type: "video/H264".to_owned(),
                 clock_rate: 90_000,
-                sdp_fmtp_line: H264_SAFARI_FMTP.to_owned(),
+                sdp_fmtp_line: H264_DEFAULT_FMTP.to_owned(),
                 ..Default::default()
             },
             "screen".to_owned(),
@@ -337,7 +363,7 @@ impl WebRtcSession {
             RTCRtpCodecCapability {
                 mime_type: "video/H264".to_owned(),
                 clock_rate: 90_000,
-                sdp_fmtp_line: H264_SAFARI_FMTP.to_owned(),
+                sdp_fmtp_line: H264_DEFAULT_FMTP.to_owned(),
                 ..Default::default()
             },
             "foveated".to_owned(),

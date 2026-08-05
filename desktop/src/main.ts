@@ -2223,24 +2223,34 @@ async function handleSignalingMessage(msg: any) {
       if (msg.candidate !== undefined && msg.candidate !== null && msg.candidate !== "null" && msg.candidate !== "") {
         if (peerConnection) {
           // 發起端 (Client) JS WebRTC 處理
-          if (peerConnection.remoteDescription) {
+          let candidateObj: any = msg.candidate;
+          if (typeof candidateObj === "string") {
             try {
-              const candidateObj = JSON.parse(msg.candidate);
-              await peerConnection.addIceCandidate(candidateObj);
-            } catch (e) {
-              console.warn("[WebRTC] 無法加入 ICE Candidate:", e);
+              candidateObj = JSON.parse(candidateObj);
+            } catch {
+              candidateObj = { candidate: candidateObj };
             }
-          } else {
-            // peerConnection 尚未就緒或 remoteDescription 尚未設定，先加入佇列避免遺失
-            iceCandidateQueue.push(JSON.parse(msg.candidate));
+          }
+          if (candidateObj && (candidateObj.candidate !== undefined || candidateObj.sdpMid !== undefined || candidateObj.sdpMLineIndex !== undefined)) {
+            if (peerConnection.remoteDescription) {
+              try {
+                await peerConnection.addIceCandidate(candidateObj);
+              } catch (e) {
+                console.warn("[WebRTC] 無法加入 ICE Candidate:", e);
+              }
+            } else {
+              // peerConnection 尚未就緒或 remoteDescription 尚未設定，先加入佇列避免遺失
+              iceCandidateQueue.push(candidateObj);
+            }
           }
         } else {
           // 被控端 (Host) Rust WebRTC 處理
+          const candStr = typeof msg.candidate === "string" ? msg.candidate : JSON.stringify(msg.candidate);
           if (!rustOfferProcessed) {
-            rustIceCandidateQueue.push(msg.candidate);
+            rustIceCandidateQueue.push(candStr);
           } else {
             try {
-              await invoke("add_ice_candidate_to_rust", { candidateStr: msg.candidate });
+              await invoke("add_ice_candidate_to_rust", { candidateStr: candStr });
             } catch (e) {
               console.warn("[WebRTC] 無法將 ICE Candidate 傳遞給 Rust:", e);
             }
@@ -2329,6 +2339,27 @@ async function handleSignalingMessage(msg: any) {
   }
 }
 
+function updateSignalingStatusBadge(status: "online" | "connecting" | "offline") {
+  const statusEl = document.getElementById("val-signaling-status");
+  if (!statusEl) return;
+  if (status === "connecting") {
+    statusEl.className = "status-badge status-trial";
+    statusEl.style.backgroundColor = "#fbbf24";
+    statusEl.style.color = "#ffffff";
+    statusEl.textContent = t("status_connecting") || "Connecting...";
+  } else if (status === "online") {
+    statusEl.className = "status-badge status-active";
+    statusEl.style.backgroundColor = "";
+    statusEl.style.color = "";
+    statusEl.textContent = t("status_online") || "Online";
+  } else {
+    statusEl.className = "status-badge status-inactive";
+    statusEl.style.backgroundColor = "";
+    statusEl.style.color = "";
+    statusEl.textContent = t("status_offline") || "Offline";
+  }
+}
+
 function initSignalingClient() {
   if (signalingReconnectTimer) {
     clearTimeout(signalingReconnectTimer);
@@ -2340,11 +2371,13 @@ function initSignalingClient() {
   }
   const url = getSignalingUrl();
   console.log(t("log_sig_trying"), url);
+  updateSignalingStatusBadge("connecting");
   
   signalingWs = new WebSocket(url);
   
   signalingWs.onopen = () => {
     console.log(t("log_sig_connected_logging_in"));
+    updateSignalingStatusBadge("online");
     signalingWs!.send(JSON.stringify({ type: "login", id: myId }));
     signalingRetryDelaySec = 5; // 連線成功，重置指數退避
     
@@ -2370,11 +2403,13 @@ function initSignalingClient() {
   signalingWs.onmessage = async (event) => {
     let msg: any;
     try { msg = JSON.parse(event.data); } catch { return; }
+    updateSignalingStatusBadge("online");
     await handleSignalingMessage(msg);
   };
 
   signalingWs.onclose = function(this: WebSocket) {
     console.warn(`[Signaling] WebSocket 已斷線，${signalingRetryDelaySec}秒後重新嘗試...`);
+    updateSignalingStatusBadge("offline");
     if (signalingWs === this) {
       signalingWs = null;
       if (heartbeatTimer) {
@@ -2394,6 +2429,7 @@ function initSignalingClient() {
 
   signalingWs.onerror = (err) => {
     console.error("[Signaling] 連線錯誤:", err);
+    updateSignalingStatusBadge("offline");
   };
 }
 
@@ -2405,6 +2441,7 @@ async function flushIceCandidateQueue() {
   if (peerConnection && peerConnection.remoteDescription) {
     while (iceCandidateQueue.length > 0) {
       const candidate = iceCandidateQueue.shift();
+      if (!candidate) continue;
       try {
         await peerConnection.addIceCandidate(candidate);
       } catch (e) {
@@ -6930,13 +6967,7 @@ async function initializeApp() {
       try {
         const payload = typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload;
         // 收到任何信令訊息，代表信令伺服器連線正常且處於線上狀態
-        const statusEl = document.getElementById("val-signaling-status");
-        if (statusEl && !statusEl.classList.contains("status-active")) {
-          statusEl.className = "status-badge status-active";
-          statusEl.style.backgroundColor = "";
-          statusEl.style.color = "";
-          statusEl.textContent = t("status_online") || "Online";
-        }
+        updateSignalingStatusBadge("online");
         await handleSignalingMessage(payload);
       } catch (err) {
         console.error("[Signaling] 處理 Rust bridge 訊息失敗:", err);
@@ -6944,46 +6975,20 @@ async function initializeApp() {
     });
 
     listen<void>("rust-signaling-connected", () => {
-      const statusEl = document.getElementById("val-signaling-status");
-      if (statusEl) {
-        statusEl.className = "status-badge status-active";
-        statusEl.style.backgroundColor = "";
-        statusEl.style.color = "";
-        statusEl.textContent = t("status_online") || "Online";
-      }
+      updateSignalingStatusBadge("online");
     });
 
     listen<void>("rust-signaling-disconnected", () => {
-      const statusEl = document.getElementById("val-signaling-status");
-      if (statusEl) {
-        statusEl.className = "status-badge status-inactive";
-        statusEl.style.backgroundColor = "";
-        statusEl.style.color = "";
-        statusEl.textContent = t("status_offline") || "Offline";
-      }
+      updateSignalingStatusBadge("offline");
     });
 
     // 監聽來自 Rust 的信令連線狀態更新，並同步更新 UI 狀態燈號
     listen<string>("rust-signaling-status", (event) => {
       const status = event.payload;
-      const statusEl = document.getElementById("val-signaling-status");
-      if (statusEl) {
-        if (status === "connecting") {
-          statusEl.className = "status-badge status-trial";
-          statusEl.style.backgroundColor = "#fbbf24";
-          statusEl.style.color = "#ffffff";
-          statusEl.textContent = t("status_connecting") || "Connecting...";
-        } else if (status === "online") {
-          statusEl.className = "status-badge status-active";
-          statusEl.style.backgroundColor = "";
-          statusEl.style.color = "";
-          statusEl.textContent = t("status_online") || "Online";
-        } else {
-          statusEl.className = "status-badge status-inactive";
-          statusEl.style.backgroundColor = "";
-          statusEl.style.color = "";
-          statusEl.textContent = t("status_offline") || "Offline";
-        }
+      if (status === "connecting" || status === "online" || status === "offline") {
+        updateSignalingStatusBadge(status);
+      } else {
+        updateSignalingStatusBadge("offline");
       }
       
       if (status === "connecting") {
