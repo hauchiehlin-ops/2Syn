@@ -1198,20 +1198,7 @@ function updateDomTranslations() {
   setTextContent("help-sim-loss", t("help_sim_loss"));
   setTextContent("help-sim-relay", t("help_sim_relay"));
   setTextContent("help-smart-auto", t("help_smart_auto"));
-  // 背景服務區塊翻譯
-  setTextContent("txt-service-title", t("service_title"));
-  setTextContent("txt-service-desc", t("service_desc"));
-  setTextContent("help-service", t("service_help"));
-  // 狀態强衝更新（保持目前建立的狀態不變，只重譯文字）
-  const _serviceBadge = document.getElementById("service-status-badge");
-  if (_serviceBadge) {
-    const isInstalled = _serviceBadge.classList.contains("status-active");
-    _serviceBadge.textContent = isInstalled ? t("service_status_installed") : t("service_status_not_installed");
-  }
-  const _btnInstall = document.getElementById("btn-install-service") as HTMLButtonElement | null;
-  if (_btnInstall && _btnInstall.style.display !== "none") _btnInstall.textContent = t("service_btn_install");
-  const _btnUninstall = document.getElementById("btn-uninstall-service") as HTMLButtonElement | null;
-  if (_btnUninstall && _btnUninstall.style.display !== "none") _btnUninstall.textContent = t("service_btn_uninstall");
+
   
   // 更新一鍵複製按鈕之 Tooltip 翻譯
   const btnCopyId = document.getElementById("btn-copy-id");
@@ -1328,13 +1315,7 @@ function updateDomTranslations() {
     });
   }
 
-  // 背景服務安裝引導 Modal 翻譯
-  setTextContent("txt-service-onboard-title", t("service_onboard_title"));
-  setTextContent("txt-service-onboard-subtitle", t("service_onboard_subtitle"));
-  setTextContent("txt-service-onboard-body", t("service_onboard_body"));
-  setTextContent("txt-service-onboard-tip", t("service_onboard_tip"));
-  setTextContent("txt-service-onboard-btn-install", t("service_onboard_btn_install"));
-  setTextContent("txt-service-onboard-btn-skip", t("service_onboard_btn_skip"));
+
 
   // 首次執行提示 Modal 翻譯
   setTextContent("txt-first-run-title", t("first_run_title"));
@@ -1414,7 +1395,22 @@ async function initAutostart() {
   
   try {
     const { isEnabled, enable, disable } = await import("@tauri-apps/plugin-autostart");
-    const state = await isEnabled();
+    let state = await isEnabled();
+
+    // 首次執行時預設啟用開機自動啟動與背景常駐
+    if (!localStorage.getItem("2syn_autostart_initialized")) {
+      localStorage.setItem("2syn_autostart_initialized", "1");
+      if (!state) {
+        try {
+          await enable();
+          state = true;
+          console.log("[autostart] Default enabled on first launch");
+        } catch (autoErr) {
+          console.warn("[autostart] Auto-enable failed:", autoErr);
+        }
+      }
+    }
+
     chkAutostart.checked = state;
 
     chkAutostart.addEventListener("change", async () => {
@@ -1556,81 +1552,6 @@ async function initStaticPassword() {
         } catch (e) {
           alert((t("alert_delete_static_password_fail") || "Failed to delete password: ") + e);
         }
-      }
-    });
-  }
-}
-
-// 系統服務(Unattended Access)管理邏輯
-async function initServiceManagement() {
-  if (!isDesktopTauri()) return;
-  const btnInstall = document.getElementById("btn-install-service") as HTMLButtonElement | null;
-  const btnUninstall = document.getElementById("btn-uninstall-service") as HTMLButtonElement | null;
-  const statusBadge = document.getElementById("service-status-badge");
-
-  // 初始化按鈕文字
-  if (btnInstall) btnInstall.textContent = t("service_btn_install");
-  if (btnUninstall) btnUninstall.textContent = t("service_btn_uninstall");
-  if (statusBadge) statusBadge.textContent = t("service_status_not_installed");
-
-  // 啟動時向系統底層查詢真實安裝狀態 (檢查 launchd plist / Windows Service)
-  try {
-    const isInstalled = await invoke<boolean>("check_service_installed");
-    if (statusBadge) {
-      statusBadge.textContent = isInstalled ? t("service_status_installed") : t("service_status_not_installed");
-      statusBadge.className = isInstalled ? "status-badge status-active" : "status-badge status-inactive";
-    }
-    if (isInstalled) {
-      if (btnInstall) btnInstall.style.display = "none";
-      if (btnUninstall) btnUninstall.style.display = "block";
-    } else {
-      if (btnInstall) btnInstall.style.display = "block";
-      if (btnUninstall) btnUninstall.style.display = "none";
-    }
-  } catch (err) {
-    console.warn("[Service] 無法查詢背景服務狀態:", err);
-  }
-
-  if (btnInstall) {
-    btnInstall.addEventListener("click", async () => {
-      try {
-        btnInstall.textContent = t("service_btn_installing");
-        const res = await invoke<string>("install_unattended_service");
-        if (statusBadge) {
-          statusBadge.textContent = t("service_status_installed");
-          statusBadge.className = "status-badge status-active";
-        }
-        btnInstall.style.display = "none";
-        if (btnUninstall) {
-          btnUninstall.textContent = t("service_btn_uninstall");
-          btnUninstall.style.display = "block";
-        }
-        alert(res);
-      } catch (e) {
-        alert(t("service_install_failed") + e);
-        btnInstall.textContent = t("service_btn_install");
-      }
-    });
-  }
-
-  if (btnUninstall) {
-    btnUninstall.addEventListener("click", async () => {
-      try {
-        btnUninstall.textContent = t("service_btn_uninstalling");
-        const res = await invoke<string>("uninstall_unattended_service");
-        if (statusBadge) {
-          statusBadge.textContent = t("service_status_not_installed");
-          statusBadge.className = "status-badge status-inactive";
-        }
-        btnUninstall.style.display = "none";
-        if (btnInstall) {
-          btnInstall.style.display = "block";
-          btnInstall.textContent = t("service_btn_install");
-        }
-        alert(res);
-      } catch (e) {
-        alert(t("service_uninstall_failed") + e);
-        btnUninstall.textContent = t("service_btn_uninstall");
       }
     });
   }
@@ -1819,9 +1740,6 @@ async function initFirstRunPrompt() {
         pwdSection.scrollIntoView({ behavior: "smooth", block: "center" });
         setTimeout(() => pwdSection.focus(), 400);
       }
-
-      // 密碼設定完後，延遲顯示背景服務安裝引導
-      setTimeout(() => showServiceOnboardModal(), 800);
     });
   }
 
@@ -1830,105 +1748,11 @@ async function initFirstRunPrompt() {
   if (btnSkip) {
     btnSkip.addEventListener("click", () => {
       modal.style.display = "none";
-      // 關閉密碼 Modal 後，延遲顯示背景服務安裝引導
-      setTimeout(() => showServiceOnboardModal(), 600);
     });
   }
 }
 
-// =========================================================================
-// 背景服務安裝引導 Modal (Onboarding Step 2)
-// =========================================================================
 
-/** 顯示背景服務安裝引導 Modal */
-function showServiceOnboardModal() {
-  if (!isDesktopTauri()) return;
-
-  // 如果已安裝過服務，不再顯示
-  const alreadyInstalled = localStorage.getItem("2syn_service_onboarded");
-  if (alreadyInstalled === "1") return;
-
-  const modal = document.getElementById("service-onboard-modal");
-  if (!modal) return;
-
-  // 刷新翻譯，確保語系正確
-  setTextContent("txt-service-onboard-title", t("service_onboard_title"));
-  setTextContent("txt-service-onboard-subtitle", t("service_onboard_subtitle"));
-  setTextContent("txt-service-onboard-body", t("service_onboard_body"));
-  setTextContent("txt-service-onboard-tip", t("service_onboard_tip"));
-  setTextContent("txt-service-onboard-btn-install", t("service_onboard_btn_install"));
-  setTextContent("txt-service-onboard-btn-skip", t("service_onboard_btn_skip"));
-
-  modal.style.display = "flex";
-
-  const btnInstall = document.getElementById("btn-service-onboard-install");
-  const btnSkip = document.getElementById("btn-service-onboard-skip");
-  const btnInstallLabel = document.getElementById("txt-service-onboard-btn-install");
-
-  if (btnInstall && !btnInstall.dataset.bound) {
-    btnInstall.dataset.bound = "1";
-    btnInstall.addEventListener("click", async () => {
-      if (btnInstallLabel) btnInstallLabel.textContent = t("service_onboard_btn_installing");
-      (btnInstall as HTMLButtonElement).disabled = true;
-      try {
-        await invoke<string>("install_unattended_service");
-        localStorage.setItem("2syn_service_onboarded", "1");
-        modal.style.display = "none";
-        // 同步更新正常區塊的安裝後 UI 狀態
-        const statusBadge = document.getElementById("service-status-badge");
-        if (statusBadge) {
-          statusBadge.textContent = t("service_status_installed");
-          statusBadge.className = "status-badge status-active";
-        }
-        const mainBtnInstall = document.getElementById("btn-install-service") as HTMLButtonElement | null;
-        const mainBtnUninstall = document.getElementById("btn-uninstall-service") as HTMLButtonElement | null;
-        if (mainBtnInstall) mainBtnInstall.style.display = "none";
-        if (mainBtnUninstall) {
-          mainBtnUninstall.textContent = t("service_btn_uninstall");
-          mainBtnUninstall.style.display = "block";
-        }
-        alert(t("service_onboard_success"));
-      } catch (e) {
-        alert(t("service_install_failed") + e);
-        if (btnInstallLabel) btnInstallLabel.textContent = t("service_onboard_btn_install");
-        (btnInstall as HTMLButtonElement).disabled = false;
-      }
-    });
-  }
-
-  if (btnSkip && !btnSkip.dataset.bound) {
-    btnSkip.dataset.bound = "1";
-    btnSkip.addEventListener("click", () => {
-      modal.style.display = "none";
-      // 不標記為完成，下次再安裝一次不再顯示（使用不同 key 可讓使用者很容易從設定頁手動安裝）
-    });
-  }
-}
-
-/** 初始化引導：查詢系統真實狀態，若已安裝則永不彈出 */
-async function initServiceOnboardModal() {
-  if (!isDesktopTauri()) return;
-
-  // 1. 直接向系統底層檢查是否已安裝過服務 (檢查 launchd plist 或 sc query)
-  try {
-    const isInstalled = await invoke<boolean>("check_service_installed");
-    if (isInstalled) {
-      localStorage.setItem("2syn_service_onboarded", "1");
-      return;
-    }
-  } catch (err) {
-    console.warn("[Service] 檢查服務狀態失敗:", err);
-  }
-
-  // 2. 若使用者之前已關閉或略過
-  const alreadyShown = localStorage.getItem("2syn_service_onboarded");
-  if (alreadyShown === "1") return;
-
-  // 延遲 1.5 秒後再顯示，避免與密碼 Modal 同時出現
-  setTimeout(() => {
-    showServiceOnboardModal();
-  }, 1500);
-}
 
 // =========================================================================
 // 地址簿 / 裝置常用裝置清單
@@ -2117,18 +1941,43 @@ function initDeviceBook() {
   const inputImport = document.getElementById("input-import-device-book") as HTMLInputElement;
 
   if (btnExport) {
-    btnExport.addEventListener("click", () => {
+    btnExport.addEventListener("click", async () => {
       const devices = loadDeviceBook();
       const jsonStr = JSON.stringify(devices, null, 2);
+      const filename = `2syn_address_book_${new Date().toISOString().split('T')[0]}.json`;
       const blob = new Blob([jsonStr], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `2syn_address_book_${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+
+      // 檢查是否支援 Web Share API (針對 iOS / Android 行動裝置分享/儲存檔案)
+      if (navigator.share) {
+        try {
+          const file = new File([blob], filename, { type: "application/json" });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: "2syn Address Book",
+            });
+            return;
+          }
+        } catch (err: any) {
+          if (err?.name === "AbortError") return;
+          console.warn("[DeviceBook] Web Share files failed, fallback to download/text:", err);
+        }
+      }
+
+      // 標準 Web / 桌面端下載機制
+      try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (err) {
+        console.error("[DeviceBook] Export download failed:", err);
+        alert(t("export_failed") || "Export failed");
+      }
     });
   }
 
@@ -2172,6 +2021,9 @@ function initDeviceBook() {
 // 信令客戶端：建立 WebSocket 連線並處理訊息路由
 // =========================================================================
 let heartbeatTimer: any = null;
+let pendingHostLoginTarget: string | null = null;
+let pendingHostLoginSessionId: string | null = null;
+let pendingHostLoginPin: string | null = null;
 
 async function sendSignalingMessage(message: any): Promise<void> {
   const serialized = JSON.stringify(message);
@@ -2188,8 +2040,95 @@ async function sendSignalingMessage(message: any): Promise<void> {
   throw new Error("signaling_offline");
 }
 
+function showHostLoginModal(msg: any) {
+  const modal = document.getElementById("host-login-modal") as HTMLElement | null;
+  const status = document.getElementById("host-login-status");
+  const authInput = document.getElementById("host-login-auth-password") as HTMLInputElement | null;
+  const loginInput = document.getElementById("host-login-password") as HTMLInputElement | null;
+  const desc = document.getElementById("host-login-desc");
+  if (!modal) return;
+
+  if (desc) {
+    const platform = msg.platform ? ` (${msg.platform})` : "";
+    desc.textContent = `The host is at the operating system login screen${platform}. Authorize with the 2syn unattended password, then send the OS login credentials.`;
+  }
+  if (status) status.textContent = "";
+  if (authInput) authInput.value = "";
+  if (loginInput) loginInput.value = "";
+  modal.style.display = "flex";
+  setTimeout(() => authInput?.focus(), 50);
+}
+
+function hideHostLoginModal() {
+  const modal = document.getElementById("host-login-modal") as HTMLElement | null;
+  if (modal) modal.style.display = "none";
+}
+
+function handleHostLoginResult(msg: any) {
+  const status = document.getElementById("host-login-status");
+  const submitBtn = document.getElementById("btn-submit-host-login") as HTMLButtonElement | null;
+  if (submitBtn) submitBtn.disabled = false;
+
+  if (status) {
+    status.textContent = msg.success
+      ? "Login input accepted. Waiting for the host desktop session..."
+      : `Login input failed: ${msg.message || "unsupported"}`;
+  }
+
+  if (msg.success && pendingHostLoginTarget && pendingHostLoginPin) {
+    const target = pendingHostLoginTarget;
+    const pin = pendingHostLoginPin;
+    setTimeout(() => {
+      hideHostLoginModal();
+      void startCall(target, pin);
+    }, 3500);
+  }
+}
+
+function initHostLoginModal() {
+  const form = document.getElementById("host-login-form") as HTMLFormElement | null;
+  const closeBtn = document.getElementById("btn-close-host-login");
+  const submitBtn = document.getElementById("btn-submit-host-login") as HTMLButtonElement | null;
+  const status = document.getElementById("host-login-status");
+
+  closeBtn?.addEventListener("click", () => {
+    pendingHostLoginTarget = null;
+    pendingHostLoginSessionId = null;
+    pendingHostLoginPin = null;
+    hideHostLoginModal();
+    resetConnectionUI();
+  });
+
+  form?.addEventListener("submit", async () => {
+    if (!pendingHostLoginTarget) return;
+    const authPassword = (document.getElementById("host-login-auth-password") as HTMLInputElement | null)?.value || "";
+    const username = (document.getElementById("host-login-username") as HTMLInputElement | null)?.value.trim() || undefined;
+    const loginPassword = (document.getElementById("host-login-password") as HTMLInputElement | null)?.value || "";
+    if (!authPassword || !loginPassword) {
+      if (status) status.textContent = "Both password fields are required.";
+      return;
+    }
+
+    if (submitBtn) submitBtn.disabled = true;
+    if (status) status.textContent = "Sending login input...";
+    try {
+      await sendSignalingMessage({
+        type: "login_input",
+        target: pendingHostLoginTarget,
+        username,
+        authPassword,
+        loginPassword,
+        sessionId: pendingHostLoginSessionId,
+      });
+    } catch (error) {
+      if (submitBtn) submitBtn.disabled = false;
+      if (status) status.textContent = `Failed to send login input: ${error}`;
+    }
+  });
+}
+
 async function handleSignalingMessage(msg: any) {
-  console.log("[Signaling] 收到:", msg);
+  console.log("[Signaling] 收到:", msg.type === "login_input" ? { type: "login_input", source: msg.source } : msg);
 
   switch (msg.type) {
     case "offer":
@@ -2257,6 +2196,20 @@ async function handleSignalingMessage(msg: any) {
           }
         }
       }
+      break;
+    case "login_required":
+      pendingHostLoginTarget = msg.source;
+      pendingHostLoginSessionId = currentCallSessionId || null;
+      pendingHostLoginPin = currentRemotePin;
+      if (connectionTimeoutTimer) {
+        clearTimeout(connectionTimeoutTimer);
+        connectionTimeoutTimer = null;
+      }
+      disconnectCurrentPeerConnection("host reported OS login screen");
+      showHostLoginModal(msg);
+      break;
+    case "login_result":
+      handleHostLoginResult(msg);
       break;
     case "custom_request_logs":
       {
@@ -2468,6 +2421,16 @@ function clearRemoteMediaForReconnect() {
 
 function disconnectCurrentPeerConnection(reason: string) {
   console.log(`[WebRTC] Disconnecting current PeerConnection: ${reason}`);
+  if (dataChannelSystemControl?.readyState === "open") {
+    try {
+      dataChannelSystemControl.send(JSON.stringify({
+        type: "session_disconnect",
+        reason,
+      }));
+    } catch (err) {
+      console.warn("[WebRTC] Failed to notify host before disconnect:", err);
+    }
+  }
   if (peerConnection) {
     try {
       peerConnection.close();
@@ -4932,6 +4895,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   let touchStartClientX = 0;
   let touchStartClientY = 0;
   let hasTriggeredLongPress = false;
+  let isLongPressActive = false;
 
   // --- 多指轉換防護 (Gesture Transition Guard) ---
   // 確保單指 / 雙指 / 三指手勢彼此獨立，減少控制誤判。
@@ -4949,6 +4913,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     isDragging = false;
     isPotentialDrag = false;
     hasTriggeredLongPress = false;
+    isLongPressActive = false;
     wasLongPressDrag = false;
   };
 
@@ -5105,6 +5070,10 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     if (e.pointerType === "touch" || e.pointerType === "pen") return;
     e.preventDefault();
     videoContainer?.focus();
+    try {
+      (videoEl as any).setPointerCapture?.(e.pointerId);
+    } catch (_) {}
+
     if (!isDirectTouchMode && !pointerLockUnavailable && document.pointerLockElement !== videoEl) {
       videoEl.requestPointerLock().catch(() => { pointerLockUnavailable = true; });
     }
@@ -5143,6 +5112,12 @@ function setupInputControl(videoEl: HTMLVideoElement) {
   videoEl.addEventListener("pointerup", (e) => {
     if (e.pointerType === "touch" || e.pointerType === "pen") return;
     e.preventDefault();
+    try {
+      if ((videoEl as any).hasPointerCapture?.(e.pointerId)) {
+        (videoEl as any).releasePointerCapture(e.pointerId);
+      }
+    } catch (_) {}
+
     let btn = 0;
     if (e.button === 0) btn = 1;
     else if (e.button === 2) btn = 2;
@@ -5175,6 +5150,16 @@ function setupInputControl(videoEl: HTMLVideoElement) {
     sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(btn, currentCursorPercentX, currentCursorPercentY)));
   });
 
+  videoEl.addEventListener("pointercancel", (e) => {
+    if (e.pointerType === "touch" || e.pointerType === "pen") return;
+    try {
+      if ((videoEl as any).hasPointerCapture?.(e.pointerId)) {
+        (videoEl as any).releasePointerCapture(e.pointerId);
+      }
+    } catch (_) {}
+    sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, currentCursorPercentX, currentCursorPercentY)));
+  });
+
   videoEl.addEventListener("pointermove", (e) => {
     e.preventDefault();
     if (e.pointerType === "touch" || e.pointerType === "pen") return; // 由觸控手勢處理
@@ -5202,11 +5187,6 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         renderedHeight = renderedWidth / videoRatio;
       }
 
-      // 送出「螢幕寬高比例」而非原始 CSS 像素位移：視訊畫面尺寸與被控端實際解析度
-      // /DPI 本就不同，若直接送像素值，host 端套用各平台原生滑鼠加速度曲線後，
-      // 兩端估算的游標位置會隨移動量與速度漸行漸遠，造成點擊位置「有時準確、有時
-      // 偏差」。改成 client/host 用同一套正規化座標公式疊加，並用本地已 clamp 過的
-      // 合成游標位移量（而非原始未夾限位移）送出，讓兩端邊界夾限行為一致。
       const prevSyntheticX = syntheticCursorPercentX;
       const prevSyntheticY = syntheticCursorPercentY;
       syntheticCursorPercentX = Math.max(0, Math.min(1, syntheticCursorPercentX + e.movementX / (renderedWidth || 1)));
@@ -5214,7 +5194,13 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
       pendingRelativeDX += syntheticCursorPercentX - prevSyntheticX;
       pendingRelativeDY += syntheticCursorPercentY - prevSyntheticY;
-      triggerMoveRaf();
+      
+      // 當按住滑鼠左鍵拖曳/框選文字時，即時發送座標以獲得最靈敏反應
+      if (e.buttons !== 0) {
+        sendPendingMoves();
+      } else {
+        triggerMoveRaf();
+      }
 
       currentCursorPercentX = syntheticCursorPercentX;
       currentCursorPercentY = syntheticCursorPercentY;
@@ -5243,11 +5229,15 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       x = Math.max(0, Math.min(1, x));
       y = Math.max(0, Math.min(1, y));
 
-      // 移除智能磁吸，提供完全原生的絕對座標映射
-
       pendingMouseMoveX = x;
       pendingMouseMoveY = y;
-      triggerMoveRaf();
+      
+      // 當按住滑鼠按鍵拖曳/框選時，立即發送位移
+      if (e.buttons !== 0) {
+        sendPendingMoves();
+      } else {
+        triggerMoveRaf();
+      }
 
       // 在軌跡板模式下，滑鼠移動時同步更新本地游標位置
       if (!isDirectTouchMode) {
@@ -5392,25 +5382,23 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       wasLongPressDrag = false;
 
       if (longPressTimer) clearTimeout(longPressTimer);
-      // 單指長按 -> 直接送出遠端右鍵，讓作業系統/應用程式顯示原生 context menu。
-      longPressTimer = setTimeout(() => {
-        hasTriggeredLongPress = true;
-
-        const target = isDirectTouchMode
-          ? videoPointToPercent(touchStartClientX, touchStartClientY)
-          : { x: currentCursorPercentX, y: currentCursorPercentY };
-        sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(2, target.x, target.y)));
-        setTimeout(() => {
-          sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(2, target.x, target.y)));
-        }, 80);
-
-        triggerHaptic("heavy");
-        console.log("[Gesture] 單指長按，送出原生右鍵");
-      }, 500); // 400→500ms：降低「手指稍停就誤觸拖曳/框選」的機率
-
+      isLongPressActive = false;
+      hasTriggeredLongPress = false;
       isDragging = false;
+      wasLongPressDrag = false;
+
+      // 長按判定 (350ms)：
+      // 1. 原地長按後放開：觸發「原生右鍵選單 (Right Click)」
+      // 2. 長按震動後滑動：立即轉換為「左鍵拖曳 (MouseDown Left)」，順暢框選文字或拖動物件
+      // 3. 雙擊滑動：直接進入「左鍵拖曳 (MouseDown Left)」，超快框選文字
+      longPressTimer = setTimeout(() => {
+        isLongPressActive = true;
+        triggerHaptic("medium");
+        console.log("[Gesture] 單指長按激活 (原地抬起送出右鍵 / 繼續滑動進入框選拖曳)");
+      }, 350);
+
       // 雙擊拖曳（移動視窗/框選）只在「第二次觸碰落在上次點擊附近」時才預備，
-      // 避免「點一下→移到別處」被誤判成拖曳。
+      // 降低判定半徑與延遲，讓連續雙擊拖曳/框選文字更加迅速靈敏！
       if (now - lastTapTime < 350) {
         const dFromLastTap = Math.hypot(lastTouchX - lastTapPos.x, lastTouchY - lastTapPos.y);
         if (dFromLastTap < 40) {
@@ -5539,7 +5527,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       const currentY = e.touches[0].clientY;
       
       const dist = Math.sqrt(Math.pow(currentX - touchStartClientX, 2) + Math.pow(currentY - touchStartClientY, 2));
-      if (dist > 10) {
+      if (dist > 8 && !isDragging && !isLongPressActive) {
         if (longPressTimer) {
           clearTimeout(longPressTimer);
           longPressTimer = null;
@@ -5587,9 +5575,27 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
         // Tremor Suppression (防手震) & Lazy Drag (延遲拖曳激活)
         if (!isDragging) {
-          if (hasTriggeredLongPress || isPotentialDrag) {
+          if (isLongPressActive && dist > 6) {
+            // 長按後開始移動 -> 轉換為左鍵拖曳/框選模式
+            isDragging = true;
+            isLongPressActive = false;
+            wasLongPressDrag = true;
+            let startPctX = (touchStartPos.x - rect.left - offsetX) / renderedWidth;
+            let startPctY = (touchStartPos.y - rect.top - offsetY) / renderedHeight;
+            startPctX = Math.max(0, Math.min(1, startPctX));
+            startPctY = Math.max(0, Math.min(1, startPctY));
+            
+            pendingMouseMoveX = startPctX;
+            pendingMouseMoveY = startPctY;
+            sendPendingMoves();
+            currentCursorPercentX = startPctX;
+            currentCursorPercentY = startPctY;
+
+            sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, startPctX, startPctY)));
+            console.log("[Gesture] 直控長按後移動 -> 進入文字框選/拖曳模式 (MouseDown Left)");
+          } else if (isPotentialDrag) {
             const startDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
-            if (startDist > 14) {
+            if (startDist > 6) { // 降低雙擊拖曳門檻 (14px -> 6px)，文字框選反應更靈敏
               isDragging = true;
               isPotentialDrag = false;
               let startPctX = (touchStartPos.x - rect.left - offsetX) / renderedWidth;
@@ -5599,7 +5605,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
               
               pendingMouseMoveX = startPctX;
               pendingMouseMoveY = startPctY;
-              triggerMoveRaf();
+              sendPendingMoves();
               currentCursorPercentX = startPctX;
               currentCursorPercentY = startPctY;
 
@@ -5612,24 +5618,31 @@ function setupInputControl(videoEl: HTMLVideoElement) {
             triggerMoveRaf();
           }
         } else {
-          // 已進入拖曳狀態
+          // 已進入拖曳/文字框選狀態：即時發送座標，大幅降低延遲
           pendingMouseMoveX = x;
           pendingMouseMoveY = y;
-          triggerMoveRaf();
+          sendPendingMoves();
 
           currentCursorPercentX = x;
           currentCursorPercentY = y;
         }
       } else {
         // 軌跡板模式下的移動
-        if (isPotentialDrag) {
-          // 雙擊後手指移動：如果移動超過微小閾值，真正激活拖曳模式
-          const moveDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
-          if (moveDist > 12) {
+        if (!isDragging) {
+          if (isLongPressActive && dist > 6) {
             isDragging = true;
-            isPotentialDrag = false;
+            isLongPressActive = false;
             sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, currentCursorPercentX, currentCursorPercentY)));
-            console.log("[Gesture] 雙擊拖曳模式激活");
+            console.log("[Gesture] 軌跡板長按後移動 -> 進入拖曳/框選模式 (MouseDown Left)");
+          } else if (isPotentialDrag) {
+            // 雙擊後手指移動：如果移動超過微小閾值，真正激活拖曳模式
+            const moveDist = Math.sqrt(Math.pow(currentX - touchStartPos.x, 2) + Math.pow(currentY - touchStartPos.y, 2));
+            if (moveDist > 6) { // 降低閾值 (12px -> 6px)
+              isDragging = true;
+              isPotentialDrag = false;
+              sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(1, currentCursorPercentX, currentCursorPercentY)));
+              console.log("[Gesture] 雙擊拖曳模式激活");
+            }
           }
         }
 
@@ -5656,7 +5669,11 @@ function setupInputControl(videoEl: HTMLVideoElement) {
 
           pendingMouseMoveX = trackpadCursorX;
           pendingMouseMoveY = trackpadCursorY;
-          triggerMoveRaf();
+          if (isDragging) {
+            sendPendingMoves();
+          } else {
+            triggerMoveRaf();
+          }
 
           updateCursorOverlay(trackpadCursorX, trackpadCursorY);
 
@@ -5757,11 +5774,33 @@ function setupInputControl(videoEl: HTMLVideoElement) {
       isMouseInsideVideo = false;
       hasMouseMoved = false;
 
-      if (hasTriggeredLongPress) {
-        // 長按右鍵已在 timer 觸發時送出；此處只清狀態，不送遠端左鍵/拖曳事件。
-        isDragging = false;
+      // 單指長按後原地放開（無滑動轉換為拖曳）：觸發原生右鍵選單
+      if (isLongPressActive && !isDragging) {
+        isLongPressActive = false;
+        hasTriggeredLongPress = true;
+        const target = isDirectTouchMode
+          ? videoPointToPercent(touchStartClientX, touchStartClientY)
+          : { x: currentCursorPercentX, y: currentCursorPercentY };
+        sendInputPacket(buildInputPacket(0x02, buildMouseButtonPayload(2, target.x, target.y)));
+        setTimeout(() => {
+          sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(2, target.x, target.y)));
+        }, 80);
+        triggerHaptic("heavy");
+        console.log("[Gesture] 單指長按原地放開 -> 送出原生右鍵選單");
+        
+        initialPinchDistance = -1;
+        touchStartTime = 0;
+        lastTouchX = 0;
+        lastTouchY = 0;
+        maxTouches = 0;
+        return;
+      }
 
+      if (hasTriggeredLongPress) {
+        // 長按右鍵已送出；此處只清狀態，不送遠端左鍵/拖曳事件。
+        isDragging = false;
         hasTriggeredLongPress = false;
+        isLongPressActive = false;
         initialPinchDistance = -1;
         touchStartTime = 0;
         lastTouchX = 0;
@@ -5777,6 +5816,7 @@ function setupInputControl(videoEl: HTMLVideoElement) {
         if (isDragging) {
           sendInputPacket(buildInputPacket(0x03, buildMouseButtonPayload(1, releaseX, releaseY)));
           isDragging = false;
+          wasLongPressDrag = false;
         } else {
           const tapDist = Math.sqrt(Math.pow(endX - lastTapPos.x, 2) + Math.pow(endY - lastTapPos.y, 2));
           if (now - lastTapTime < 350 && tapDist < 35) {
@@ -6804,6 +6844,7 @@ async function initializeApp() {
   applyBuildInfo(await resolveBuildInfo());
   setupFileTransferDropZone(getOrRecoverFileTransferChannel);
   initDeviceBook();
+  initHostLoginModal();
 
   await initI18n();
 
@@ -6870,7 +6911,6 @@ async function initializeApp() {
   initNetworkSimulator();
   initSignalingReconnect();
   initStaticPassword();
-  initServiceManagement();
   initPanelToggle();
   initOfflineSdpMode();
   initSystemDiagnostic();
@@ -6882,7 +6922,6 @@ async function initializeApp() {
   initTailscaleGuide();
   initPinToggle();
   initFirstRunPrompt();
-  initServiceOnboardModal(); // Onboarding Step 2：背景服務安裝引導
 
   // 啟動狀態輪詢
   startStatusPolling();

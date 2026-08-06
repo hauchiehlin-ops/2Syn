@@ -239,11 +239,13 @@ impl CoreEngine {
     let control_last_seq = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let unreliable_last_seq = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let engine_inner = Arc::clone(self);
+    let pc_for_data_channel = Arc::clone(&pc);
     let session_alive_data_channel = Arc::clone(&session_alive);
 
     pc.on_data_channel(Box::new(move |d| {
         let label = d.label().to_owned();
         let engine_inner = Arc::clone(&engine_inner);
+        let pc_self = Arc::clone(&pc_for_data_channel);
         let session_alive = Arc::clone(&session_alive_data_channel);
         println!("Rust 接收到 DataChannel: {}", label);
 
@@ -310,10 +312,14 @@ impl CoreEngine {
         } else if label == "system-control" {
             let engine_inner = Arc::clone(&engine_inner);
             let dc_for_system = Arc::clone(&d);
+            let pc_for_system = Arc::clone(&pc_self);
+            let session_alive_for_system = Arc::clone(&session_alive);
             d.on_message(Box::new(move |msg| {
                 let data = msg.data.to_vec();
                 let engine_inner = Arc::clone(&engine_inner);
                 let dc = Arc::clone(&dc_for_system);
+                let pc_self = Arc::clone(&pc_for_system);
+                let session_alive = Arc::clone(&session_alive_for_system);
                 Box::pin(async move {
                     if let Ok(text) = String::from_utf8(data) {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
@@ -332,6 +338,43 @@ impl CoreEngine {
                                 });
                                 if let Err(error) = dc.send_text(pong.to_string()).await {
                                     eprintln!("[input-health] Failed to send input pong: {}", error);
+                                }
+                            } else if json["type"] == "session_disconnect" {
+                                let old_pc = {
+                                    let mut active_pc = engine_inner.active_pc.lock().await;
+                                    if active_pc
+                                        .as_ref()
+                                        .map(|cur| Arc::ptr_eq(cur, &pc_self))
+                                        .unwrap_or(false)
+                                    {
+                                        active_pc.take()
+                                    } else {
+                                        None
+                                    }
+                                };
+
+                                if let Some(pc) = old_pc {
+                                    session_alive.store(false, std::sync::atomic::Ordering::SeqCst);
+                                    engine_inner
+                                        .has_active_webrtc
+                                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                                    *engine_inner.current_remote_id.write().await = String::new();
+                                    *engine_inner.active_session_id.write().await = String::new();
+                                    *engine_inner.active_file_channel.lock().await = None;
+                                    *engine_inner.active_file_control_channel.lock().await = None;
+                                    engine_inner.active_file_data_channels.lock().await.clear();
+                                    *engine_inner.file_receive_state.lock().await = None;
+                                    engine_inner.file_resume_offsets.lock().await.clear();
+                                    engine_inner.file_complete_confirmations.lock().await.clear();
+                                    engine_inner.active_file_send_ids.lock().await.clear();
+                                    engine_inner.file_cancelled_transfers.lock().await.clear();
+                                    if let Err(error) = pc.close().await {
+                                        eprintln!("[WebRTC] Failed to close session after client logout: {}", error);
+                                    } else {
+                                        println!("[WebRTC] Client logout received; active host session closed");
+                                    }
+                                } else {
+                                    println!("[WebRTC] Client logout received for stale session; ignored");
                                 }
                             }
                         }

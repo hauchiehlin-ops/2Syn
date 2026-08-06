@@ -1,6 +1,6 @@
 [package]
 name = "syn-signaling"
-version = "7.1.2"
+version = "7.2.1"
 edition = "2021"
 
 [dependencies]

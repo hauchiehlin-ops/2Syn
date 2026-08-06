@@ -392,17 +392,34 @@ function bindQueueActions(getChannel: () => RTCDataChannel | null) {
     });
   });
 
+  const dismissQueue = () => {
+    if (activeQueueSending) {
+      activeQueueSending = false;
+      cancelActiveFileTransfer(getChannel());
+    }
+    clearPendingFiles();
+  };
+
   document.querySelectorAll<HTMLButtonElement>("[data-transfer-queue-clear]").forEach((button) => {
     if (button.dataset.bound === "true") return;
     button.dataset.bound = "true";
-    button.addEventListener("click", () => {
-      if (activeQueueSending) {
-        activeQueueSending = false;
-        cancelActiveFileTransfer(getChannel());
-      }
-      clearPendingFiles();
-    });
+    button.addEventListener("click", dismissQueue);
   });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-transfer-queue-close]").forEach((button) => {
+    if (button.dataset.bound === "true") return;
+    button.dataset.bound = "true";
+    button.addEventListener("click", dismissQueue);
+  });
+
+  if (!(window as any).__transferQueueEscBound) {
+    (window as any).__transferQueueEscBound = true;
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && pendingSendFiles.length > 0) {
+        dismissQueue();
+      }
+    });
+  }
 }
 
 function addPendingFiles(files: PendingSendFile[]) {
@@ -474,9 +491,7 @@ function updateQueueUi() {
       sendButton.disabled = activeQueueSending || pendingSendFiles.length === 0;
     }
     if (clearButton) {
-      clearButton.textContent = activeQueueSending
-        ? transferText("file_transfer_cancel_selected", "Cancel")
-        : transferText("file_transfer_clear_selected", "Clear");
+      clearButton.textContent = transferText("file_transfer_cancel_selected", "Cancel");
       clearButton.disabled = false;
     }
   });

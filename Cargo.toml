@@ -3,6 +3,6 @@ resolver = "2"
 members = [
     "core",
     "signaling",
-    "desktop/src-tauri",
-    "daemon"
+    "desktop/src-tauri"
 ]
+

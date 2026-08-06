@@ -1336,8 +1336,45 @@ input:checked + .slider:before {
   font-weight: 700;
 }
 
+.file-transfer-queue-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-transfer-queue-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-transfer-queue-close:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ef4444;
+}
+
 .session-file-transfer-queue .file-transfer-queue-header {
   color: rgba(255, 255, 255, 0.9);
+}
+
+.session-file-transfer-queue .btn-transfer-queue-close {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.session-file-transfer-queue .btn-transfer-queue-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #f87171;
 }
 
 .file-transfer-queue-list {
@@ -1818,6 +1855,42 @@ body.file-transfer-active-queue .session-transfer-progress {
 
 .modal-close-btn:hover {
   color: var(--text-main);
+}
+
+.host-login-modal-content {
+  max-width: 440px;
+}
+
+.host-login-desc {
+  margin: 0 0 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.host-login-form {
+  display: grid;
+  gap: 12px;
+}
+
+.host-login-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.host-login-form input {
+  width: 100%;
+}
+
+.host-login-status {
+  min-height: 18px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 /* Tab 導航列 */

@@ -44,8 +44,6 @@ pub mod audio;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod engine;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod system_config;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod signaling_client;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod host_session;

@@ -29,6 +29,9 @@ pub enum EngineEvent {
     VideoStatus(String),
     SignalingError(String),
     CustomRequestLogs { source: String, target: String },
+    LoginRequired { source: String, reason: String, platform: Option<String> },
+    LoginInput { source: String, username: Option<String>, auth_password: String, login_password: String, session_id: Option<String> },
+    LoginResult { source: String, success: bool, message: String, session_id: Option<String> },
 }
 
 /// CoreEngine encapsulates the entire connection, WebRTC, and signaling state.

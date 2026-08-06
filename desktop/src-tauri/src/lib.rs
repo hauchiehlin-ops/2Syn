@@ -57,153 +57,13 @@ async fn get_device_hwid() -> Result<String, String> {
 
 const STATIC_PWD_KEY: &str = "2syn_static_password";
 
-/// 設定靜態無人值守密碼
+/// 設定靜態密碼
 #[tauri::command]
 async fn set_static_password(password: String) -> Result<(), String> {
     if password.is_empty() {
         return Err("Password cannot be empty".to_string());
     }
-    // Save to user's keychain for legacy compatibility
-    let _ = SecureStorage::save_secret(STATIC_PWD_KEY, &password);
-
-    // Also save to system config for daemon (desktop only — iOS is client-only, no daemon)
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    {
-        let hashed = syn_core::system_config::SystemConfig::hash_password(&password);
-        let mut config = syn_core::system_config::SystemConfig::read_config();
-        config.hashed_password = Some(hashed);
-        syn_core::system_config::SystemConfig::write_config(&config)
-            .map_err(|e| format!("Failed to write system config: {}", e))?;
-    }
-
-    Ok(())
-}
-
-/// 安裝背景服務 (需提權)
-#[tauri::command]
-async fn install_unattended_service() -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-        let exe_dir = exe_path.parent().unwrap();
-        let daemon_path = exe_dir.join("2syn-daemon.exe");
-        
-        let script = format!(
-            "Start-Process sc.exe -ArgumentList 'create', '2syn-daemon', 'binPath=', '\"{}\"', 'start=', 'auto' -Verb RunAs",
-            daemon_path.display()
-        );
-        
-        std::process::Command::new("powershell")
-            .args(&["-Command", &script])
-            .output()
-            .map_err(|e| format!("Failed to invoke powershell: {}", e))?;
-        
-        // Start it immediately
-        let start_script = "Start-Process sc.exe -ArgumentList 'start', '2syn-daemon' -Verb RunAs";
-        std::process::Command::new("powershell")
-            .args(&["-Command", start_script])
-            .output()
-            .map_err(|e| format!("Failed to start service: {}", e))?;
-            
-        Ok(())
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-        let exe_dir = exe_path.parent().unwrap();
-        let daemon_path = exe_dir.join("2syn-daemon");
-        
-        let plist_content = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.2syn.daemon</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{}</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>"#, daemon_path.display());
-
-        let temp_plist = "/tmp/com.2syn.daemon.plist";
-        std::fs::write(temp_plist, plist_content).map_err(|e| e.to_string())?;
-
-        let script = format!(
-            "do shell script \"mv {} /Library/LaunchDaemons/com.2syn.daemon.plist && chown root:wheel /Library/LaunchDaemons/com.2syn.daemon.plist && launchctl load /Library/LaunchDaemons/com.2syn.daemon.plist\" with administrator privileges",
-            temp_plist
-        );
-
-        std::process::Command::new("osascript")
-            .args(&["-e", &script])
-            .output()
-            .map_err(|e| format!("Failed to invoke osascript: {}", e))?;
-            
-        Ok(())
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        Err("Unsupported OS".to_string())
-    }
-}
-
-/// 查詢背景服務是否已安裝（直接檢查系統名稱/plist，不依賴 localStorage）
-#[tauri::command]
-async fn check_service_installed() -> Result<bool, String> {
-    #[cfg(target_os = "macos")]
-    {
-        // 檢查 launchd plist 檔案是否存在
-        Ok(std::path::Path::new("/Library/LaunchDaemons/com.2syn.daemon.plist").exists())
-    }
-    #[cfg(target_os = "windows")]
-    {
-        // 檢查 Windows 服務是否存在
-        let output = std::process::Command::new("sc")
-            .args(&["query", "2syn-daemon"])
-            .output()
-            .map_err(|e| format!("Failed to query service: {}", e))?;
-        // sc query 返回 0 表示服務存在（無論啟動狀態）
-        Ok(output.status.success())
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        Ok(false)
-    }
-}
-
-/// 移除背景服務 (需提權)
-#[tauri::command]
-async fn uninstall_unattended_service() -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        let script = "Start-Process sc.exe -ArgumentList 'stop', '2syn-daemon' -Verb RunAs; Start-Process sc.exe -ArgumentList 'delete', '2syn-daemon' -Verb RunAs";
-        std::process::Command::new("powershell")
-            .args(&["-Command", script])
-            .output()
-            .map_err(|e| format!("Failed to invoke powershell: {}", e))?;
-        Ok(())
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let script = "do shell script \"launchctl unload /Library/LaunchDaemons/com.2syn.daemon.plist && rm /Library/LaunchDaemons/com.2syn.daemon.plist\" with administrator privileges";
-        std::process::Command::new("osascript")
-            .args(&["-e", script])
-            .output()
-            .map_err(|e| format!("Failed to invoke osascript: {}", e))?;
-        Ok(())
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        Err("Unsupported OS".to_string())
-    }
+    SecureStorage::save_secret(STATIC_PWD_KEY, &password).map_err(|e| e.to_string())
 }
 
 /// 驗證靜態無人值守密碼
@@ -1019,11 +879,13 @@ async fn handle_remote_offer_as_host(
     let control_last_seq = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let unreliable_last_seq = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let app_for_data_channel = app_handle.clone();
+    let pc_for_data_channel = Arc::clone(&pc);
     let session_alive_data_channel = Arc::clone(&session_alive);
 
     pc.on_data_channel(Box::new(move |d| {
         let label = d.label().to_owned();
         let app = app_for_data_channel.clone();
+        let pc_self = Arc::clone(&pc_for_data_channel);
         let session_alive = Arc::clone(&session_alive_data_channel);
         println!("Rust 接收到 DataChannel: {}", label);
 
@@ -1090,10 +952,14 @@ async fn handle_remote_offer_as_host(
         } else if label == "system-control" {
             let app_for_system = app.clone();
             let dc_for_system = Arc::clone(&d);
+            let pc_for_system = Arc::clone(&pc_self);
+            let session_alive_for_system = Arc::clone(&session_alive);
             d.on_message(Box::new(move |msg| {
                 let data = msg.data.to_vec();
                 let app = app_for_system.clone();
                 let dc = Arc::clone(&dc_for_system);
+                let pc_self = Arc::clone(&pc_for_system);
+                let session_alive = Arc::clone(&session_alive_for_system);
                 Box::pin(async move {
                     if let Ok(text) = String::from_utf8(data) {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
@@ -1112,6 +978,45 @@ async fn handle_remote_offer_as_host(
                                 });
                                 if let Err(error) = dc.send_text(pong.to_string()).await {
                                     eprintln!("[input-health] Failed to send input pong: {}", error);
+                                }
+                            } else if json["type"] == "session_disconnect" {
+                                let state = app.state::<AppState>();
+                                let old_pc = {
+                                    let mut active_pc = state.engine.active_pc.lock().await;
+                                    if active_pc
+                                        .as_ref()
+                                        .map(|cur| Arc::ptr_eq(cur, &pc_self))
+                                        .unwrap_or(false)
+                                    {
+                                        active_pc.take()
+                                    } else {
+                                        None
+                                    }
+                                };
+
+                                if let Some(pc) = old_pc {
+                                    session_alive.store(false, std::sync::atomic::Ordering::SeqCst);
+                                    state
+                                        .engine
+                                        .has_active_webrtc
+                                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                                    *state.engine.current_remote_id.write().await = String::new();
+                                    *state.engine.active_session_id.write().await = String::new();
+                                    *state.engine.active_file_channel.lock().await = None;
+                                    *state.engine.active_file_control_channel.lock().await = None;
+                                    state.engine.active_file_data_channels.lock().await.clear();
+                                    *state.engine.file_receive_state.lock().await = None;
+                                    state.engine.file_resume_offsets.lock().await.clear();
+                                    state.engine.file_complete_confirmations.lock().await.clear();
+                                    state.engine.active_file_send_ids.lock().await.clear();
+                                    state.engine.file_cancelled_transfers.lock().await.clear();
+                                    if let Err(error) = pc.close().await {
+                                        eprintln!("[WebRTC] Failed to close session after client logout: {}", error);
+                                    } else {
+                                        println!("[WebRTC] Client logout received; active host session closed");
+                                    }
+                                } else {
+                                    println!("[WebRTC] Client logout received for stale session; ignored");
                                 }
                             }
                         }
@@ -2306,6 +2211,13 @@ fn unique_received_file_path(dir: &std::path::Path, file_name: &str) -> std::pat
     dir.join(format!("{}-{}", uuid::Uuid::new_v4(), file_name))
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    WindowEvent,
+};
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -2328,9 +2240,60 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_shell::init())
+        .on_window_event(|window, event| {
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                // 預設持續在背景運作（除非使用者在系統選單中點擊完全退出）
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|_app| {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             {
+                if let (Ok(show_i), Ok(quit_i)) = (
+                    MenuItem::with_id(_app, "show", "開啟 2syn 主畫面", true, None::<&str>),
+                    MenuItem::with_id(_app, "quit", "完全結束 2syn", true, None::<&str>),
+                ) {
+                    if let Ok(menu) = Menu::with_items(_app, &[&show_i, &quit_i]) {
+                        if let Some(icon) = _app.default_window_icon() {
+                            let _ = TrayIconBuilder::new()
+                                .icon(icon.clone())
+                                .menu(&menu)
+                                .show_menu_on_left_click(false)
+                                .on_menu_event(|app, event| match event.id.as_ref() {
+                                    "show" => {
+                                        if let Some(window) = app.get_webview_window("main") {
+                                            let _ = window.show();
+                                            let _ = window.unminimize();
+                                            let _ = window.set_focus();
+                                        }
+                                    }
+                                    "quit" => {
+                                        app.exit(0);
+                                    }
+                                    _ => {}
+                                })
+                                .on_tray_icon_event(|tray, event| {
+                                    if let TrayIconEvent::Click {
+                                        button: MouseButton::Left,
+                                        button_state: MouseButtonState::Up,
+                                        ..
+                                    } = event
+                                    {
+                                        let app = tray.app_handle();
+                                        if let Some(window) = app.get_webview_window("main") {
+                                            let _ = window.show();
+                                            let _ = window.unminimize();
+                                            let _ = window.set_focus();
+                                        }
+                                    }
+                                })
+                                .build(_app);
+                        }
+                    }
+                }
+
                 let app_handle = _app.handle().clone();
                 let state = _app.state::<AppState>();
                 let mut event_rx = state.engine.subscribe_events();
@@ -2387,6 +2350,36 @@ pub fn run() {
                                 });
                                 let _ = app_handle.emit("rust-signaling-message", payload.to_string());
                             }
+                            syn_core::engine::EngineEvent::LoginRequired { source, reason, platform } => {
+                                let payload = serde_json::json!({
+                                    "type": "login_required",
+                                    "source": source,
+                                    "reason": reason,
+                                    "platform": platform
+                                });
+                                let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                            }
+                            syn_core::engine::EngineEvent::LoginInput { source, username, auth_password, login_password, session_id } => {
+                                let payload = serde_json::json!({
+                                    "type": "login_input",
+                                    "source": source,
+                                    "username": username,
+                                    "authPassword": auth_password,
+                                    "loginPassword": login_password,
+                                    "sessionId": session_id
+                                });
+                                let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                            }
+                            syn_core::engine::EngineEvent::LoginResult { source, success, message, session_id } => {
+                                let payload = serde_json::json!({
+                                    "type": "login_result",
+                                    "source": source,
+                                    "success": success,
+                                    "message": message,
+                                    "sessionId": session_id
+                                });
+                                let _ = app_handle.emit("rust-signaling-message", payload.to_string());
+                            }
                             syn_core::engine::EngineEvent::SignalingConnected => {
                                 let _ = app_handle.emit("rust-signaling-connected", ());
                             }
@@ -2420,9 +2413,6 @@ pub fn run() {
             verify_static_password,
             check_has_static_password,
             delete_static_password,
-            install_unattended_service,
-            uninstall_unattended_service,
-            check_service_installed,
             verify_license_key,
             check_license_status,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]

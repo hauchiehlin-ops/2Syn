@@ -47,6 +47,12 @@ enum SignalingMessage {
     Ice { target: String, candidate: String, #[serde(rename = "sessionId")] session_id: Option<String> },
     #[serde(rename = "error")]
     Error { target: String, message: String },
+    #[serde(rename = "login_required")]
+    LoginRequired { target: String, reason: String, platform: Option<String> },
+    #[serde(rename = "login_input")]
+    LoginInput { target: String, username: Option<String>, #[serde(rename = "authPassword")] auth_password: String, #[serde(rename = "loginPassword")] login_password: String, #[serde(rename = "sessionId")] session_id: Option<String> },
+    #[serde(rename = "login_result")]
+    LoginResult { target: String, success: bool, message: String, #[serde(rename = "sessionId")] session_id: Option<String> },
     #[serde(rename = "ping")]
     Ping,
 }
@@ -62,6 +68,12 @@ enum ServerMessage {
     Ice { source: String, candidate: String, #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none")] session_id: Option<String> },
     #[serde(rename = "error")]
     Error { message: String },
+    #[serde(rename = "login_required")]
+    LoginRequired { source: String, reason: String, platform: Option<String> },
+    #[serde(rename = "login_input")]
+    LoginInput { source: String, username: Option<String>, #[serde(rename = "authPassword")] auth_password: String, #[serde(rename = "loginPassword")] login_password: String, #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none")] session_id: Option<String> },
+    #[serde(rename = "login_result")]
+    LoginResult { source: String, success: bool, message: String, #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none")] session_id: Option<String> },
     #[serde(rename = "pong")]
     Pong,
 }
@@ -269,6 +281,54 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                 if let Some(target_tx) = target_tx_opt {
                                     let out_msg = ServerMessage::Error {
                                         message: format!("From {}: {}", client_id.clone().unwrap_or_default(), message),
+                                    };
+                                    let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
+                                }
+                            }
+                            SignalingMessage::LoginRequired { target, reason, platform } => {
+                                let target_tx_opt = {
+                                    let clients = state.clients.read().await;
+                                    clients.get(&target).cloned()
+                                };
+                                if let Some(target_tx) = target_tx_opt {
+                                    let out_msg = ServerMessage::LoginRequired {
+                                        source: client_id.clone().unwrap_or_default(),
+                                        reason,
+                                        platform,
+                                    };
+                                    let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
+                                }
+                            }
+                            SignalingMessage::LoginInput { target, username, auth_password, login_password, session_id } => {
+                                let target_tx_opt = {
+                                    let clients = state.clients.read().await;
+                                    clients.get(&target).cloned()
+                                };
+                                if let Some(target_tx) = target_tx_opt {
+                                    let out_msg = ServerMessage::LoginInput {
+                                        source: client_id.clone().unwrap_or_default(),
+                                        username,
+                                        auth_password,
+                                        login_password,
+                                        session_id,
+                                    };
+                                    let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
+                                } else {
+                                    let err = ServerMessage::Error { message: "Target offline".into() };
+                                    let _ = tx.send(Message::Text(serde_json::to_string(&err).unwrap())).await;
+                                }
+                            }
+                            SignalingMessage::LoginResult { target, success, message, session_id } => {
+                                let target_tx_opt = {
+                                    let clients = state.clients.read().await;
+                                    clients.get(&target).cloned()
+                                };
+                                if let Some(target_tx) = target_tx_opt {
+                                    let out_msg = ServerMessage::LoginResult {
+                                        source: client_id.clone().unwrap_or_default(),
+                                        success,
+                                        message,
+                                        session_id,
                                     };
                                     let _ = target_tx.send(Message::Text(serde_json::to_string(&out_msg).unwrap())).await;
                                 }

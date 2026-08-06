@@ -36,6 +36,31 @@ pub enum IncomingMessage {
     Pong,
     #[serde(rename = "custom_request_logs")]
     CustomRequestLogs { source: String, target: String },
+    #[serde(rename = "login_required")]
+    LoginRequired {
+        source: String,
+        reason: String,
+        platform: Option<String>,
+    },
+    #[serde(rename = "login_input")]
+    LoginInput {
+        source: String,
+        username: Option<String>,
+        #[serde(rename = "authPassword")]
+        auth_password: String,
+        #[serde(rename = "loginPassword")]
+        login_password: String,
+        #[serde(rename = "sessionId")]
+        session_id: Option<String>,
+    },
+    #[serde(rename = "login_result")]
+    LoginResult {
+        source: String,
+        success: bool,
+        message: String,
+        #[serde(rename = "sessionId")]
+        session_id: Option<String>,
+    },
 }
 
 impl CoreEngine {
@@ -149,6 +174,15 @@ impl CoreEngine {
                                         }
                                         IncomingMessage::CustomRequestLogs { source, target } => {
                                             engine_inner.emit(EngineEvent::CustomRequestLogs { source, target });
+                                        }
+                                        IncomingMessage::LoginRequired { source, reason, platform } => {
+                                            engine_inner.emit(EngineEvent::LoginRequired { source, reason, platform });
+                                        }
+                                        IncomingMessage::LoginInput { source, username, auth_password, login_password, session_id } => {
+                                            engine_inner.emit(EngineEvent::LoginInput { source, username, auth_password, login_password, session_id });
+                                        }
+                                        IncomingMessage::LoginResult { source, success, message, session_id } => {
+                                            engine_inner.emit(EngineEvent::LoginResult { source, success, message, session_id });
                                         }
                                         IncomingMessage::Pong => {}
                                     }
