@@ -6290,7 +6290,7 @@ dependencies = [
 
 [[package]]
 name = "syn-core"
-version = "7.2.0"
+version = "7.3.0"
 dependencies = [
  "aes-gcm",
  "apple-cf",
@@ -6335,7 +6335,7 @@ dependencies = [
 
 [[package]]
 name = "syn-desktop"
-version = "7.2.0"
+version = "7.3.0"
 dependencies = [
  "arboard",
  "bytes",
@@ -6359,11 +6359,12 @@ dependencies = [
  "url",
  "uuid",
  "webrtc",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
 name = "syn-signaling"
-version = "7.2.0"
+version = "7.3.0"
 dependencies = [
  "axum",
  "futures-util",

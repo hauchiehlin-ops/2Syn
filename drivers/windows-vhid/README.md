@@ -39,7 +39,13 @@ Reboot after enabling test-signing.
 
 ## Runtime Contract
 
-The 2syn daemon first tries the virtual HID path. If the device is not installed
-or rejects an input report, the daemon falls back to the older SendInput backend
-and reports that fallback in `login_result.message`.
+The 2syn daemon uses this virtual HID path for Windows lock-screen login. If the
+device is not installed or rejects an input report, lock-screen password
+injection fails and the client receives a `login_result` error. The lock-screen
+path must not silently fall back to `SendInput`, because `SendInput` cannot be
+treated as a reliable secure-desktop input backend.
 
+The current boot-keyboard report path intentionally supports only stable
+alphanumeric credentials (`A-Z`, `a-z`, `0-9`) for Windows lock-screen login.
+Punctuation and non-ASCII characters depend on the active Windows keyboard
+layout at the secure desktop and are not safe to promise for unattended login.

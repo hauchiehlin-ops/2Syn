@@ -51,3 +51,5 @@ pub mod host_session;
 pub mod turn;
 pub mod wol;
 pub mod debug_log;
+#[cfg(target_os = "windows")]
+pub mod os;

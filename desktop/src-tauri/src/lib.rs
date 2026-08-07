@@ -90,6 +90,97 @@ async fn delete_static_password() -> Result<(), String> {
     SecureStorage::delete_secret(STATIC_PWD_KEY).map_err(|e| e.to_string())
 }
 
+#[cfg(target_os = "windows")]
+fn is_host_screen_locked() -> bool {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::Foundation::MAXIMUM_ALLOWED;
+    use windows_sys::Win32::System::StationsAndDesktops::{
+        CloseDesktop, GetUserObjectInformationW, OpenInputDesktop, UOI_NAME,
+    };
+
+    unsafe {
+        let desktop = OpenInputDesktop(0, 0, MAXIMUM_ALLOWED);
+        if desktop == 0 {
+            return true;
+        }
+
+        let mut needed = 0u32;
+        let mut buffer = [0u16; 256];
+        let ok = GetUserObjectInformationW(
+            desktop,
+            UOI_NAME,
+            buffer.as_mut_ptr() as *mut _,
+            (buffer.len() * std::mem::size_of::<u16>()) as u32,
+            &mut needed,
+        );
+        CloseDesktop(desktop);
+
+        if ok == 0 {
+            return false;
+        }
+
+        let len = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
+        let name = OsString::from_wide(&buffer[..len])
+            .to_string_lossy()
+            .to_ascii_lowercase();
+        name == "winlogon" || name == "screen-saver"
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn is_host_screen_locked() -> bool {
+    use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
+    use core_foundation::boolean::{CFBoolean, CFBooleanGetTypeID};
+    use core_foundation::dictionary::CFDictionaryGetValue;
+    use core_foundation::string::CFString;
+
+    extern "C" {
+        fn CGSessionCopyCurrentDictionary() -> CFTypeRef;
+    }
+
+    unsafe {
+        let dict = CGSessionCopyCurrentDictionary();
+        if dict.is_null() {
+            return false;
+        }
+
+        let key = CFString::new("CGSSessionScreenIsLocked");
+        let value = CFDictionaryGetValue(dict as _, key.as_concrete_TypeRef() as *const _);
+        let locked = if value.is_null() {
+            false
+        } else if core_foundation::base::CFGetTypeID(value as _) == CFBooleanGetTypeID() {
+            bool::from(CFBoolean::wrap_under_get_rule(value as _))
+        } else {
+            false
+        };
+
+        CFRelease(dict);
+        locked
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn is_host_screen_locked() -> bool {
+    false
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[tauri::command]
+async fn check_host_screen_locked() -> Result<serde_json::Value, String> {
+    let locked = is_host_screen_locked();
+    #[cfg(target_os = "windows")]
+    let supports_password_injection = syn_core::os::windows::is_vhid_available();
+    #[cfg(not(target_os = "windows"))]
+    let supports_password_injection = false;
+
+    Ok(serde_json::json!({
+        "locked": locked,
+        "platform": std::env::consts::OS,
+        "supportsPasswordInjection": supports_password_injection
+    }))
+}
+
 /// 開啟 macOS「系統設定 > 一般 > 登入項目與延伸功能」面板，
 /// 方便使用者設定「自動登入」，避免被控端登出後遠端連線中斷。
 #[cfg(target_os = "macos")]
@@ -1678,6 +1769,96 @@ async fn send_custom_signaling_message(
     }
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn send_login_result_to_client(
+    state: &AppState,
+    target: &str,
+    success: bool,
+    message: &str,
+    session_id: Option<String>,
+) -> Result<(), String> {
+    let tx_opt = state.engine.signaling_tx.lock().await.clone();
+    let tx = tx_opt.ok_or_else(|| "信令連線未建立".to_string())?;
+    let msg = serde_json::json!({
+        "type": "login_result",
+        "target": target,
+        "success": success,
+        "message": message,
+        "sessionId": session_id,
+    });
+    tx.send(msg.to_string())
+        .await
+        .map_err(|e| format!("發送登入結果失敗: {}", e))
+}
+
+#[cfg(target_os = "windows")]
+fn inject_windows_login_input(username: Option<String>, login_password: String) -> Result<(), String> {
+    syn_core::os::windows::type_windows_login_with_vhid(username.as_deref(), &login_password)
+}
+
+#[cfg(target_os = "windows")]
+async fn handle_platform_login_input(
+    username: Option<String>,
+    login_password: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || inject_windows_login_input(username, login_password))
+        .await
+        .map_err(|e| format!("登入輸入工作失敗: {}", e))??;
+    Ok("Windows login input sent through 2syn virtual HID. Waiting for desktop session.".to_string())
+}
+
+#[cfg(target_os = "macos")]
+async fn handle_platform_login_input(
+    _username: Option<String>,
+    _login_password: String,
+) -> Result<String, String> {
+    Err("macOS locked screens must be unlocked with native system authentication, such as the physical keyboard, Touch ID, or Apple Watch, then reconnect 2syn.".to_string())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+async fn handle_platform_login_input(
+    _username: Option<String>,
+    _login_password: String,
+) -> Result<String, String> {
+    Err("OS login input is not supported on this host platform.".to_string())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+async fn process_host_login_input(
+    app: tauri::AppHandle,
+    source: String,
+    username: Option<String>,
+    auth_password: String,
+    login_password: String,
+    session_id: Option<String>,
+) {
+    let state = app.state::<AppState>();
+    let authorized = match SecureStorage::load_secret(STATIC_PWD_KEY) {
+        Ok(saved) => !saved.is_empty() && saved == auth_password,
+        Err(_) => false,
+    };
+
+    if !authorized {
+        let _ = send_login_result_to_client(
+            &state,
+            &source,
+            false,
+            "Invalid 2syn unattended password.",
+            session_id,
+        )
+        .await;
+        return;
+    }
+
+    let result = handle_platform_login_input(username, login_password).await;
+    let (success, message) = match result {
+        Ok(message) => (true, message),
+        Err(message) => (false, message),
+    };
+
+    let _ = send_login_result_to_client(&state, &source, success, &message, session_id).await;
+}
+
 #[tauri::command]
 async fn wake_device(mac: String) -> Result<(), String> {
     syn_core::wol::wake_on_lan(&mac).await
@@ -2360,15 +2541,18 @@ pub fn run() {
                                 let _ = app_handle.emit("rust-signaling-message", payload.to_string());
                             }
                             syn_core::engine::EngineEvent::LoginInput { source, username, auth_password, login_password, session_id } => {
-                                let payload = serde_json::json!({
-                                    "type": "login_input",
-                                    "source": source,
-                                    "username": username,
-                                    "authPassword": auth_password,
-                                    "loginPassword": login_password,
-                                    "sessionId": session_id
+                                let app = app_handle.clone();
+                                tokio::spawn(async move {
+                                    process_host_login_input(
+                                        app,
+                                        source,
+                                        username,
+                                        auth_password,
+                                        login_password,
+                                        session_id,
+                                    )
+                                    .await;
                                 });
-                                let _ = app_handle.emit("rust-signaling-message", payload.to_string());
                             }
                             syn_core::engine::EngineEvent::LoginResult { source, success, message, session_id } => {
                                 let payload = serde_json::json!({
@@ -2444,6 +2628,8 @@ pub fn run() {
             check_macos_permissions,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             send_custom_signaling_message,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            check_host_screen_locked,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             has_active_file_transfer_channel,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]

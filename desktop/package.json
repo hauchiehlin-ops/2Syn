@@ -1,14 +1,14 @@
 {
   "name": "syn-desktop-ui",
   "private": true,
-  "version": "7.2.1",
+  "version": "7.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:build:host": "node -e \"if(process.platform==='darwin'){require('child_process').execSync('bash ../scripts/clean-dmg-mounts.sh',{stdio:'inherit'})}\" && tauri build",
+    "tauri:build:host": "node -e \"const cp=require('child_process');if(process.platform==='darwin'){cp.execSync('bash ../scripts/clean-dmg-mounts.sh',{stdio:'inherit'})}if(process.platform==='win32'&&process.env.SYN_SKIP_WINDOWS_DRIVER_PREPARE!=='1'){cp.execSync('powershell.exe -ExecutionPolicy Bypass -File ../scripts/prepare-windows-host-installer.ps1',{stdio:'inherit'})}\" && tauri build",
     "tauri:build:client": "tauri build --config src-tauri/tauri.client.conf.json",
     "tauri:build:ios:host": "tauri ios build",
     "tauri:build:ios:client": "tauri ios build --config src-tauri/tauri.client.conf.json",

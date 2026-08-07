@@ -1,6 +1,6 @@
 [package]
 name = "syn-core"
-version = "7.2.1"
+version = "7.3.0"
 edition = "2021"
 
 [dependencies]
@@ -45,6 +45,7 @@ winreg = "0.52"
 windows-sys = { version = "0.52", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_Foundation",
+    "Win32_System_StationsAndDesktops",
     "Win32_System_IO",
     "Win32_Storage_FileSystem",
     "Win32_Graphics",

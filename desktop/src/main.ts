@@ -2024,6 +2024,8 @@ let heartbeatTimer: any = null;
 let pendingHostLoginTarget: string | null = null;
 let pendingHostLoginSessionId: string | null = null;
 let pendingHostLoginPin: string | null = null;
+let pendingHostLoginPlatform: string | null = null;
+let pendingHostLoginReason: string | null = null;
 
 async function sendSignalingMessage(message: any): Promise<void> {
   const serialized = JSON.stringify(message);
@@ -2044,19 +2046,43 @@ function showHostLoginModal(msg: any) {
   const modal = document.getElementById("host-login-modal") as HTMLElement | null;
   const status = document.getElementById("host-login-status");
   const authInput = document.getElementById("host-login-auth-password") as HTMLInputElement | null;
+  const usernameInput = document.getElementById("host-login-username") as HTMLInputElement | null;
   const loginInput = document.getElementById("host-login-password") as HTMLInputElement | null;
+  const submitBtn = document.getElementById("btn-submit-host-login") as HTMLButtonElement | null;
   const desc = document.getElementById("host-login-desc");
   if (!modal) return;
 
+  pendingHostLoginPlatform = msg.platform || null;
+  pendingHostLoginReason = msg.reason || null;
+  const requiresNativeUnlock = msg.reason === "macos_locked_native_unlock_required";
+  const authLabel = authInput?.closest("label") as HTMLElement | null;
+  const usernameLabel = usernameInput?.closest("label") as HTMLElement | null;
+  const loginLabel = loginInput?.closest("label") as HTMLElement | null;
+
   if (desc) {
     const platform = msg.platform ? ` (${msg.platform})` : "";
-    desc.textContent = `The host is at the operating system login screen${platform}. Authorize with the 2syn unattended password, then send the OS login credentials.`;
+    desc.textContent = requiresNativeUnlock
+      ? `The macOS host is locked${platform}. Unlock it with native macOS authentication on the host, such as the physical keyboard, Touch ID, or Apple Watch, then reconnect 2syn.`
+      : msg.platform === "windows"
+        ? `The Windows host is locked${platform}. Authorize with the 2syn unattended password, then send Windows login credentials. For stable lock-screen input, use only letters and digits.`
+        : `The host is at the operating system login screen${platform}. Authorize with the 2syn unattended password, then send the OS login credentials.`;
   }
-  if (status) status.textContent = "";
+  if (status) {
+    status.textContent = requiresNativeUnlock
+      ? "For reliability and macOS security boundaries, 2syn does not inject passwords into the macOS lock screen."
+      : "";
+  }
   if (authInput) authInput.value = "";
+  if (usernameInput) usernameInput.value = "";
   if (loginInput) loginInput.value = "";
+  if (authLabel) authLabel.style.display = requiresNativeUnlock ? "none" : "grid";
+  if (usernameLabel) usernameLabel.style.display = requiresNativeUnlock ? "none" : "grid";
+  if (loginLabel) loginLabel.style.display = requiresNativeUnlock ? "none" : "grid";
+  if (submitBtn) submitBtn.style.display = requiresNativeUnlock ? "none" : "inline-flex";
   modal.style.display = "flex";
-  setTimeout(() => authInput?.focus(), 50);
+  if (!requiresNativeUnlock) {
+    setTimeout(() => authInput?.focus(), 50);
+  }
 }
 
 function hideHostLoginModal() {
@@ -2095,6 +2121,8 @@ function initHostLoginModal() {
     pendingHostLoginTarget = null;
     pendingHostLoginSessionId = null;
     pendingHostLoginPin = null;
+    pendingHostLoginPlatform = null;
+    pendingHostLoginReason = null;
     hideHostLoginModal();
     resetConnectionUI();
   });
@@ -2107,6 +2135,15 @@ function initHostLoginModal() {
     if (!authPassword || !loginPassword) {
       if (status) status.textContent = "Both password fields are required.";
       return;
+    }
+    if (pendingHostLoginPlatform === "windows" && pendingHostLoginReason === "windows_locked_password_supported") {
+      const stableChars = /^[A-Za-z0-9]+$/;
+      if ((username && !stableChars.test(username)) || !stableChars.test(loginPassword)) {
+        if (status) {
+          status.textContent = "Windows lock-screen auto login supports only letters and digits for reliable keyboard-layout-independent input.";
+        }
+        return;
+      }
     }
 
     if (submitBtn) submitBtn.disabled = true;
@@ -3066,6 +3103,26 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
       console.warn("[Signaling] 發送密碼錯誤拒絕訊息失敗:", e);
     }
     return;
+  }
+
+  try {
+    const lockState = await invoke<any>("check_host_screen_locked");
+    if (lockState?.locked) {
+      const platform = lockState.platform || "desktop";
+      const reason = platform === "macos"
+        ? "macos_locked_native_unlock_required"
+        : "windows_locked_password_supported";
+      await sendSignalingMessage({
+        type: "login_required",
+        target: sourceId,
+        reason,
+        platform,
+      });
+      console.warn(`[WebRTC] Host is locked (${platform}); deferred session setup.`);
+      return;
+    }
+  } catch (e) {
+    console.warn("[WebRTC] Unable to check host lock state; continuing with normal session setup:", e);
   }
 
   try {

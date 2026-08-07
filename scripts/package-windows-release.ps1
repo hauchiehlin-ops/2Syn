@@ -198,13 +198,32 @@ if ($SignedDriverCatalogPath.Trim().Length -gt 0) {
   throw "Driver catalog 2synvhid.cat was not found. A formal package requires a signed catalog."
 }
 
-Write-Host "`nBuilding Tauri app bundle..." -ForegroundColor Green
+Write-Host "`nStaging virtual HID driver into Tauri installer payload..." -ForegroundColor Green
 Run "powershell.exe" @(
   "-ExecutionPolicy", "Bypass",
-  "-File", (Join-Path $ScriptDir "build-windows-clean.ps1"),
-  "-Target", $Target,
-  "-SkipPull"
+  "-File", (Join-Path $ScriptDir "stage-windows-vhid-for-tauri.ps1"),
+  "-Configuration", $Configuration,
+  "-Platform", $Platform,
+  "-RequireCatalog"
 )
+
+Write-Host "`nBuilding Tauri app bundle..." -ForegroundColor Green
+$PreviousSkipDriverPrepare = $env:SYN_SKIP_WINDOWS_DRIVER_PREPARE
+$env:SYN_SKIP_WINDOWS_DRIVER_PREPARE = "1"
+try {
+  Run "powershell.exe" @(
+    "-ExecutionPolicy", "Bypass",
+    "-File", (Join-Path $ScriptDir "build-windows-clean.ps1"),
+    "-Target", $Target,
+    "-SkipPull"
+  )
+} finally {
+  if ($null -eq $PreviousSkipDriverPrepare) {
+    Remove-Item Env:\SYN_SKIP_WINDOWS_DRIVER_PREPARE -ErrorAction SilentlyContinue
+  } else {
+    $env:SYN_SKIP_WINDOWS_DRIVER_PREPARE = $PreviousSkipDriverPrepare
+  }
+}
 
 $Installer = Find-LatestFile @(
   (Join-Path $RepoRoot "target\release\bundle\nsis\*.exe"),
