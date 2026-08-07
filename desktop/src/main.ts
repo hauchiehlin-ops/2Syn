@@ -2054,35 +2054,35 @@ function showHostLoginModal(msg: any) {
 
   pendingHostLoginPlatform = msg.platform || null;
   pendingHostLoginReason = msg.reason || null;
-  const requiresNativeUnlock = msg.reason === "macos_locked_native_unlock_required";
   const authLabel = authInput?.closest("label") as HTMLElement | null;
   const usernameLabel = usernameInput?.closest("label") as HTMLElement | null;
   const loginLabel = loginInput?.closest("label") as HTMLElement | null;
 
   if (desc) {
     const platform = msg.platform ? ` (${msg.platform})` : "";
-    desc.textContent = requiresNativeUnlock
-      ? `The macOS host is locked${platform}. Unlock it with native macOS authentication on the host, such as the physical keyboard, Touch ID, or Apple Watch, then reconnect 2syn.`
-      : msg.platform === "windows"
-        ? `The Windows host is locked${platform}. Authorize with the 2syn unattended password, then send Windows login credentials. For stable lock-screen input, use only letters and digits.`
-        : `The host is at the operating system login screen${platform}. Authorize with the 2syn unattended password, then send the OS login credentials.`;
+    if (msg.platform === "macos") {
+      desc.textContent = `macOS 主機目前處於鎖定狀態${platform}。請輸入 2syn 值守密碼與 macOS 登入密碼解鎖，或在畫面中直接點擊並輸入密碼。`;
+    } else if (msg.platform === "windows") {
+      desc.textContent = `Windows 主機目前處於鎖定狀態${platform}。請輸入 2syn 值守密碼與 Windows 登入憑證進行解鎖。`;
+    } else {
+      desc.textContent = `主機目前處於系統登入/鎖定畫面${platform}。請輸入 2syn 值守密碼與系統登入密碼。`;
+    }
   }
   if (status) {
-    status.textContent = requiresNativeUnlock
-      ? "For reliability and macOS security boundaries, 2syn does not inject passwords into the macOS lock screen."
-      : "";
+    status.textContent = "";
   }
   if (authInput) authInput.value = "";
   if (usernameInput) usernameInput.value = "";
   if (loginInput) loginInput.value = "";
-  if (authLabel) authLabel.style.display = requiresNativeUnlock ? "none" : "grid";
-  if (usernameLabel) usernameLabel.style.display = requiresNativeUnlock ? "none" : "grid";
-  if (loginLabel) loginLabel.style.display = requiresNativeUnlock ? "none" : "grid";
-  if (submitBtn) submitBtn.style.display = requiresNativeUnlock ? "none" : "inline-flex";
-  modal.style.display = "flex";
-  if (!requiresNativeUnlock) {
-    setTimeout(() => authInput?.focus(), 50);
+  if (authLabel) authLabel.style.display = "grid";
+  if (usernameLabel) usernameLabel.style.display = (msg.platform === "macos" ? "none" : "grid");
+  if (loginLabel) loginLabel.style.display = "grid";
+  if (submitBtn) {
+    submitBtn.style.display = "inline-flex";
+    submitBtn.disabled = false;
   }
+  modal.style.display = "flex";
+  setTimeout(() => authInput?.focus(), 50);
 }
 
 function hideHostLoginModal() {
@@ -2097,17 +2097,19 @@ function handleHostLoginResult(msg: any) {
 
   if (status) {
     status.textContent = msg.success
-      ? "Login input accepted. Waiting for the host desktop session..."
-      : `Login input failed: ${msg.message || "unsupported"}`;
+      ? (msg.message || "登入憑證已送出，正在等待主機解鎖與桌面 Session...")
+      : `登入失敗: ${msg.message || "未知錯誤"}`;
   }
 
-  if (msg.success && pendingHostLoginTarget && pendingHostLoginPin) {
-    const target = pendingHostLoginTarget;
-    const pin = pendingHostLoginPin;
+  if (msg.success) {
     setTimeout(() => {
       hideHostLoginModal();
-      void startCall(target, pin);
-    }, 3500);
+      if (!peerConnection || peerConnection.connectionState === "disconnected" || peerConnection.connectionState === "failed") {
+        if (pendingHostLoginTarget && pendingHostLoginPin) {
+          void startCall(pendingHostLoginTarget, pendingHostLoginPin);
+        }
+      }
+    }, 2000);
   }
 }
 
@@ -2124,7 +2126,9 @@ function initHostLoginModal() {
     pendingHostLoginPlatform = null;
     pendingHostLoginReason = null;
     hideHostLoginModal();
-    resetConnectionUI();
+    if (!peerConnection || peerConnection.connectionState === "disconnected" || peerConnection.connectionState === "failed") {
+      resetConnectionUI();
+    }
   });
 
   form?.addEventListener("submit", async () => {
@@ -2242,7 +2246,6 @@ async function handleSignalingMessage(msg: any) {
         clearTimeout(connectionTimeoutTimer);
         connectionTimeoutTimer = null;
       }
-      disconnectCurrentPeerConnection("host reported OS login screen");
       showHostLoginModal(msg);
       break;
     case "login_result":
@@ -3109,8 +3112,10 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
     const lockState = await invoke<any>("check_host_screen_locked");
     if (lockState?.locked) {
       const platform = lockState.platform || "desktop";
+      // 立即喚醒被控端顯示器與背光，確保 ScreenCaptureKit 能順利截取畫面
+      await invoke("wake_display").catch(() => {});
       const reason = platform === "macos"
-        ? "macos_locked_native_unlock_required"
+        ? "macos_locked_password_supported"
         : "windows_locked_password_supported";
       await sendSignalingMessage({
         type: "login_required",
@@ -3118,8 +3123,7 @@ async function handleIncomingOffer(sourceId: string, sdpString: string, incoming
         reason,
         platform,
       });
-      console.warn(`[WebRTC] Host is locked (${platform}); deferred session setup.`);
-      return;
+      console.log(`[WebRTC] Host is locked (${platform}); display wake requested and login_required sent, proceeding with WebRTC streaming.`);
     }
   } catch (e) {
     console.warn("[WebRTC] Unable to check host lock state; continuing with normal session setup:", e);

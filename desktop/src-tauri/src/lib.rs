@@ -171,7 +171,9 @@ async fn check_host_screen_locked() -> Result<serde_json::Value, String> {
     let locked = is_host_screen_locked();
     #[cfg(target_os = "windows")]
     let supports_password_injection = syn_core::os::windows::is_vhid_available();
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    let supports_password_injection = true;
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let supports_password_injection = false;
 
     Ok(serde_json::json!({
@@ -179,6 +181,19 @@ async fn check_host_screen_locked() -> Result<serde_json::Value, String> {
         "platform": std::env::consts::OS,
         "supportsPasswordInjection": supports_password_injection
     }))
+}
+
+/// 喚醒被控端顯示器與背光（特別適用於 macOS / Windows 鎖定螢幕或螢幕休眠時）
+#[tauri::command]
+async fn wake_display() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        syn_core::os::macos::wake_display()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
 }
 
 /// 開啟 macOS「系統設定 > 一般 > 登入項目與延伸功能」面板，
@@ -1809,10 +1824,15 @@ async fn handle_platform_login_input(
 
 #[cfg(target_os = "macos")]
 async fn handle_platform_login_input(
-    _username: Option<String>,
-    _login_password: String,
+    username: Option<String>,
+    login_password: String,
 ) -> Result<String, String> {
-    Err("macOS locked screens must be unlocked with native system authentication, such as the physical keyboard, Touch ID, or Apple Watch, then reconnect 2syn.".to_string())
+    tokio::task::spawn_blocking(move || {
+        syn_core::os::macos::type_macos_login(username.as_deref(), &login_password)
+    })
+    .await
+    .map_err(|e| format!("登入輸入工作失敗: {}", e))??;
+    Ok("macOS 登入憑證已送出，正在等待桌面 Session 喚醒...".to_string())
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -2645,6 +2665,7 @@ pub fn run() {
             read_clipboard,
             write_clipboard,
             wake_device,
+            wake_display,
             get_local_mac_address,
             get_app_product_name
         ])
