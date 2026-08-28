@@ -20,6 +20,23 @@
 
 # 歷程
 
+## 2026-08-28 — 修正 [Stats] 對已死 pc 無限輸出假數據
+
+- **問題/目標**：連線失敗後，系統日誌被 `[Stats] e2e≈0ms RTT — ... fps 0.0` 每 2 秒刷一次、持續數分鐘，真正的失敗訊息被洗出畫面，看起來像「連上了但沒畫面」。
+- **根因/做法**：`disconnectCurrentPeerConnection()` 只在「發起新通話 / 使用者掛斷 / 登出」三處被呼叫（main.ts:2500/6796/6907），連線自行 failed/closed **不會**清空 `peerConnection`；統計輪詢卻只檢查 `if (!peerConnection) return`，於是對著已死的 pc 一直 getStats()。改為在輪詢開頭檢查 `connectionState`，terminal state 時印一次「已 failed/closed，停止輸出統計」後返回（以 pc 物件比對做去重，換新 pc 自動恢復）。不主動把 `peerConnection` 設為 null，以免影響既有的 ICE restart 復原路徑。
+- **教訓**：週期性診斷輸出必須綁定「來源還活著」的條件，否則故障時反而變成噪音來源。
+
+## 2026-08-28 — [Stats] 日誌加上連線層診斷（pc 狀態 / 候選配對 / 累計位元組）
+
+- **問題/目標**：回報「無法遠端連線」時，日誌只有 `fps 0.0 RTT —`，無法區分「ICE 根本沒連通」與「ICE 通了但 host 沒推影格」，每次都要另外抓 log 才能判斷。
+- **根因/做法**：原 `[Stats]` 行只印媒體層指標，且 RTT 在區網下四捨五入為 0 會顯示 `—`，與「無 succeeded candidate pair」看起來一模一樣（main.ts 統計輪詢）。現在補印 `pc=<connectionState>/<iceConnectionState>`、`pair=<local→remote candidateType>`（host/srflx/relay，可看出是否走 TURN 中繼）與 `rx=<累計 KB>`（有沒有任何 RTP 進來）。
+- **教訓**：診斷數值「0 或缺值」要能和「沒量到」區分，否則日誌看起來有資訊、其實不能下結論。
+
+## 2026-08-28 — 系統日誌時間戳改用本機時區
+
+- **問題/目標**：系統日誌每行的 `[HH:MM:SS.mmm]` 是 UTC 時間，與使用者本機時鐘對不上，除錯時難以跟畫面/其他 log 對照。
+- **根因/做法**：`main.ts:385` 用 `new Date().toISOString()` 取時間（永遠是 UTC）。改為以 `getHours()/getMinutes()/getSeconds()/getMilliseconds()` 自行組字串，輸出格式不變（仍為 `HH:MM:SS.mmm`），故快取在 `dataset.timestamp` 的重繪流程不受影響。
+
 ## 2026-08-05 — 連線成功率與穩定度提升（ICE Restart、TURN 升級、指數退避、Gathering Timeout）
 
 - **問題/目標**：WebRTC ICE 失敗時需手動重連；公共 TURN 只有 UDP port 80、企業防火牆常封鎖；信令重連固定 5 秒在 Render 冷啟動場景反覆失敗；ICE gathering 無超時保護最壞情況等 15 秒。

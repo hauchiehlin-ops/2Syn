@@ -382,7 +382,10 @@ function translateLogMessage(msg: string, tFunc: (key: string) => string): strin
 
       const line = document.createElement('div');
       line.style.color = color;
-      const timestamp = new Date().toISOString().split('T')[1].slice(0,-1);
+      // 使用本機時區時間（toISOString 為 UTC，會與使用者實際時間對不上）
+      const now = new Date();
+      const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+      const timestamp = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${pad(now.getMilliseconds(), 3)}`;
       line.textContent = `[${timestamp}] ${msg}`;
       
       // 在 DOM 上快取原始訊息、時間戳與顏色，供多國語言切換時即時重譯重繪
@@ -3823,11 +3826,24 @@ function startStatusPolling() {
     ready: false,
   };
   let _diagTick = 0;
+  // 已印過終態訊息的 pc，避免重複刷屏；換成新 pc（物件不同）時自動重置
+  let _statsSilencedPc: RTCPeerConnection | null = null;
   setInterval(async () => {
     _diagTick++;
     // 無 peerConnection（被控端/未連線）時靜默返回，避免刷屏汙染系統日誌。
     // 控制端一旦建立連線即自動開始輸出真實診斷數據。
     if (!peerConnection) return;
+    // pc 進入終態後不再輸出統計。`peerConnection` 只有在「發起新通話 / 使用者主動掛斷 /
+    // 登出」時才會被清空，連線自行 failed/closed 並不會清掉它；若繼續輪詢就會無止盡地
+    // 印出 fps 0.0、RTT — 的假數據，把真正的失敗原因洗出畫面。
+    const pcTerminalState = peerConnection.connectionState;
+    if (pcTerminalState === "closed" || pcTerminalState === "failed") {
+      if (_statsSilencedPc !== peerConnection) {
+        _statsSilencedPc = peerConnection;
+        console.warn(`[Stats] 連線已 ${pcTerminalState}，停止輸出統計（重新連線後自動恢復）`);
+      }
+      return;
+    }
     let statsReport: any;
     try {
       statsReport = await peerConnection.getStats();
@@ -3843,6 +3859,10 @@ function startStatusPolling() {
       let packetsReceived = 0;
       let candidatePairFound = false;
       let vid: any = null; // inbound-rtp video 原始統計，供診斷差分使用
+      // 連線診斷：已選定的候選配對型別（host/srflx/relay）與累計收到的位元組。
+      // 用來區分「ICE 根本沒通」與「ICE 通了但 host 沒送影格」這兩種完全不同的故障。
+      let pairDesc = "無";
+      let totalBytesReceived = 0;
 
       statsReport.forEach((stat: RTCStatsReport) => {
         const s = stat as any;
@@ -3856,6 +3876,7 @@ function startStatusPolling() {
           if (elapsed > 0) {
             bytesReceivedDelta = (totalBytes - _lastBytesReceived) / elapsed;
           }
+          totalBytesReceived = totalBytes;
           _lastBytesReceived = totalBytes;
           _lastStatsTime = now;
           packetsLost = s.packetsLost ?? 0;
@@ -3865,6 +3886,9 @@ function startStatusPolling() {
         if (s.type === "candidate-pair" && s.state === "succeeded" && !candidatePairFound) {
           rttMs = Math.round((s.currentRoundTripTime ?? 0) * 1000);
           candidatePairFound = true;
+          const localCand = (statsReport as any).get?.(s.localCandidateId) as any;
+          const remoteCand = (statsReport as any).get?.(s.remoteCandidateId) as any;
+          pairDesc = `${localCand?.candidateType ?? "?"}→${remoteCand?.candidateType ?? "?"}`;
         }
       });
 
@@ -3904,7 +3928,8 @@ function startStatusPolling() {
 
           console.log(
             `[Stats] e2e≈${e2eMs.toFixed(0)}ms RTT ${fmt(rttMs || null, 0, "ms")} jb ${fmt(jbMs, 0, "ms")} ` +
-            `decode ${fmt(decodeMs, 1, "ms")} fps ${fps.toFixed(1)} freeze +${dFreezeCnt} drop +${dDropped}`
+            `decode ${fmt(decodeMs, 1, "ms")} fps ${fps.toFixed(1)} freeze +${dFreezeCnt} drop +${dDropped} ` +
+            `| pc=${peerConnection.connectionState}/${peerConnection.iceConnectionState} pair=${pairDesc} rx=${(totalBytesReceived / 1024).toFixed(0)}KB`
           );
         }
 
@@ -3919,7 +3944,10 @@ function startStatusPolling() {
         _prev.framesDropped = vid.framesDropped ?? 0;
         _prev.ready = true;
       } else {
-        console.log(`[Stats] 等待視訊統計 RTT ${rttMs || "—"}ms`);
+        console.log(
+          `[Stats] 等待視訊統計 RTT ${rttMs || "—"}ms ` +
+          `| pc=${peerConnection.connectionState}/${peerConnection.iceConnectionState} pair=${pairDesc}`
+        );
       }
 
       // 更新實際 FPS
