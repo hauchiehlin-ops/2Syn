@@ -20,6 +20,15 @@
 
 # 歷程
 
+## 2026-09-23 — Windows 鎖定畫面 vhid 驅動改為安裝檔選配
+
+- **問題/目標**：Windows 建置機沒裝 WDK（`MSB8020` 找不到 `WindowsKernelModeDriver10.0`）就整個 `tauri:build:host` 失敗；且驅動未經 Microsoft 簽章時，一般使用者安裝會因 `pnputil` 失敗被 `hooks.nsh` Abort，等於沒人裝得起來。
+- **根因/做法**：
+  - `scripts/prepare-windows-host-installer.ps1`：驅動建置/staging 失敗改為警告並清空 staging 目錄，繼續打包；`SYN_REQUIRE_WINDOWS_DRIVER=1` 可恢復嚴格模式。
+  - `desktop/src-tauri/windows/hooks.nsh`：編譯期用 `!if /FileExists` 檢查 inf/sys/cat 三檔齊全才打包驅動；安裝期 pnputil 失敗只跳警告（`/SD IDOK` 支援靜默安裝），不再中止。
+  - 原本 `File "windows\driver\..."` 是相對路徑，但 tauri 以絕對路徑 `!include` hooks、makensis 工作目錄在 target 下，相對路徑本來就解析不到；改用 `${__FILEDIR__}` 在 macro 外先展開成 define。
+- **教訓**：未簽章的核心驅動不能是安裝檔的硬性依賴；NSIS hooks 裡的檔案路徑要以 hooks 檔本身為基準。
+
 ## 2026-09-23 — Windows host 建置：MSBuild 路徑改用 vswhere 偵測
 
 - **問題/目標**：`build-windows-clean.ps1` 在 Windows 機器上失敗，`prepare-windows-host-installer.ps1` 丟出 `MSBuild not found`。

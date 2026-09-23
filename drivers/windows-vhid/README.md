@@ -49,3 +49,14 @@ The current boot-keyboard report path intentionally supports only stable
 alphanumeric credentials (`A-Z`, `a-z`, `0-9`) for Windows lock-screen login.
 Punctuation and non-ASCII characters depend on the active Windows keyboard
 layout at the secure desktop and are not safe to promise for unattended login.
+
+## Installer Integration
+
+`npm run tauri:build:host` on Windows runs
+`scripts/prepare-windows-host-installer.ps1`, which builds and stages this
+driver into `desktop/src-tauri/windows/driver/`. The driver is **optional**:
+if the build fails (e.g. no WDK) or the catalog is missing, the installer is
+built without it and lock-screen login is unavailable. Set
+`SYN_REQUIRE_WINDOWS_DRIVER=1` to make a missing driver fail the build.
+At install time, a `pnputil` failure (unsigned driver, not elevated) shows a
+warning but does not abort the installation.
