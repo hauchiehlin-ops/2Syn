@@ -22,7 +22,7 @@
 
 💻 **一次买断，全平台支持**
 * 拒绝订阅费！一次性买断，单账号支持 5 台设备。
-* 完美支持 Windows、macOS、Linux、iOS 与 Android。
+* 完美支持 Windows、macOS、Linux 与 iOS。
 
 🛠️ **进阶专业功能**
 * 跨设备双向拖拽文件传输。
