@@ -94,13 +94,12 @@ async fn delete_static_password() -> Result<(), String> {
 fn is_host_screen_locked() -> bool {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
-    use windows_sys::Win32::Foundation::MAXIMUM_ALLOWED;
     use windows_sys::Win32::System::StationsAndDesktops::{
         CloseDesktop, GetUserObjectInformationW, OpenInputDesktop, UOI_NAME,
     };
 
     unsafe {
-        let desktop = OpenInputDesktop(0, 0, MAXIMUM_ALLOWED);
+        let desktop = OpenInputDesktop(0, 0, 0x02000000);
         if desktop == 0 {
             return true;
         }
