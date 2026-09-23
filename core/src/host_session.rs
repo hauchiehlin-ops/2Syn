@@ -34,7 +34,7 @@ impl CoreEngine {
         crate::audio::AudioStreamer::new(audio_track).map_err(|e| e.to_string())?;
     crate::debug_log!("TAURI", "AudioStreamer created");
     
-    let engine_inner = Arc::clone(self);
+    let _engine_inner = Arc::clone(self);
     let active_webrtc = self.has_active_webrtc.clone();
     let active_webrtc_audio = active_webrtc.clone();
 

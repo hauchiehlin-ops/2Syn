@@ -3,12 +3,12 @@ pub fn switch_to_input_desktop() -> Result<(), String> {
     use windows_sys::Win32::System::StationsAndDesktops::{
         OpenInputDesktop, SetThreadDesktop, CloseDesktop
     };
-    use windows_sys::Win32::Foundation::{GetLastError, MAXIMUM_ALLOWED};
+    use windows_sys::Win32::Foundation::GetLastError;
     use log::{info, error};
 
     unsafe {
         // MAXIMUM_ALLOWED: 0x02000000
-        let h_desktop = OpenInputDesktop(0, 0, MAXIMUM_ALLOWED);
+        let h_desktop = OpenInputDesktop(0, 0, 0x02000000);
         if h_desktop == 0 {
             let err = GetLastError();
             error!("OpenInputDesktop failed with error code: {}", err);
@@ -62,7 +62,7 @@ fn open_vhid_device() -> Result<windows_sys::Win32::Foundation::HANDLE, String> 
     let handle = unsafe {
         CreateFileW(
             path.as_ptr(),
-            windows_sys::Win32::Storage::FileSystem::GENERIC_WRITE,
+            0x40000000, // GENERIC_WRITE
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             std::ptr::null_mut(),
             OPEN_EXISTING,
