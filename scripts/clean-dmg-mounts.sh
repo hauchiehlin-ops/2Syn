@@ -12,13 +12,14 @@
 # =============================================================================
 set -u
 
-# 1) 卸載任何已掛載、會與打包卷宗名衝突的 2syn 卷宗（含 "... 1"/"... 2" 編號變體）
-for vol in /Volumes/2syn_Duel* /Volumes/2syn_Client*; do
+# 1) 卸載任何已掛載、會與打包卷宗名衝突的 2syn 卷宗（含 "... 1"/"... 2" 編號變體），
+#    以及 create-dmg 失敗時可能留下的匿名 dmg.* 暫存掛載點。
+for vol in /Volumes/2syn_Duel* /Volumes/2syn_Client* /Volumes/dmg.*; do
   [ -e "$vol" ] || continue
   if diskutil eject "$vol" >/dev/null 2>&1; then
     echo "[clean-dmg] ejected $vol"
   else
-    echo "[clean-dmg] WARN: 無法卸載 $vol（可能正被使用），請手動退出後再 build" >&2
+    echo "[clean-dmg] WARN: 無法卸載 ${vol}（可能正被使用），請手動退出後再 build" >&2
   fi
 done
 
