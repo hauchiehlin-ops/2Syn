@@ -20,6 +20,12 @@
 
 # 歷程
 
+## 2026-09-23 — Windows host 建置：MSBuild 路徑改用 vswhere 偵測
+
+- **問題/目標**：`build-windows-clean.ps1` 在 Windows 機器上失敗，`prepare-windows-host-installer.ps1` 丟出 `MSBuild not found`。
+- **根因/做法**：`scripts/build-windows-vhid.ps1` 寫死只找 `VS 2022\Community` 與 `VS 2022\BuildTools` 兩個路徑，其他版本/版次（2026、Professional、Enterprise）都找不到。改用 `vswhere -latest -products * -requires Microsoft.Component.MSBuild` 定位，找不到再退回 PATH 上的 `msbuild.exe`。
+- **教訓**：Windows 工具鏈路徑不要寫死，一律走 vswhere。另外 vhid 驅動仍需 WDK（含 Inf2Cat 產生 `.cat`），`hooks.nsh` 會直接 `File` 打包 inf/sys/cat，缺任何一個 NSIS 都會失敗。
+
 ## 2026-08-28 — 修正 [Stats] 對已死 pc 無限輸出假數據
 
 - **問題/目標**：連線失敗後，系統日誌被 `[Stats] e2e≈0ms RTT — ... fps 0.0` 每 2 秒刷一次、持續數分鐘，真正的失敗訊息被洗出畫面，看起來像「連上了但沒畫面」。
